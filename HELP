@@ -1,0 +1,59 @@
+if [ ! -z ${INDEX_HELP} ] && ${INDEX_HELP}; then 
+    echo "
+NAME
+    index -- Retrieve reference genomes and MAGs from NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks
+
+VERSION
+    "$VERSION" ("$DATE")
+
+SYNOPSIS
+    index [--work-dir=directory] [--kmer-len=num] [--filter-size=num] 
+          [--nproc=num] [--xargs-nproc=num] ...
+
+DESCRIPTION
+    This pipeline is used to automatically retrieve reference genomes and metagenome-assembled genomes from NCBI GenBank 
+    and finally index them with kmtricks.
+
+    The following options are available:
+
+    --filter-size=num
+        This is the size of the bloom filters.
+
+    -h|--help
+        Print this help and exit
+
+    --kmer-len=num
+        This is the length of the kmers used for building bloom filters.
+
+    --license
+        Print software license and exit
+
+    --nproc=num
+        This argument refers to the number of processors used for parallelizing the pipeline when possible.
+        Default: --nproc=1
+
+    --resolve-dependencies
+        Search for external software dependencies and exit
+
+    -v|--version
+        Print current version and exit
+
+    --work-dir=directory
+        This is the working directory that will contain genomes organised by species and their index produced by kmtricks.
+
+    --xargs-nproc=num
+        This refers to the number of xargs processes used for launching independent runs of kmtricks.
+        Default: --xargs-nproc=1
+
+EXIT STATUS
+    This script exits with one of the following values:
+
+    0    The pipeline has been correctly applied.
+    >0   An error occurred.
+
+EXAMPLES
+    Try running this script by typing:
+
+        $ index --work-dir=~/myindex --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2 
+"
+fi
