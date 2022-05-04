@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #====================================================================================================================================
 
-DATE="May 3, 2022"
+DATE="May 4, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -14,7 +14,7 @@ INDEX_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 check_dependencies () {
     printf "Checking for software dependencies\n"
     # Define the set of dependencies
-    DEPENDENCIES=("kmtricks" "ncbitax2lin" "wget")
+    DEPENDENCIES=("howdesbt" "kmtricks" "ncbitax2lin" "wget")
 
     # Count how many missing dependencies
     MISSING=0
@@ -70,7 +70,7 @@ esearch_txid () {
             # Download GCA
             FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
             GCA=${FNAME%%.*}
-            if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
+            if [[ ! -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
                 wget -q "$URL/$FNAME" -O ${OUTDIR}/${GCA}.fna.gz
                 if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
                     if gzip -t ${OUTDIR}/${GCA}.fna.gz; then
@@ -314,22 +314,89 @@ NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l` # Count how many kmt
 while [ $NFOFOUT -lt $NFOFIN ]; do
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
         'INPUT={}; \
-         echo $INPUT >> '"${DBDIR}"'/kmtricks.log; \
-         FOLDERPATH=$(dirname "$INPUT"); \
-         kmtricks pipeline --file $INPUT \
-                           --run-dir $FOLDERPATH/index \
-                           --kmer-size '"${KMER_LEN}"' \
-                           --mode hash:bft:bin \
-                           --hard-min 1 \
-                           --bloom-size '"${FILTER_SIZE}"' \
-                           --bf-format howdesbt \
-                           --cpr \
-                           --skip-merge \
-                           -t '"${NPROC}"'; \
-         kmtricks index --run-dir $FOLDERPATH/index --howde;'
+         FOLDERPATH=$(dirname "${INPUT}"); \
+         if [[ ! -f "${FOLDERPATH}/index/kmtricks.fof" ]]; then \
+            echo ${INPUT} >> '"${DBDIR}"'/kmtricks.log; \
+            kmtricks pipeline --file ${INPUT} \
+                              --run-dir ${FOLDERPATH}/index \
+                              --kmer-size '"${KMER_LEN}"' \
+                              --mode hash:bft:bin \
+                              --hard-min 1 \
+                              --bloom-size '"${FILTER_SIZE}"' \
+                              --bf-format howdesbt \
+                              --cpr \
+                              --skip-merge \
+                              -t '"${NPROC}"'; \
+            FOLDERNAME="${FOLDERPATH##*/}"; \
+            HOWMANY=$(wc -l ${INPUT} | cut -d" " -f1); \
+            if [[ "${HOWMANY}" -gt "1" ]]; then \
+                kmtricks index --run-dir ${FOLDERPATH}/index \
+                               --howde \
+                               --threads '"${NPROC}"';
+                while read line; do \
+                    GENOME=$(echo "${line}" | cut -d" " -f1); \
+                    if [[ ! -f ${FOLDERPATH}/${FOLDERNAME}.bf ]]; then \
+                        cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf; \
+                    else \
+                        howdesbt bfoperate ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf --or --out ${FOLDERPATH}/merged.bf; \
+                        mv ${FOLDERPATH}/merged.bf ${FOLDERPATH}/${FOLDERNAME}.bf; \
+                    fi; \
+                done < ${INPUT}; \
+            else \
+                mkdir -p ${FOLDERPATH}/index/howde_index; \
+                cp ${INPUT} ${FOLDERPATH}/index/kmtricks.fof; \
+                GENOME=$(head -n1 "${INPUT}" | cut -d" " -f1); \
+                cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf; \
+            fi; \
+         fi'
     # Search for missing species and process them one by one
     NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l`
     XARGS_NPROC=1
+done
+
+# Process lower taxonomic levels
+LEVELS=(
+    "g__" # Genus
+    "f__" # Family
+    "o__" # Order
+    "c__" # Class
+    "p__" # Phylum
+    "k__" # Kingdom
+)
+# Start with genera at depth 6
+DEPTH=6
+for LEVEL in "${LEVELS[@]}"; do
+    find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -P 1 -I {} bash -c \
+        'LEVEL_DIR={};\
+         LEVEL_NAME=$(basename ${LEVEL_DIR}); \
+         for DIRECTORY in ${LEVEL_DIR}/*/; do \
+            UPPER_LEVEL=$(basename $DIRECTORY); \
+            echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt; \
+         done; \
+         mkdir -p ${LEVEL_DIR}/index; \
+         HOWMANY=$(wc -l ${LEVEL_DIR}/${LEVEL_NAME}.txt | cut -d" " -f1); \
+         if [[ "${HOWMANY}" -gt "1" ]]; then \
+            howdesbt cluster --list=${LEVEL_DIR}/${LEVEL_NAME}.txt \
+                             --bits='"${FILTER_SIZE}"' \
+                             --tree=${LEVEL_DIR}/index/union.sbt \
+                             --nodename=node{number} \
+                             --keepallnodes;
+            hodesbt build --HowDe \
+                          --tree=${LEVEL_DIR}/index/union.sbt \
+                          --outtree=${LEVEL_DIR}/index/index.detbrief.sbt;
+            while read BFPATH; do \
+                if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then \
+                    cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf; \
+                else \
+                    howdesbt bfoperate ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out ${LEVEL_DIR}/merged.bf; \
+                    mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf; \
+                fi; \
+            done < ${LEVEL_DIR}/${LEVEL_NAME}.txt; \
+         else \
+            BFPATH=$(head -n1 "${LEVEL_DIR}/${LEVEL_NAME}.txt"); \
+            cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf; \
+         fi'
+    DEPTH=$(expr $DEPTH - 1)
 done
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
