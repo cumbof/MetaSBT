@@ -15,3 +15,13 @@ TBA
 
 ## Querying the database
 TBA
+
+## Improving kraken database quality
+
+TBA
+
+## Credits
+
+Please credit our work in your manuscript by citing:
+
+TBA
