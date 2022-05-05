@@ -1,4 +1,4 @@
-if [ ! -z ${INDEX_HELP} ] && ${INDEX_HELP}; then 
+if [ ! -z ${INDEX_HELP} ] && ${INDEX_HELP}; then
     echo "
 NAME
     index -- Retrieve reference genomes and MAGs from NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks
@@ -17,19 +17,19 @@ DESCRIPTION
     The following options are available:
 
     --filter-size=num
-        This is the size of the bloom filters.
+        This is the size of the bloom filters
 
     -h|--help
         Print this help and exit
 
     --kmer-len=num
-        This is the length of the kmers used for building bloom filters.
+        This is the length of the kmers used for building bloom filters
 
     --license
         Print software license and exit
 
     --nproc=num
-        This argument refers to the number of processors used for parallelizing the pipeline when possible.
+        This argument refers to the number of processors used for parallelizing the pipeline when possible
         Default: --nproc=1
 
     --resolve-dependencies
@@ -39,10 +39,10 @@ DESCRIPTION
         Print current version and exit
 
     --work-dir=directory
-        This is the working directory that will contain genomes organised by species and their index produced by kmtricks.
+        This is the working directory that will contain genomes organised by species and their index produced by kmtricks
 
     --xargs-nproc=num
-        This refers to the number of xargs processes used for launching independent runs of kmtricks.
+        This refers to the number of xargs processes used for launching independent runs of kmtricks
         Default: --xargs-nproc=1
 
 EXIT STATUS
@@ -54,6 +54,60 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ index --work-dir=~/myindex --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2 
+        $ index --work-dir=~/myindex --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2
+"
+fi
+
+if [ ! -z ${QUERY_HELP} ] && ${QUERY_HELP}; then
+    echo "
+NAME
+    query -- Query the sequence bloom trees at all the 7 taxonomic levels
+
+VERSION
+    "$VERSION" ("$DATE")
+
+SYNOPSIS
+    query [--input=file] [--tree=file] [--output=file] [--expand] ...
+
+DESCRIPTION
+    This tool is used to query a sequence bloom tree at different taxonomic levels.
+
+    The following options are available:
+
+    --expand
+        Expand the input query on all the taxonomic levels
+        Default: false
+    
+    -h|--help
+        Print this help and exit
+
+    --input
+        This is the input file with the set of queries
+    
+    --license
+        Print software license and exit
+    
+    --output
+        This is the output file with matches
+    
+    --resolve-dependencies
+        Search for external software dependencies and exit
+
+    --tree
+        This is the tree definition file
+    
+    -v|--version
+        Print current version and exit
+
+EXIT STATUS
+    This script exits with one of the following values:
+
+    0    The pipeline has been correctly applied.
+    >0   An error occurred.
+
+EXAMPLES
+    Try running this script by typing:
+
+        $ query --input=~/myqueries.fa --tree=~/mytree.txt --expand --output=~/matches.txt
 "
 fi
