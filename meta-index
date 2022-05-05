@@ -1,0 +1,44 @@
+#!/bin/bash
+#title          :meta-index
+#description    :This is the meta-index controller for running modules
+#author         :Fabio Cumbo (fabio.cumbo@gmail.com)
+#=====================================================================
+
+DATE="May 4, 2022"
+VERSION="0.1.0"
+
+# Define script directory
+METAIDX_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Modules base path
+MODULES_DIR=${METAIDX_DIR}/modules
+
+# Take track of the full command line
+CMD=("$@")
+
+# Extract module
+MODULE="${CMD[0]}"
+# Build module path
+MODULE_PATH=${MODULES_DIR}/${MODULE}.sh
+
+# All the other arguments
+ARGS="${CMD[@]:1}"
+
+if [[ -f ${MODULE_PATH} ]]; then
+    # Run module with the same shell
+    . ${MODULE_PATH} $ARGS
+else
+    printf "[ERROR] Unknown module!\n\n"
+    printf "Please use one of the following modules:\n"
+    for module in ${MODULES_DIR}/*.sh; do
+        MODULE_NAME=$(basename $module)
+        MODULE_NAME="${MODULE_NAME%.*}"
+        if [[ "${MODULE_NAME}" != "utils" ]]; then
+            # Exclude utils
+            printf "\t%s\n" "${MODULE_NAME}"
+        fi
+    done
+fi
+
+printf "\nTry running a module with --help to expand the list of its available arguments\n"
+
+exit 0
