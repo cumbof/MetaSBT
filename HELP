@@ -87,11 +87,19 @@ DESCRIPTION
     --license
         Print software license and exit
     
-    --output
-        This is the output file with matches
+    --output-dir
+        This is the output folder with queries results
+
+    --output-prefix
+        Prefix of the output files with query matches
     
     --resolve-dependencies
         Search for external software dependencies and exit
+
+    --threshold
+        Fraction of query kmers that must be present in a leaf to be considered a match
+        This must be between 0 and 1
+        Default: 0.7
 
     --tree
         This is the tree definition file
