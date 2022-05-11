@@ -7,7 +7,11 @@ The index subroutine allows to automatically retrieve reference genomes and meta
 
 The following command will trigger the generation of the database:
 ```
-$ bash meta-index index --work-dir=~/myindex --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2
+$ bash meta-index index --work-dir=~/myindex \
+                        --kmer-len 31 \
+                        --filter-size 10000 \
+                        --nproc 4 \
+                        --xargs-nproc 2
 ```
 
 ## Updating the database
