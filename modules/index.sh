@@ -399,6 +399,6 @@ done
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-printf "\tTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
 
 exit 0
