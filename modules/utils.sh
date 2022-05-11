@@ -11,7 +11,7 @@ VERSION="0.1.0"
 check_dependencies () {
     printf "Checking for software dependencies\n"
     # Define the set of dependencies
-    DEPENDENCIES=("howdesbt" "kmtricks" "ncbitax2lin" "wget")
+    DEPENDENCIES=("bc" "howdesbt" "kmtricks" "ncbitax2lin" "wget")
 
     # Count how many missing dependencies
     MISSING=0
