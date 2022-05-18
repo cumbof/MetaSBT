@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 4, 2022"
+DATE="May 18, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -174,7 +174,7 @@ while [[ -f ${TREE} ]]; do
 done
 
 # Reconstruct the lineage
-if [ ${#LINEAGE[@]} -eq 0 ]; then
+if [ ${#LINEAGE[@]} -gt 0 ]; then
     # Print closest lineage
     printf "Closest lineage:\n"
     CLOSEST_LINEAGE=$(printf "|%s" "${LINEAGE[@]}")
