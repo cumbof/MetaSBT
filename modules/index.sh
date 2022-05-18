@@ -8,10 +8,10 @@ DATE="May 18, 2022"
 VERSION="0.1.0"
 
 # Define script directory
-INDEX_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Import utility functions
-source ${INDEX_DIR}/utils.sh
+source ${SCRIPT_DIR}/utils.sh
 
 # Download genomes from NCBI GenBank
 esearch_txid () {
@@ -184,7 +184,7 @@ for ARG in "$@"; do
         -h|--help)
             # Print extended help
             INDEX_HELP=true
-            source ${INDEX_DIR}/../HELP
+            source ${SCRIPT_DIR}/../HELP
             exit 0
             ;;
         --index-mags)
@@ -218,7 +218,7 @@ for ARG in "$@"; do
             ;;
         --license)
             # Print license
-            printf "%s\n" "$(cat ${INDEX_DIR}/../LICENSE)"
+            printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
             exit 0
             ;;
         --no-references)

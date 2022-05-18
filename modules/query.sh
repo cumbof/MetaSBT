@@ -8,10 +8,10 @@ DATE="May 18, 2022"
 VERSION="0.1.0"
 
 # Define script directory
-QUERY_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Import utility functions
-source ${QUERY_DIR}/utils.sh
+source ${SCRIPT_DIR}/utils.sh
 
 # Do not expand queries by default
 # If true, keep querying trees at higher taxonomic levels
@@ -29,7 +29,7 @@ for ARG in "$@"; do
         -h|--help)
             # Print extended help
             QUERY_HELP=true
-            source ${QUERY_DIR}/../HELP
+            source ${SCRIPT_DIR}/../HELP
             exit 0
             ;;
         --input=*)
@@ -44,7 +44,7 @@ for ARG in "$@"; do
             ;;
         --license)
             # Print license
-            printf "%s\n" "$(cat ${QUERY_DIR}/../LICENSE)"
+            printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
             exit 0
             ;;
         --output-dir=*)
