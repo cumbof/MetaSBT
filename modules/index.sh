@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #====================================================================================================================================
 
-DATE="May 4, 2022"
+DATE="May 18, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -156,6 +156,12 @@ export -f kmtricks_wrapper
 # Define default value for --nproc and --xargs-nproc
 NPROC=1
 XARGS_NPROC=1
+# Download and index reference genomes from isolate sequencing by default
+# Disable with --no-references
+INDEX_REFERENCES=true
+# Do not download MAGs by default
+# Enable with --index-mags
+INDEX_MAGS=false
 
 # Parse input arguments
 for ARG in "$@"; do
@@ -181,6 +187,20 @@ for ARG in "$@"; do
             source ${INDEX_DIR}/../HELP
             exit 0
             ;;
+        --index-mags)
+            # Download and index MAGs
+            INDEX_MAGs=true
+            ;;
+        --kingdom=*)
+            # Consider genomes whose lineage belong to a specific kingdom only
+            KINGDOM="${ARG#*=}"
+            # Define helper
+            if [[ "${KINGDOM}" =~ "?" ]]; then
+                printf "index helper: --kingdom=value\n\n"
+                printf "\tConsider genomes whose lineage belongs to a specific kingdom only.\n\n"
+                exit 0
+            fi
+            ;;
         --kmer-len=*)
             # Length of the kmers
             KMER_LEN="${ARG#*=}"
@@ -200,6 +220,10 @@ for ARG in "$@"; do
             # Print license
             printf "%s\n" "$(cat ${INDEX_DIR}/../LICENSE)"
             exit 0
+            ;;
+        --no-references)
+            # Do not download and index reference genomes from isolate sequencing
+            INDEX_REFERENCES=false
             ;;
         --nproc=*)
             # Max nproc for all parallel instructions
@@ -290,84 +314,99 @@ ncbitax2lin --nodes-file $WORKDIR/taxdump/nodes.dmp \
             --output $WORKDIR/ncbi_lineages.csv.gz
 
 # Build a mapping between tax id and full taxonomy
-# Keep Bacteria and Archaea only
+# Consider a specific kingdom only
 # Remove special characters
 # Fill empty taxa level with "unclassified"
 printf "Building tax id to full taxonomy mapping\n"
 zcat $WORKDIR/ncbi_lineages.csv.gz | \
-    awk 'BEGIN { FS=","; OFS="" } 
-               { gsub(" ", "_"); gsub(/\.|\047|\"|\(|\)|\:/, "") }
-               {
-                    if ($3=="") {
-                        phylum_pre=$2;
-                        phylum_suf="_unclassified";
-                    } else {
-                        phylum_pre=$3;
-                        phylum_suf="";
-                    }
-               } {
-                    if ($4=="") {
-                        class_pre=phylum_pre; 
-                        class_suf="_unclassified";
-                    } else { 
-                        class_pre=$4; 
-                        class_suf="";
-                    }
-               } {
-                    if ($5=="") { 
-                        order_pre=class_pre; 
-                        order_suf="_unclassified";
-                    } else { 
-                        order_pre=$5; 
-                        order_suf="";
-                    }
-               } {
-                    if ($6=="") {
-                        family_pre=order_pre; 
-                        family_suf="_unclassified";
-                    } else { 
-                        family_pre=$6; 
-                        family_suf="";
-                    }
-               } {
-                    if ($7=="") { 
-                        genus_pre=family_pre; 
-                        genus_suf="_unclassified"; 
-                    } else { 
-                        genus_pre=$7; 
-                        genus_suf="";
-                    }
-               } {
-                    if ($8=="") { 
-                        species_pre=genus_pre; 
-                        species_suf="_unclassified";
-                    } else {
-                        species_pre=$8; 
-                        species_suf="";
-                    }
-               } { 
-                    if (NR>1 && ($2=="Bacteria" || $2=="Archaea")) {
-                        print $1, "\t", "k__", $2,
-                                        "|p__", phylum_pre, phylum_suf,
-                                        "|c__", class_pre, class_suf,
-                                        "|o__", order_pre, order_suf,
-                                        "|f__", family_pre, family_suf,
-                                        "|g__", genus_pre, genus_suf,
-                                        "|s__", species_pre, species_suf;
-                    }
-               }' > $WORKDIR/taxa.tsv
+    awk -v kingdom="$KINGDOM" 'BEGIN { FS=","; OFS="" } 
+                                     { gsub(" ", "_"); gsub(/\.|\047|\"|\(|\)|\:/, "") }
+                                     {
+                                        if ($3=="") {
+                                            phylum_pre=$2;
+                                            phylum_suf="_unclassified";
+                                        } else {
+                                            phylum_pre=$3;
+                                            phylum_suf="";
+                                        }
+                                     } {
+                                        if ($4=="") {
+                                            class_pre=phylum_pre; 
+                                            class_suf="_unclassified";
+                                        } else { 
+                                            class_pre=$4; 
+                                            class_suf="";
+                                        }
+                                     } {
+                                        if ($5=="") { 
+                                            order_pre=class_pre; 
+                                            order_suf="_unclassified";
+                                        } else { 
+                                            order_pre=$5; 
+                                            order_suf="";
+                                        }
+                                     } {
+                                        if ($6=="") {
+                                            family_pre=order_pre; 
+                                            family_suf="_unclassified";
+                                        } else { 
+                                            family_pre=$6; 
+                                            family_suf="";
+                                        }
+                                     } {
+                                        if ($7=="") { 
+                                            genus_pre=family_pre; 
+                                            genus_suf="_unclassified"; 
+                                        } else { 
+                                            genus_pre=$7; 
+                                            genus_suf="";
+                                        }
+                                     } {
+                                        if ($8=="") { 
+                                            species_pre=genus_pre; 
+                                            species_suf="_unclassified";
+                                        } else {
+                                            species_pre=$8; 
+                                            species_suf="";
+                                        }
+                                     } { 
+                                        if (NR>1 && $2==kingdom) {
+                                            print $1, "\t", "k__", $2,
+                                                            "|p__", phylum_pre, phylum_suf,
+                                                            "|c__", class_pre, class_suf,
+                                                            "|o__", order_pre, order_suf,
+                                                            "|f__", family_pre, family_suf,
+                                                            "|g__", genus_pre, genus_suf,
+                                                            "|s__", species_pre, species_suf;
+                                        }
+                                     }' > $WORKDIR/taxa.tsv
 
 # Download all GCAs associated to the taxa IDs in taxa.tsv
 # Use genomes that have not been excluded from RefSeq
 # https://www.ncbi.nlm.nih.gov/assembly/help/anomnotrefseq/
 printf "Downloading genomes from NCBI GenBank\n"
 while read tax_id, taxonomy; do
-    SEARCH_CRITERIA="NOT excluded-from-refseq [PROP]"
-    esearch_txid $DBDIR ${tax_id} $taxonomy "references" ${SEARCH_CRITERIA}
-    # Run esearch_txid again for downloading genomes with no search criteria
-    # Genomes already processed with the previous esearch_txid run are skipped
-    esearch_txid $DBDIR ${tax_id} $taxonomy "mags"
+    # Do not consider "unclassified" genomes since two genomes under 
+    # the same "unclassified" taxonomic label could potentially be completely different
+    # Unclassified genomes can be used with the "update" module with "--type=MAGs"
+    if [[ ! $taxonomy == *"_unclassified"* ]]; then
+        # Index reference genomes
+        if ${INDEX_REFERENCES}; then
+            SEARCH_CRITERIA="NOT excluded-from-refseq [PROP]"
+            esearch_txid $DBDIR ${tax_id} $taxonomy "references" ${SEARCH_CRITERIA}
+        fi
+        # Index MAGs
+        if ${INDEX_MAGs}; then
+            # Run esearch_txid again for downloading genomes with no search criteria
+            # Genomes already processed with the previous esearch_txid run are skipped
+            esearch_txid $DBDIR ${tax_id} $taxonomy "mags"
+        fi
+    fi
 done < $WORKDIR/taxa.tsv
+
+# Use kmtricks to build a kmer matrix and compare input genomes
+# Discard genomes with the same kmers (dereplication)
+# TODO
 
 # Run kmtricks and build a sequence bloom tree for each species
 printf "Running kmtricks at the species level\n"
