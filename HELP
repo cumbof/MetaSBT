@@ -21,12 +21,23 @@ DESCRIPTION
 
     -h|--help
         Print this help and exit
+    
+    --index-mags
+        Download and index metagenome-assembled genomes from the NCBI GenBank
+        Default: false
+
+    --kingdom=value
+        Consider genomes whose lineage belongs to a specific kingdom only
 
     --kmer-len=num
         This is the length of the kmers used for building bloom filters
 
     --license
         Print software license and exit
+    
+    --no-references
+        Do not download and index reference genomes from isolate sequencing
+        Default: true
 
     --nproc=num
         This argument refers to the number of processors used for parallelizing the pipeline when possible
@@ -54,7 +65,7 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ index --work-dir=~/myindex --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2
+        $ index --work-dir=~/myindex --kingdom=Bacteria --kmer-len 31 --filter-size 10000 --nproc 4 --xargs-nproc 2
 "
 fi
 
@@ -81,27 +92,27 @@ DESCRIPTION
     -h|--help
         Print this help and exit
 
-    --input
+    --input=file
         This is the input file with the set of queries
     
     --license
         Print software license and exit
     
-    --output-dir
+    --output-dir=directory
         This is the output folder with queries results
 
-    --output-prefix
+    --output-prefix=value
         Prefix of the output files with query matches
     
     --resolve-dependencies
         Search for external software dependencies and exit
 
-    --threshold
+    --threshold=num
         Fraction of query kmers that must be present in a leaf to be considered a match
         This must be between 0 and 1
         Default: 0.7
 
-    --tree
+    --tree=file
         This is the tree definition file
     
     -v|--version
@@ -116,6 +127,6 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ query --input=~/myqueries.fa --tree=~/mytree.txt --expand --output=~/matches.txt
+        $ query --input=~/mag.fna --tree=~/mytree.txt --expand --output=~/matches.txt
 "
 fi
