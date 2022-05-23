@@ -7,20 +7,29 @@ The index subroutine allows to automatically retrieve reference genomes and meta
 
 The following command will trigger the generation of the database with all the available bacterial genomes from isolate sequencing in NCBI GenBank:
 ```bash
-$ bash meta-index index --work-dir=~/myindex \
-                        --kmer-len=31 \
-                        --filter-size=10000 \
-                        --kingdom=Bacteria \
-                        --dereplicate \
-                        --nproc=4 \
-                        --xargs-nproc=2
+$ meta-index index --work-dir=~/myindex \
+                   --kmer-len=31 \
+                   --filter-size=10000 \
+                   --kingdom=Bacteria \
+                   --dereplicate \
+                   --nproc=4 \
+                   --xargs-nproc=2
 ```
 
 ## Updating the database
 TBA
 
 ## Profiling genomes
-TBA
+
+The `profile` module allows to characterize an input genome according to the taxonomic label of the closest genome in the database. It allows to process only one genome in input at a time:
+```bash
+$ meta-index profile --input=~/mygenome.fna \
+                     --tree=~/myindex/tree.txt \
+                     --threshold=0.7 \
+                     --output-dir=~/myqueries \
+                     --output-prefix=query \
+                     --expand
+```
 
 ## Improving kraken database quality
 
