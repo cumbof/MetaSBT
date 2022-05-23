@@ -69,10 +69,10 @@ EXAMPLES
 "
 fi
 
-if [ ! -z ${QUERY_HELP} ] && ${QUERY_HELP}; then
+if [ ! -z ${PROFILE_HELP} ] && ${PROFILE_HELP}; then
     echo "
 NAME
-    query -- Query the sequence bloom trees at all the 7 taxonomic levels
+    profile -- Query the sequence bloom trees at all the 7 taxonomic levels
 
 VERSION
     "$VERSION" ("$DATE")
@@ -127,6 +127,6 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ query --input=~/mag.fna --tree=~/mytree.txt --expand --output=~/matches.txt
+        $ profile --input=~/mag.fna --tree=~/mytree.txt --expand --output=~/matches.txt
 "
 fi

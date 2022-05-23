@@ -1,5 +1,5 @@
 #!/bin/bash
-#title          :query
+#title          :profile
 #description    :Query the sequence bloom trees at all the 7 taxonomic levels
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
@@ -28,7 +28,7 @@ for ARG in "$@"; do
             ;;
         -h|--help)
             # Print extended help
-            QUERY_HELP=true
+            PROFILE_HELP=true
             source ${SCRIPT_DIR}/../HELP
             exit 0
             ;;
@@ -106,7 +106,7 @@ for ARG in "$@"; do
     esac
 done
 
-printf "query version %s (%s)\n\n" "$VERSION" "$DATE"
+printf "profile version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies
@@ -114,7 +114,7 @@ if [[ "$?" -gt "0" ]]; then
     exit 1
 fi
 
-printf "Query:\n"
+printf "Input:\n"
 printf "\t%s\n\n" "${INPUT}"
 
 # Create the output directory if it does not exist
