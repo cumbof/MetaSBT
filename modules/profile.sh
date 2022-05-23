@@ -37,7 +37,7 @@ for ARG in "$@"; do
             INPUT="${ARG#*=}"
             # Define helper
             if [[ "${INPUT}" =~ "?" ]]; then
-                printf "query helper: --input=file\n\n"
+                printf "profile helper: --input=file\n\n"
                 printf "\tThis is the input file with the set of queries.\n\n"
                 exit 0
             fi
@@ -52,7 +52,7 @@ for ARG in "$@"; do
             OUTPUTDIR="${ARG#*=}"
             # Define helper
             if [[ "${OUTPUTDIR}" =~ "?" ]]; then
-                printf "query helper: --output-dir=file\n\n"
+                printf "profile helper: --output-dir=file\n\n"
                 printf "\tThis is the output folder with queries results.\n\n"
                 exit 0
             fi
@@ -62,7 +62,7 @@ for ARG in "$@"; do
             OUTPUTPREFIX="${ARG#*=}"
             # Define helper
             if [[ "${OUTPUTPREFIX}" =~ "?" ]]; then
-                printf "query helper: --output-prefix=file\n\n"
+                printf "profile helper: --output-prefix=file\n\n"
                 printf "\tPrefix of the output files with query matches.\n\n"
                 exit 0
             fi
@@ -77,7 +77,7 @@ for ARG in "$@"; do
             THRESHOLD="${ARG#*=}"
             # Define helper
             if [[ "${THRESHOLD}" =~ "?" ]]; then
-                printf "query helper: --threshold=number\n\n"
+                printf "profile helper: --threshold=number\n\n"
                 printf "\tFraction of query kmers that must be present in a leaf to be considered a match.\n"
                 printf "\tThis must be between 0 and 1.\n"
                 printf "\tDefault: 0.7\n\n"
@@ -89,18 +89,18 @@ for ARG in "$@"; do
             TREE="${ARG#*=}"
             # Define helper
             if [[ "${TREE}" =~ "?" ]]; then
-                printf "query helper: --tree=file\n\n"
+                printf "profile helper: --tree=file\n\n"
                 printf "\tThis is the tree definition file.\n\n"
                 exit 0
             fi
             ;;
         -v|--version)
             # Print pipeline version
-            printf "query version %s (%s)\n" "$VERSION" "$DATE"
+            printf "profile version %s (%s)\n" "$VERSION" "$DATE"
             exit 0
             ;;
         *)
-            printf "query: invalid option -- %s\n" "$ARG"
+            printf "profile: invalid option -- %s\n" "$ARG"
             exit 1
             ;;
     esac
@@ -146,7 +146,7 @@ while [[ -f ${TREE} ]]; do
                    --sort ${INPUT} \
                    > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
     # Get best match
-    BEST=$(grep -E "^[[:alnum:]]" prova.txt | head -n 1)
+    BEST=$(grep -E "^[[:alnum:]]" ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
     MATCH=$(echo "$BEST" | cut -d' ' -f1)
     SCORE=$(echo "$BEST" | cut -d' ' -f5)
 
