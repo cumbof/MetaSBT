@@ -121,7 +121,7 @@ kmtricks_wrapper () {
                           --bf-format howdesbt \
                           --cpr \
                           --skip-merge \
-                          -t ${NPROC}
+                          --threads ${NPROC}
         
         FOLDERNAME="${FOLDERPATH##*/}"
         HOWMANY=$(wc -l ${INPUT} | cut -d" " -f1)
@@ -162,10 +162,18 @@ INDEX_REFERENCES=true
 # Do not download MAGs by default
 # Enable with --index-mags
 INDEX_MAGS=false
+# Dereplicate input genomes
+# Use kmtricks to build the kmer matrix on the input set of genomes
+# Remove genomes with identical set of kmers
+DEREPLICATE=false
 
 # Parse input arguments
 for ARG in "$@"; do
     case "$ARG" in
+        --dereplicate)
+            # Dereplicate input genomes
+            DEREPLICATE=true
+            ;;
         --filter-size=*)
             # Bloom filter size
             FILTER_SIZE="${ARG#*=}"
@@ -401,12 +409,58 @@ while read tax_id, taxonomy; do
             # Genomes already processed with the previous esearch_txid run are skipped
             esearch_txid $DBDIR ${tax_id} $taxonomy "mags"
         fi
+
+        # Use kmtricks to build a kmer matrix and compare input genomes
+        # Discard genomes with the same set of kmers (dereplication)
+        if ${DEREPLICATE}; then
+            TAXDIR=$DBDIR/$(echo "$taxonomy" | sed 's/|/\//g')
+            GENOMES_FOF=${TAXDIR}/genomes.fof
+            GENOMES_DIR=${TAXDIR}/genomes
+            if [[ -f ${GENOMES_FOF} ]]; then
+                HOW_MANY=$(cat ${GENOMES_FOF} | wc -l)
+                if [[ "${HOW_MANY}" -gt "1" ]]; then
+                    printf "\t[TAXID=%s] Dereplicating %s genomes\n" "${tax_id}" "${HOW_MANY}"
+                    # Build matrix
+                    kmtricks pipeline --file ${GENOMES_FOF} \
+                                      --run-dir ${TAXDIR}/matrix \
+                                      --mode kmer:count:bin \
+                                      --hard-min 1 \
+                                      --cpr \
+                                      --threads ${NPROC}
+                    # Aggregate
+                    kmtricks aggregate --run-dir ${TAXDIR}/matrix \
+                                       --matrix kmer \
+                                       --format text \
+                                       --cpr-in \
+                                       --sorted \
+                                       --threads ${NPROC} > ${TAXDIR}/kmers_matrix.txt
+                    # Add header to the kmers matrix
+                    HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' genomes.fof)
+                    echo "#kmer $HEADER" > ${TAXDIR}/kmers_matrix_wh.txt
+                    cat ${TAXDIR}/kmers_matrix.txt >> ${TAXDIR}/kmers_matrix_wh.txt
+                    mv ${TAXDIR}/kmers_matrix_wh.txt ${TAXDIR}/kmers_matrix.txt
+                    # Remove duplicate columns
+                    cat ${TAXDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TAXDIR}/kmers_matrix_dereplicated.txt
+                    # Dereplicate genomes
+                    while read -r genome; do
+                        if ! head -n1 ${TAXDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
+                            # Remove genome from directory
+                            rm -rf ${GENOMES_DIR}/${genome}.*
+                        else
+                            grep "^${genome} " ${TAXDIR}/genomes.fof >> ${TAXDIR}/genomes_dereplicated.fof
+                        fi
+                    done <<<"$(head -n1 ${TAXDIR}/kmers_matrix.txt | tr " " "\n")"
+                    # Cleanup space
+                    rm -rf ${TAXDIR}/matrix
+                    mv ${TAXDIR}/kmers_matrix_dereplicated.txt ${TAXDIR}/kmers_matrix.txt
+                    if [[ -f ${TAXDIR}/genomes_dereplicated.fof ]]; then
+                        mv ${TAXDIR}/genomes_dereplicated.fof ${TAXDIR}/genomes.fof
+                    fi
+                fi
+            fi
+        fi
     fi
 done < $WORKDIR/taxa.tsv
-
-# Use kmtricks to build a kmer matrix and compare input genomes
-# Discard genomes with the same kmers (dereplication)
-# TODO
 
 # Run kmtricks and build a sequence bloom tree for each species
 printf "Running kmtricks at the species level\n"

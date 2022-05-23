@@ -47,3 +47,14 @@ displaytime () {
     if [[ "$DAYS" -gt "0" ]] || [[ "$HOURS" -gt "0" ]] || [[ "$MINUTES" -gt "0" ]]; then printf "and "; fi
     printf "%s seconds\n" "$SECONDS"
 }
+
+# Transpose matrix file
+# Credits: https://stackoverflow.com/a/28167793
+transpose () {
+  awk '{for (i=1; i<=NF; i++) a[i,NR]=$i; max=(max<NF?NF:max)}
+        END {for (i=1; i<=max; i++)
+              {for (j=1; j<=NR; j++) 
+                  printf "%s%s", a[i,j], (j<NR?OFS:ORS)
+              }
+        }'
+}
