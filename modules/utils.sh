@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 17, 2022"
+DATE="May 23, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
