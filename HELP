@@ -78,7 +78,8 @@ VERSION
     "$VERSION" ("$DATE")
 
 SYNOPSIS
-    query [--input=file] [--tree=file] [--output=file] [--expand] ...
+    profile [--input=file] [--tree=file] [--threshold=num]
+            [--output-dir=directory] [--output-prefix=value] [--expand] ...
 
 DESCRIPTION
     This tool is used to query a sequence bloom tree at different taxonomic levels.
