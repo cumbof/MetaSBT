@@ -34,6 +34,25 @@ check_dependencies () {
     return 0
 }
 
+# Check for new software release
+check_for_software_updates () {
+    LAST_SOFTWARE_VERSION="$(get_last_software_release)"
+    VERSION=$1
+    if [ ! -z ${LAST_SOFTWARE_VERSION} ]; then
+        if [[ "${LAST_SOFTWARE_VERSION}" != $VERSION ]]; then
+            println 'A new version of meta-index is available!\n' "${LAST_SOFTWARE_VERSION}"
+            println 'https://github.com/BlankenbergLab/meta-index/releases\n\n'
+        fi
+    fi
+}
+
+# Print credits
+credits () {
+    printf "Thanks for using meta-index!\n"
+    printf "Please credit this tool in your manuscript by citing:\n\n"
+    printf "\tTBA\n\n"
+}
+
 # Format seconds in human-readable format
 # Credits: https://unix.stackexchange.com/a/27014
 displaytime () {
@@ -46,6 +65,14 @@ displaytime () {
     if [[ "$MINUTES" -gt "0" ]]; then printf "%s minutes " "$MINUTES"; fi
     if [[ "$DAYS" -gt "0" ]] || [[ "$HOURS" -gt "0" ]] || [[ "$MINUTES" -gt "0" ]]; then printf "and "; fi
     printf "%s seconds\n" "$SECONDS"
+}
+
+# Get the last software version
+# Credits: https://gist.github.com/lukechilds/a83e1d7127b78fef38c2914c4ececc3c
+get_last_software_release () {
+    curl --silent "https://api.github.com/repos/BlankenbergLab/meta-index/releases/latest" | \
+        grep '"tag_name":' | \
+        sed -E 's/.*"([^"]+)".*/\1/'
 }
 
 # Transpose matrix file

@@ -4,13 +4,15 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================
 
-DATE="May 4, 2022"
+DATE="May 23, 2022"
 VERSION="0.1.0"
 
 # Define script directory
 METAIDX_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Modules base path
 MODULES_DIR=${METAIDX_DIR}/modules
+# Import utility functions
+source ${MODULES_DIR}/utils.sh
 
 # Take track of the full command line
 CMD=("$@")
@@ -23,12 +25,16 @@ MODULE_PATH=${MODULES_DIR}/${MODULE}.sh
 # All the other arguments
 ARGS="${CMD[@]:1}"
 
+# Check for new software updates
+check_for_software_updates "$VERSION"
+
 if [[ -f ${MODULE_PATH} ]]; then
     # Run module with the same shell
     . ${MODULE_PATH} $ARGS
 else
+    printf "meta-index version %s (%s)\n\n" "$VERSION" "$DATE"
     printf "[ERROR] Unknown module!\n\n"
-    printf "Please use one of the following modules:\n"
+    printf "Available modules:\n"
     for module in ${MODULES_DIR}/*.sh; do
         MODULE_NAME=$(basename $module)
         MODULE_NAME="${MODULE_NAME%.*}"
@@ -37,8 +43,7 @@ else
             printf "\t%s\n" "${MODULE_NAME}"
         fi
     done
+    printf "\nTry running a module with --help to expand the list of its available arguments\n"
 fi
-
-printf "\nTry running a module with --help to expand the list of its available arguments\n"
 
 exit 0
