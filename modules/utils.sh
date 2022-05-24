@@ -9,7 +9,10 @@ VERSION="0.1.0"
 
 # Check for external software dependencies
 check_dependencies () {
-    printf "Checking for software dependencies\n"
+    VERBOSE=$1
+    if ${VERBOSE}; then
+        printf "Checking for software dependencies\n"
+    fi
     # Define the set of dependencies
     DEPENDENCIES=("bc" "checkm" "howdesbt" "kmtricks" "ncbitax2lin" "wget")
 
@@ -18,19 +21,29 @@ check_dependencies () {
     for dep in "${DEPENDENCIES[@]}"; do
         # Check for dependency
         if ! command -v $dep &> /dev/null ; then
-            printf "\t[--] %s\n" "$dep"
+            if ${VERBOSE}; then
+                printf "\t[--] %s\n" "$dep"
+            fi
             MISSING=$(($MISSING + 1))
         else
-            printf "\t[OK] %s\n" "$dep"
+            if ${VERBOSE}; then
+                printf "\t[OK] %s\n" "$dep"
+            fi
         fi
     done
     
+    # Return 1 in case of missing dependencies
     if [ "$MISSING" -gt "0" ]; then
-        printf "\nPlease, install all the missing dependencies and try again.\n\n"
+        if ${VERBOSE}; then
+            printf "\nPlease, install all the missing dependencies and try again.\n\n"
+        fi
         return 1
     fi
     
-    printf "\nAll required dependencies satisfied!\n\n"
+    # Return 0 if all external software dependencies are satisfied
+    if ${VERBOSE}; then
+        printf "\nAll required dependencies satisfied!\n\n"
+    fi
     return 0
 }
 
@@ -46,11 +59,16 @@ check_for_software_updates () {
     fi
 }
 
+# Print citations
+citations () {
+    printf "TBA\n\n"
+}
+
 # Print credits
 credits () {
-    printf "Thanks for using meta-index!\n"
+    printf "Thanks for using meta-index!\n\n"
     printf "Please credit this tool in your manuscript by citing:\n\n"
-    printf "\tTBA\n\n"
+    citations
 
     printf "Remember to star the meta-index repository on GitHub to stay updated on its development and new features:\n"
     printf "https://github.com/BlankenbergLab/meta-index\n\n"
