@@ -1,20 +1,27 @@
 if [ ! -z ${INDEX_HELP} ] && ${INDEX_HELP}; then
     echo "
 NAME
-    index -- Retrieve reference genomes and MAGs from NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks
+    index -- Retrieve genomes from isolate sequencing from the NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks
 
 VERSION
     "$VERSION" ("$DATE")
 
 SYNOPSIS
     index [--db-dir=directory] [--kingdom=value] [--kmer-len=num] [--filter-size=num] 
-          [--dereplicate] [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
+          [--checkm-completeness=value] [--checkm-contamination=value] [--dereplicate] 
+          [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
 
 DESCRIPTION
     This pipeline is used to automatically retrieve reference genomes and metagenome-assembled genomes from NCBI GenBank 
     and finally index them with kmtricks.
 
     The following options are available:
+
+    --checkm-completeness=num
+        Input genomes must have a minimum completeness percentage before being processed and added to the database
+    
+    --checkm-contamination=num
+        Input genomes must have a maximum contamination percentage before being processed and added to the database
 
     --cleanup
         Remove temporary data at the end of the pipeline
@@ -31,10 +38,6 @@ DESCRIPTION
     -h|--help
         Print this help and exit
     
-    --index-mags
-        Download and index metagenome-assembled genomes from the NCBI GenBank
-        Default: false
-
     --kingdom=value
         Consider genomes whose lineage belongs to a specific kingdom only
 
@@ -44,10 +47,6 @@ DESCRIPTION
     --license
         Print software license and exit
     
-    --no-references
-        Do not download and index reference genomes from isolate sequencing
-        Default: true
-
     --nproc=num
         This argument refers to the number of processors used for parallelizing the pipeline when possible
         Default: --nproc=1
@@ -154,7 +153,8 @@ SYNOPSIS
     update [--input-list=file] [--kmer-len=num] [--filter-size=num]
            [--checkm-completeness=num] [--checkm-contamination=num]
            [--db-dir=directory] [--tmp-dir=directory] [--dereplicate] 
-           [--type=value] [--cleanup] [--nproc=num] ...
+           [--type=value] [--extension=value] [--taxa=file]
+           [--cleanup] [--nproc=num] ...
 
 DESCRIPTION
     The update module is used to add new genomes to the database.
@@ -162,12 +162,10 @@ DESCRIPTION
     The following options are available:
 
     --checkm-completeness=num
-        Input genomes must have a minimum completeness percentage before being processed and added to the database.
-        Please note that this argument is used only in case of MAGs as input genomes
+        Input genomes must have a minimum completeness percentage before being processed and added to the database
     
     --checkm-contamination=num
-        Input genomes must have a maximum contamination percentage before being processed and added to the database.
-        Please note that this argument is used only in case of MAGs as input genomes
+        Input genomes must have a maximum contamination percentage before being processed and added to the database
     
     --cleanup
         Remove temporary data at the end of the pipeline
@@ -178,6 +176,10 @@ DESCRIPTION
     --dereplicate
         Dereplicate input genomes based on the presence/absence of kmers
     
+    --extension=value
+        Specify the input genome files extension.
+        All the input genomes must have the same file extension before running this module
+
     --filter-size=num
         This is the size of the bloom filters
     
@@ -203,6 +205,10 @@ DESCRIPTION
     --tmp-dir=directory
         Path to the folder for storing temporary data
     
+    --taxa=file
+        Input file with the mapping between input genome IDs and their taxonomic label.
+        This is used in case of reference genomes only \"--type=references\"
+
     --type=value
         Define the nature of the input genomes. Only \"references\" and \"MAGs\" are allowed
     
@@ -220,6 +226,6 @@ EXAMPLES
 
         $ update --input-list=~/mygenomes.txt --db-dir=~/myindex --tmp-dir=~/tmp 
                  --kmer-len=31 --filter-size=10000 --dereplicate --type=references
-                 --nproc=8 --cleanup
+                 --extension=fna.gz --nproc=8 --cleanup
 "
 fi
