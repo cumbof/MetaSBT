@@ -1,10 +1,10 @@
 #!/bin/bash
 #title          :index
-#description    :Retrieve reference genomes and MAGs from NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks 
+#description    :Retrieve genomes from isolate sequencing from the NCBI GenBank and build a Sequence Bloom Tree for each species with kmtricks 
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
-#====================================================================================================================================
+#=============================================================================================================================================
 
-DATE="May 23, 2022"
+DATE="May 24, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -39,6 +39,7 @@ esearch_txid () {
                         # Define a file of file (fof) with the list of genomes for current species
                         GCAPATH=$(readlink -m ${OUTDIR}/${GCA}.fna.gz)
                         printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
+                        printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
                         printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
                     else
                         # Delete corrupted genome
@@ -156,12 +157,6 @@ export -f kmtricks_wrapper
 # Define default value for --nproc and --xargs-nproc
 NPROC=1
 XARGS_NPROC=1
-# Download and index reference genomes from isolate sequencing by default
-# Disable with --no-references
-INDEX_REFERENCES=true
-# Do not download MAGs by default
-# Enable with --index-mags
-INDEX_MAGS=false
 # Dereplicate input genomes
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
@@ -172,6 +167,36 @@ CLEANUP=false
 # Parse input arguments
 for ARG in "$@"; do
     case "$ARG" in
+        --checkm-completeness=*)
+            # CheckM completeness
+            CHECKM_COMPLETENESS="${ARG#*=}"
+            # Define helper
+            if [[ "${CHECKM_COMPLETENESS}" =~ "?" ]]; then
+                printf "index helper: --checkm-completeness=num\n\n"
+                printf "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
+                exit 0
+            fi
+            # Check whether --checkm-completeness is an integer
+            if [[ ! ${CHECKM_COMPLETENESS} =~ ^[0-9]+$ ]] || [[ "${CHECKM_COMPLETENESS}" -gt "100" ]]; then
+                printf "Argument --checkm-completeness must be a positive integer greater than 0 (up to 100)\n"
+                exit 1
+            fi
+            ;;
+        --checkm-contamination=*)
+            # CheckM contamination
+            CHECKM_CONTAMINATION="${ARG#*=}"
+            # Define helper
+            if [[ "${CHECKM_CONTAMINATION}" =~ "?" ]]; then
+                printf "index helper: --checkm-contamination=num\n\n"
+                printf "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
+                exit 0
+            fi
+            # Check whether --checkm-contamination is an integer
+            if [[ ! ${CHECKM_CONTAMINATION} =~ ^[0-9]+$ ]] || [[ "${CHECKM_CONTAMINATION}" -gt "100" ]]; then
+                printf "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
+                exit 1
+            fi
+            ;;
         --cleanup)
             # Remove temporary data at the end of the pipeline
             CLEANUP=true
@@ -215,10 +240,6 @@ for ARG in "$@"; do
             source ${SCRIPT_DIR}/../HELP
             exit 0
             ;;
-        --index-mags)
-            # Download and index MAGs
-            INDEX_MAGs=true
-            ;;
         --kingdom=*)
             # Consider genomes whose lineage belong to a specific kingdom only
             KINGDOM="${ARG#*=}"
@@ -248,10 +269,6 @@ for ARG in "$@"; do
             # Print license
             printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
             exit 0
-            ;;
-        --no-references)
-            # Do not download and index reference genomes from isolate sequencing
-            INDEX_REFERENCES=false
             ;;
         --nproc=*)
             # Max nproc for all parallel instructions
@@ -421,23 +438,53 @@ while read tax_id, taxonomy; do
     # Unclassified genomes can be used with the "update" module with "--type=MAGs"
     if [[ ! $taxonomy == *"_unclassified"* ]]; then
         # Index reference genomes
-        if ${INDEX_REFERENCES}; then
-            SEARCH_CRITERIA="NOT excluded-from-refseq [PROP]"
-            esearch_txid $DBDIR ${tax_id} $taxonomy "references" ${SEARCH_CRITERIA}
-        fi
-        # Index MAGs
-        if ${INDEX_MAGs}; then
-            # Run esearch_txid again for downloading genomes with no search criteria
-            # Genomes already processed with the previous esearch_txid run are skipped
-            esearch_txid $DBDIR ${tax_id} $taxonomy "mags"
+        SEARCH_CRITERIA="NOT excluded-from-refseq [PROP]"
+        esearch_txid $DBDIR ${tax_id} $taxonomy "references" ${SEARCH_CRITERIA}
+
+        # Taxonomy folder, genomes directory, and fof file are generated by the "esearch_txid" function
+        TAXDIR=$DBDIR/$(echo "$taxonomy" | sed 's/|/\//g')
+        GENOMES_FOF=${TAXDIR}/genomes.fof
+        GENOMES_DIR=${TAXDIR}/genomes
+
+        # Input genomes must be quality-controlled before being added to the database
+        if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
+            CHECKMTABLES="" # This is the result of the "run_checkm" function as a list of file paths separated by comma
+            run_checkm ${TAXDIR}/genomes.txt "fna.gz" $TMPDIR $NPROC
+
+            # Process all the CheckM tables
+            for table in ${CHECKMTABLES//,/ }; do
+                # Skip header line with sed
+                # Discard genomes according to their completeness and contamination
+                sed 1d $table | while read line; do
+                    # Retrieve completeness and contamination of current genome
+                    GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Get value under column 1
+                    COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Get value under column 12
+                    CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Get value under column 13
+                    if [[ "$COMPLETENESS" -lt "${CHECKM_COMPLETENESS}" ]] || [[ "$CONTAMINATION" -gt "${CHECKM_CONTAMINATION}" ]]; then
+                        # Remove genome from directory
+                        rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
+                    else
+                        # Current genome passed the quality control
+                        grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> ${TAXID}/genomes_qc.fof
+                    fi
+                done
+            done
+
+            # Proceed if at least one input genome passed the quality control
+            if [[ -f ${TAXID}/genomes_qc.fof ]]; then
+                GENOMES_FOF=${TAXID}/genomes_qc.fof
+            else
+                # No input genomes survived the quality control step
+                # Remove the genomes.fof file to avoind running kmtricks on current taxonomy
+                rm ${GENOMES_FOF}
+                # Skip the dereplication step and proceed with the next taxonomy
+                continue
+            fi
         fi
 
         # Use kmtricks to build a kmer matrix and compare input genomes
         # Discard genomes with the same set of kmers (dereplication)
         if ${DEREPLICATE}; then
-            TAXDIR=$DBDIR/$(echo "$taxonomy" | sed 's/|/\//g')
-            GENOMES_FOF=${TAXDIR}/genomes.fof
-            GENOMES_DIR=${TAXDIR}/genomes
             if [[ -f ${GENOMES_FOF} ]]; then
                 HOW_MANY=$(cat ${GENOMES_FOF} | wc -l)
                 if [[ "${HOW_MANY}" -gt "1" ]]; then
@@ -467,16 +514,16 @@ while read tax_id, taxonomy; do
                     while read -r genome; do
                         if ! head -n1 ${TAXDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
                             # Remove genome from directory
-                            rm -rf ${GENOMES_DIR}/${genome}.*
+                            rm -rf ${GENOMES_DIR}/${genome}.fna.gz
                         else
-                            grep "^${genome} " ${TAXDIR}/genomes.fof >> ${TAXDIR}/genomes_dereplicated.fof
+                            grep "^${genome} " ${GENOMES_FOF} >> ${TAXDIR}/genomes_dereplicated.fof
                         fi
                     done <<<"$(head -n1 ${TAXDIR}/kmers_matrix.txt | tr " " "\n")"
                     # Cleanup space
                     rm -rf ${TAXDIR}/matrix
                     mv ${TAXDIR}/kmers_matrix_dereplicated.txt ${TAXDIR}/kmers_matrix.txt
                     if [[ -f ${TAXDIR}/genomes_dereplicated.fof ]]; then
-                        mv ${TAXDIR}/genomes_dereplicated.fof ${TAXDIR}/genomes.fof
+                        mv ${TAXDIR}/genomes_dereplicated.fof ${GENOMES_FOF}
                     fi
                 fi
             fi
@@ -490,7 +537,10 @@ NFOFIN=`find $DBDIR -type f -iname "genomes.fof" | wc -l`   # Count how many gen
 NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l` # Count how many kmtricks.fof files (copy of genomes.fof generated by kmtricks)
 while [ $NFOFOUT -lt $NFOFIN ]; do
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
-        'kmtricks_wrapper {} '"${DBDIR}"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"${NPROC}"
+        'INPUT={}; \
+         if [[ ! -f "$(dirname $INPUT)/index/kmtricks.fof" ]]; then \
+            kmtricks_wrapper "$INPUT" '"${DBDIR}"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"${NPROC}"'; \
+         fi'
     # Search for missing species and process them one by one
     NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l`
     XARGS_NPROC=1
