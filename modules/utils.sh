@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 23, 2022"
+DATE="May 24, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -40,8 +40,8 @@ check_for_software_updates () {
     VERSION=$1
     if [ ! -z ${LAST_SOFTWARE_VERSION} ]; then
         if [[ "${LAST_SOFTWARE_VERSION}" != $VERSION ]]; then
-            println 'A new version of meta-index is available!\n' "${LAST_SOFTWARE_VERSION}"
-            println 'https://github.com/BlankenbergLab/meta-index/releases\n\n'
+            println "A new version of meta-index is available!\n" "${LAST_SOFTWARE_VERSION}"
+            println "https://github.com/BlankenbergLab/meta-index/releases\n\n"
         fi
     fi
 }
@@ -51,6 +51,9 @@ credits () {
     printf "Thanks for using meta-index!\n"
     printf "Please credit this tool in your manuscript by citing:\n\n"
     printf "\tTBA\n\n"
+
+    printf "Remember to star the meta-index repository on GitHub to stay updated on its development and new features:\n"
+    printf "https://github.com/BlankenbergLab/meta-index\n\n"
 }
 
 # Format seconds in human-readable format
@@ -73,6 +76,54 @@ get_last_software_release () {
     curl --silent "https://api.github.com/repos/BlankenbergLab/meta-index/releases/latest" | \
         grep '"tag_name":' | \
         sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+# Run CheckM for quality control base on completeness and contamination
+# Remember to create a global variable "CHECKMTABLES" before calling this function 
+# for accessing the result as a list of file paths separated by comma
+run_checkm () {
+    INLIST=$1       # Path to the file with the list of paths to the input genomes
+    EXTENSION=$2    # Extension of input genome files
+    TMPDIR=$3       # Temporary folder
+    NPROC=$4        # Number of parallel processes for CheckM
+
+    # Run CheckM
+    printf 'Running CheckM\n'
+    CHECKM_START_TIME="$(date +%s.%3N)"
+    mkdir -p $TMPDIR/checkm/tmp
+    # Split the set of bins in chunks with 1000 genomes at most
+    println '\tOrganising genomes in chunks\n'
+    split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $TMPDIR/checkm/tmp/bins_
+    CHUNKS=`ls "$TMPDIR"/checkm/tmp/bins_*.txt 2>/dev/null | wc -l`
+    CHECKMTABLES=""
+    for filepath in $TMPDIR/checkm/tmp/bins_*.txt; do
+        # Retrieve chunk id
+        filename="$(basename $filepath)"
+        suffix="${filename#*_}"
+        suffix="${suffix%.txt}"
+        println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
+        # Create chunk folder
+        mkdir -p $TMPDIR/checkm/tmp/bins_${suffix}
+        for bin in `sed '/^$/d' $filepath`; do
+            # Make a symbolic link to the 1000 genomes for the current chunk
+            ln -s $bin $TMPDIR/checkm/tmp/bins_${suffix}
+        done
+        # Create the CheckM folder for the current chunk
+        mkdir -p $TMPDIR/checkm/run_$suffix/
+        # Run CheckM
+        checkm lineage_wf -t ${NPROC} \
+                          -x ${EXTENSION} \
+                          --pplacer_threads ${NPROC} \
+                          --tab_table -f $TMPDIR/checkm/run_${suffix}.tsv \
+                          $TMPDIR/checkm/tmp/bins_${suffix} $TMPDIR/checkm/run_$suffix
+        # Take trace of the CheckM output tables
+        CHECKMTABLES=$TMPDIR/checkm/run_${suffix}.tsv,$CHECKMTABLES
+    done
+    CHECKM_END_TIME="$(date +%s.%3N)"
+    CHECKM_ELAPSED="$(bc <<< "${CHECKM_END_TIME}-${CHECKM_START_TIME}")"
+    println '\tTotal elapsed time: %s\n\n' "$(displaytime ${CHECKM_ELAPSED})"
+    # Trim the last comma out of the list of CheckM output table file paths
+    CHECKMTABLES="${CHECKMTABLES%?}"
 }
 
 # Transpose matrix file
