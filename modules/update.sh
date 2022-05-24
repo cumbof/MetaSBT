@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 23, 2022"
+DATE="May 24, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -20,7 +20,7 @@ CHECKM_CONTAMINATION=100
 # CheckM cannot handle a set of genomes with mixed file extensions
 # Extensions of the input genomes must be standardized before running this script
 # Input genome extension is forced to be fna
-CHECKM_BINEXT="fna"
+EXTENSION="fna"
 # Dereplicate input genomes
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
@@ -37,8 +37,7 @@ for ARG in "$@"; do
             # Define helper
             if [[ "${CHECKM_COMPLETENESS}" =~ "?" ]]; then
                 printf "update helper: --checkm-completeness=num\n\n"
-                printf "\tInput genomes must have a minimum completeness percentage before being processed and added to the database.\n"
-                printf "\tPlease note that this argument is used only in case of MAGs as input genomes.\n\n"
+                printf "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-completeness is an integer
@@ -53,8 +52,7 @@ for ARG in "$@"; do
             # Define helper
             if [[ "${CHECKM_CONTAMINATION}" =~ "?" ]]; then
                 printf "update helper: --checkm-contamination=num\n\n"
-                printf "\tInput genomes must have a maximum contamination percentage before being processed and added to the database.\n"
-                printf "\tPlease note that this argument is used only in case of MAGs as input genomes.\n\n"
+                printf "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-contamination is an integer
@@ -84,6 +82,26 @@ for ARG in "$@"; do
         --dereplicate)
             # Dereplicate input genomes
             DEREPLICATE=true
+            ;;
+        --extension=*)
+            # Input genome files extension
+            # It must be standardised before running this tool module
+            # All the input genomes must have the same file extension
+            EXTENSION="${ARG#*=}"
+            # Define helper
+            if [[ "${EXTENSION}" =~ "?" ]]; then
+                printf "update helper: --extension=value\n\n"
+                printf "\tSpecify the input genome files extension.\n"
+                printf "\tAll the input genomes must have the same file extension before running this module.\n\n"
+                exit 0
+            fi
+            # Allowed extensions: "fa", "fasta", "fna" and GZip compressed formats
+            EXTENSION_LIST=("fa" "fa.gz" "fasta" "fasta.gz" "fna" "fna.gz")
+            if ! echo ${EXTENSION_LIST[@]} | grep -w -q $EXTENSION; then
+                printf "File extension \"%s\" is not allowed!\n" "$TYPE"
+                printf "Please have a look at the helper of the --extension argument for a list of valid input file extensions.\n"
+                exit 1
+            fi
             ;;
         --filter-size=*)
             # Bloom filter size
@@ -157,6 +175,17 @@ for ARG in "$@"; do
             check_dependencies
             exit $?
             ;;
+        --taxa=*)
+            # Input file with the mapping between input reference genome IDs and their taxonomic label
+            TAXA="${ARG#*=}"
+            # Define helper
+            if [[ "${TAXA}" =~ "?" ]]; then
+                printf "update helper: --taxa=file\n\n"
+                printf "\tInput file with the mapping between input genome IDs and their taxonomic label.\n"
+                printf "\tThis is used in case of reference genomes only \"--type=references\".\n\n"
+                exit 0
+            fi
+            ;;
         --tmp-dir=*)
             # Temporary folder
             TMPDIR="${ARG#*=}"
@@ -183,7 +212,7 @@ for ARG in "$@"; do
             # Allowed genome types: "references" and "MAGs"
             if [[ ! "$TYPE" = "MAGs" ]] && [[ ! "$TYPE" = "references" ]]; then
                 printf "Input type \"%s\" is not allowed!\n" "$TYPE"
-                printf "Please have a look at the helper of the --type argument for a list of valid genome types\n"
+                printf "Please have a look at the helper of the --type argument for a list of valid genome types.\n"
                 exit 1
             fi
             ;;
@@ -210,120 +239,104 @@ fi
 # Create temporary folder
 mkdir -p $TMPDIR
 
-# Apply CheckM in case of MAGs only
-if [[ "$TYPE" = "MAGs" ]]; then
-    # Input genomes must be quality-controlled before being added to the database
-    if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
-        # Run CheckM
-        printf 'Running CheckM\n'
-        CHECKM_START_TIME="$(date +%s.%3N)"
-        mkdir -p $TMPDIR/checkm/tmp
-        # Split the set of bins in chunks with 1000 genomes at most
-        println '\tOrganising genomes in chunks\n'
-        split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $TMPDIR/checkm/tmp/bins_
-        CHUNKS=`ls "$TMPDIR"/checkm/tmp/bins_*.txt 2>/dev/null | wc -l`
-        CHECKMTABLES=""
-        for filepath in $TMPDIR/checkm/tmp/bins_*.txt; do
-            # Retrieve chunk id
-            filename="$(basename $filepath)"
-            suffix="${filename#*_}"
-            suffix="${suffix%.txt}"
-            println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
-            # Create chunk folder
-            mkdir -p $TMPDIR/checkm/tmp/bins_${suffix}
-            for bin in `sed '/^$/d' $filepath`; do
-                # Make a symbolic link to the 1000 genomes for the current chunk
-                ln -s $bin $TMPDIR/checkm/tmp/bins_${suffix}
-            done
-            # Create the CheckM folder for the current chunk
-            mkdir -p $TMPDIR/checkm/run_$suffix/
-            # Run CheckM
-            checkm lineage_wf -t ${NPROC} \
-                              -x ${CHECKM_BINEXT} \
-                              --pplacer_threads ${NPROC} \
-                              --tab_table -f $TMPDIR/checkm/run_${suffix}.tsv \
-                              $TMPDIR/checkm/tmp/bins_${suffix} $TMPDIR/checkm/run_$suffix
-            # Take trace of the CheckM output tables
-            CHECKMTABLES=$TMPDIR/checkm/run_${suffix}.tsv,$CHECKMTABLES
+# Input genomes must be quality-controlled before being added to the database
+if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
+    CHECKMTABLES="" # This is the result of the "run_checkm" function as a list of file paths separated by comma
+    run_checkm $INLIST $EXTENSION $TMPDIR $NPROC
+    
+    # Read all the CheckM output tables and filter genomes on their completeness and contamination scores 
+    # according to the those provided in input
+    touch ${TMPDIR}/genomes_qc.txt
+    for table in ${CHECKMTABLES//,/ }; do
+        # Skip header line with sed
+        # Discard genomes according to their completeness and contamination
+        sed 1d $table | while read line; do
+            # Retrieve completeness and contamination of current genome
+            GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Get value under column 1
+            COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Get value under column 12
+            CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Get value under column 13
+            if [[ "$COMPLETENESS" -ge "${CHECKM_COMPLETENESS}" ]] && [[ "$CONTAMINATION" -le "${CHECKM_CONTAMINATION}" ]]; then
+                # Current genome passed the quality control
+                grep -w "${GENOMEID}.${EXTENSION}" ${INLIST} >> ${TMPDIR}/genomes_qc.txt
+            fi
         done
-        CHECKM_END_TIME="$(date +%s.%3N)"
-        CHECKM_ELAPSED="$(bc <<< "${CHECKM_END_TIME}-${CHECKM_START_TIME}")"
-        println '\tTotal elapsed time: %s\n\n' "$(displaytime ${CHECKM_ELAPSED})"
-        # Trim the last comma out of the list of CheckM output table file paths
-        CHECKMTABLES="${CHECKMTABLES%?}"
+    done
 
-        # Read all the CheckM output tables and filter genomes on their completeness and contamination scores 
-        # according to the those provided in input
-
-        # Create a new INLIST file with the new list of genomes
-
-    fi
+    # Create a new INLIST file with the new list of genomes
+    INLIST=${TMPDIR}/genomes_qc.txt
 fi
 
 # Use kmtricks to build a kmer matrix and compare input genomes
 # Discard genomes with the same set of kmers (dereplication)
-HOW_MANY=$(cat ${INLIST} | wc -l)
-if ${DEREPLICATE} && [[ "${HOW_MANY}" -gt "1" ]]; then
-    GENOMES_FOF=${TMPDIR}/genomes.fof
-    # Build a fof file with the list of input genomes
-    while read -r genomepath; do
-        GENOME_NAME="$(basename $genomepath)"
-        echo "${GENOME_NAME} : $genomepath" >> ${GENOMES_FOF}
-    done <$INLIST
+if ${DEREPLICATE}; then
+    # Count how many input genomes survived in case they have been quality controlled
+    HOW_MANY=$(cat ${INLIST} | wc -l)
+    if [[ "${HOW_MANY}" -gt "1" ]]; then
+        GENOMES_FOF=${TMPDIR}/genomes.fof
+        # Build a fof file with the list of input genomes
+        while read -r genomepath; do
+            GENOME_NAME="$(basename $genomepath)"
+            echo "${GENOME_NAME} : $genomepath" >> ${GENOMES_FOF}
+        done <$INLIST
 
-    if [[ -f ${GENOMES_FOF} ]]; then
-        printf "\tDereplicating %s input genomes" "${HOW_MANY}"
-        # Build matrix
-        kmtricks pipeline --file ${GENOMES_FOF} \
-                          --run-dir ${TMPDIR}/matrix \
-                          --mode kmer:count:bin \
-                          --hard-min 1 \
-                          --cpr \
-                          --threads ${NPROC}
-        # Aggregate
-        kmtricks aggregate --run-dir ${TMPDIR}/matrix \
-                           --matrix kmer \
-                           --format text \
-                           --cpr-in \
-                           --sorted \
-                           --threads ${NPROC} > ${TMPDIR}/kmers_matrix.txt
-        # Add header to the kmers matrix
-        HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
-        echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
-        cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
-        mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
-        # Remove duplicate columns
-        cat ${TMPDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TMPDIR}/kmers_matrix_dereplicated.txt
-        # Dereplicate genomes
-        while read -r genome; do
-            if head -n1 ${TMPDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
-                # Rebuild the absolute path to the genome file
-                realpath -s $(grep "^${genome} " ${TMPDIR}/genomes.fof | cut -d' ' -f3) >> ${TMPDIR}/genomes_dereplicated.txt
+        if [[ -f ${GENOMES_FOF} ]]; then
+            printf "\tDereplicating %s input genomes" "${HOW_MANY}"
+            # Build matrix
+            kmtricks pipeline --file ${GENOMES_FOF} \
+                              --run-dir ${TMPDIR}/matrix \
+                              --mode kmer:count:bin \
+                              --hard-min 1 \
+                              --cpr \
+                              --threads ${NPROC}
+            # Aggregate
+            kmtricks aggregate --run-dir ${TMPDIR}/matrix \
+                               --matrix kmer \
+                               --format text \
+                               --cpr-in \
+                               --sorted \
+                               --threads ${NPROC} > ${TMPDIR}/kmers_matrix.txt
+            # Add header to the kmers matrix
+            HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+            echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
+            cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
+            mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
+            # Remove duplicate columns
+            cat ${TMPDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TMPDIR}/kmers_matrix_dereplicated.txt
+            # Dereplicate genomes
+            while read -r genome; do
+                if head -n1 ${TMPDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
+                    # Rebuild the absolute path to the genome file
+                    realpath -s $(grep "^${genome} " ${TMPDIR}/genomes.fof | cut -d' ' -f3) >> ${TMPDIR}/genomes_dereplicated.txt
+                fi
+            done <<<"$(head -n1 ${TMPDIR}/kmers_matrix.txt | tr " " "\n")"
+            # Use the new list of dereplicated genomes
+            if [[ -f ${TMPDIR}/genomes_dereplicated.txt ]]; then
+                INLIST=${TMPDIR}/genomes_dereplicated.txt
             fi
-        done <<<"$(head -n1 ${TMPDIR}/kmers_matrix.txt | tr " " "\n")"
-        # Use the new list of dereplicated genomes
-        if [[ -f ${TMPDIR}/genomes_dereplicated.txt ]]; then
-            INLIST=${TMPDIR}/genomes_dereplicated.txt
         fi
+    else
+        # No input genomes survived from the quality control step
+        printf "\tNo input genomes available!"
+        exit 0
     fi
 fi
 
-# In case of MAGs:
-#   For each of the input genomes
-#   Make a query to establish the closest group for each taxonomic level in the tree
-#   If it is close enough to a group in a taxonomic level, remember that this genome must be assigned to the same group
-#   Otherwise, mark the genome as unassigned
-#
-#   Assigned all the genomes to the closest groups and rebuild the SBTs
-#   Define new groups by looking at the kmer matrix of kmtricks for the unassigned genomes
-
-# In case of references:
-#   If the taxonomic label of the input genome already exists in the database
-#       Add the new genome to the assigned taxonomic branch and rebuild the SBTs
-#   Otherwise,
-#       Compare the genome with genomes in newly defined clusters at the level of the known lineage
-#       In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
-#       Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
+if [[ "$TYPE" = "MAGs" ]]; then
+    # For each of the input genomes
+    # Make a query to establish the closest group for each taxonomic level in the tree
+    # If it is close enough to a group in a taxonomic level, remember that this genome must be assigned to the same group
+    # Otherwise, mark the genome as unassigned
+    #
+    # Assigned all the genomes to the closest groups and rebuild the SBTs
+    # Define new groups by looking at the kmer matrix of kmtricks for the unassigned genomes
+elif [[ "$TYPE" = "references" ]]; then
+    # If the taxonomic label of the input genome already exists in the database
+    #   Add the new genome to the assigned taxonomic branch and rebuild the SBTs
+    # Otherwise,
+    #   Compare the genome with genomes in newly defined clusters at the level of the known lineage
+    #   In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
+    #   Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
+fi
 
 # Cleanup temporary data
 if ${CLEANUP}; then
