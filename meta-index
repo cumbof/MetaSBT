@@ -4,15 +4,45 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================
 
-DATE="May 23, 2022"
+DATE="May 24, 2022"
 VERSION="0.1.0"
 
 # Define script directory
-METAIDX_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Modules base path
-MODULES_DIR=${METAIDX_DIR}/modules
+MODULES_DIR=${SCRIPT_DIR}/modules
 # Import utility functions
 source ${MODULES_DIR}/utils.sh
+
+# Parse input arguments
+for ARG in "$@"; do
+    case "$ARG" in
+        --credits)
+            # Print credits
+            credits
+            exit 0
+            ;;
+        --license)
+            # Print license
+            printf "%s\n" "$(cat ${SCRIPT_DIR}/LICENSE)"
+            exit 0
+            ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true
+            exit $?
+            ;;
+        -v|--version)
+            # Print pipeline version
+            printf "meta-index version %s (%s)\n" "$VERSION" "$DATE"
+            exit 0
+            ;;
+        *)
+            # Try to run a module
+            continue
+            ;;
+    esac
+done
 
 # Take track of the full command line
 CMD=("$@")
