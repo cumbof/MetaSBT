@@ -265,11 +265,6 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
-        --license)
-            # Print license
-            printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
-            exit 0
-            ;;
         --nproc=*)
             # Max nproc for all parallel instructions
             NPROC="${ARG#*=}"
@@ -286,11 +281,6 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
-        --resolve-dependencies)
-            # Check for external software dependencies and python modules
-            check_dependencies
-            exit $?
-            ;;
         --tmp-dir=*)
             # Temporary folder
             TMPDIR="${ARG#*=}"
@@ -304,11 +294,6 @@ for ARG in "$@"; do
             TMPDIR="$( cd "$( dirname "${TMPDIR}" )" &> /dev/null && pwd )"/"$( basename $TMPDIR )"
             # Trim the last slash out of the path
             TMPDIR="${TMPDIR%/}"
-            ;;
-        -v|--version)
-            # Print pipeline version
-            printf "index version %s (%s)\n" "$VERSION" "$DATE"
-            exit 0
             ;;
         --xargs-nproc=*)
             # Max number of independent runs of kmtricks
@@ -336,7 +321,7 @@ done
 printf "index version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies
+check_dependencies false
 if [[ "$?" -gt "0" ]]; then
     exit 1
 fi

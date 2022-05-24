@@ -149,11 +149,6 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
-        --license)
-            # Print license
-            printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
-            exit 0
-            ;;
         --nproc=*)
             # Max nproc for all parallel instructions
             NPROC="${ARG#*=}"
@@ -169,11 +164,6 @@ for ARG in "$@"; do
                 printf "Argument --nproc must be a positive integer greater than 0\n"
                 exit 1
             fi
-            ;;
-        --resolve-dependencies)
-            # Check for external software dependencies and python modules
-            check_dependencies
-            exit $?
             ;;
         --taxa=*)
             # Input file with the mapping between input reference genome IDs and their taxonomic label
@@ -216,11 +206,6 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
-        -v|--version)
-            # Print pipeline version
-            printf "update version %s (%s)\n" "$VERSION" "$DATE"
-            exit 0
-            ;;
         *)
             printf "update: invalid option -- %s\n" "$ARG"
             exit 1
@@ -231,7 +216,7 @@ done
 printf "update version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies
+check_dependencies false
 if [[ "$?" -gt "0" ]]; then
     exit 1
 fi

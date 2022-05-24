@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 23, 2022"
+DATE="May 24, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -42,17 +42,12 @@ for ARG in "$@"; do
                 exit 0
             fi
             ;;
-        --license)
-            # Print license
-            printf "%s\n" "$(cat ${SCRIPT_DIR}/../LICENSE)"
-            exit 0
-            ;;
         --output-dir=*)
             # Output folder
             OUTPUTDIR="${ARG#*=}"
             # Define helper
             if [[ "${OUTPUTDIR}" =~ "?" ]]; then
-                printf "profile helper: --output-dir=file\n\n"
+                printf "profile helper: --output-dir=directory\n\n"
                 printf "\tThis is the output folder with queries results.\n\n"
                 exit 0
             fi
@@ -62,15 +57,10 @@ for ARG in "$@"; do
             OUTPUTPREFIX="${ARG#*=}"
             # Define helper
             if [[ "${OUTPUTPREFIX}" =~ "?" ]]; then
-                printf "profile helper: --output-prefix=file\n\n"
+                printf "profile helper: --output-prefix=value\n\n"
                 printf "\tPrefix of the output files with query matches.\n\n"
                 exit 0
             fi
-            ;;
-        --resolve-dependencies)
-            # Check for external software dependencies and python modules
-            check_dependencies
-            exit $?
             ;;
         --threshold=*)
             # Theta threshold
@@ -94,11 +84,6 @@ for ARG in "$@"; do
                 exit 0
             fi
             ;;
-        -v|--version)
-            # Print pipeline version
-            printf "profile version %s (%s)\n" "$VERSION" "$DATE"
-            exit 0
-            ;;
         *)
             printf "profile: invalid option -- %s\n" "$ARG"
             exit 1
@@ -109,7 +94,7 @@ done
 printf "profile version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies
+check_dependencies false
 if [[ "$?" -gt "0" ]]; then
     exit 1
 fi
