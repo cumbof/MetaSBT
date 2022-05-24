@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 18, 2022"
+DATE="May 23, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -21,6 +21,12 @@ CHECKM_CONTAMINATION=100
 # Extensions of the input genomes must be standardized before running this script
 # Input genome extension is forced to be fna
 CHECKM_BINEXT="fna"
+# Dereplicate input genomes
+# Use kmtricks to build the kmer matrix on the input set of genomes
+# Remove genomes with identical set of kmers
+DEREPLICATE=false
+# Remove temporary data at the end of the pipeline
+CLEANUP=false
 
 # Parse input arguments
 for ARG in "$@"; do
@@ -56,6 +62,28 @@ for ARG in "$@"; do
                 printf "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
                 exit 1
             fi
+            ;;
+        --cleanup)
+            # Remove temporary data at the end of the pipeline
+            CLEANUP=true
+            ;;
+        --db-dir=*)
+            # Database directory
+            DBDIR="${ARG#*=}"
+            # Define helper
+            if [[ "${DBDIR}" =~ "?" ]]; then
+                printf "update helper: --db-dir=directory\n\n"
+                printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
+                exit 0
+            fi
+            # Reconstruct the full path
+            DBDIR="$( cd "$( dirname "${DBDIR}" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
+            # Trim the last slash out of the path
+            DBDIR="${DBDIR%/}"
+            ;;
+        --dereplicate)
+            # Dereplicate input genomes
+            DEREPLICATE=true
             ;;
         --filter-size=*)
             # Bloom filter size
@@ -129,6 +157,20 @@ for ARG in "$@"; do
             check_dependencies
             exit $?
             ;;
+        --tmp-dir=*)
+            # Temporary folder
+            TMPDIR="${ARG#*=}"
+            # Define helper
+            if [[ "${TMPDIR}" =~ "?" ]]; then
+                printf "update helper: --tmp-dir=directory\n\n"
+                printf "\tPath to the folder for storing temporary data.\n\n"
+                exit 0
+            fi
+            # Reconstruct the full path
+            TMPDIR="$( cd "$( dirname "${TMPDIR}" )" &> /dev/null && pwd )"/"$( basename $TMPDIR )"
+            # Trim the last slash out of the path
+            TMPDIR="${TMPDIR%/}"
+            ;;
         --type=*)
             # Input genomes type: references or MAGs
             TYPE="${ARG#*=}"
@@ -150,36 +192,6 @@ for ARG in "$@"; do
             printf "update version %s (%s)\n" "$VERSION" "$DATE"
             exit 0
             ;;
-        --work-dir=*)
-            # Working directory
-            WORKDIR="${ARG#*=}"
-            # Define helper
-            if [[ "${WORKDIR}" =~ "?" ]]; then
-                printf "update helper: --work-dir=directory\n\n"
-                printf "\tThis is the working directory that will contain genomes organised by species and their index produced by kmtricks.\n\n"
-                exit 0
-            fi
-            # Reconstruct the full path
-            WORKDIR="$( cd "$( dirname "${WORKDIR}" )" &> /dev/null && pwd )"/"$( basename $WORKDIR )"
-            # Trim the last slash out of the path
-            WORKDIR="${WORKDIR%/}"
-            ;;
-        --xargs-nproc=*)
-            # Max number of independent runs of kmtricks
-            XARGS_NPROC="${ARG#*=}"
-            # Define helper
-            if [[ "${XARGS_NPROC}" =~ "?" ]]; then
-                printf "update helper: --xargs-nproc=num\n\n"
-                printf "\tThis refers to the number of xargs processes used for launching independent runs of kmtricks.\n"
-                printf "\tDefault: --xargs-nproc=1\n\n"
-                exit 0
-            fi
-            # Check whether --xargs-nproc is an integer
-            if [[ ! $XARGS_NPROC =~ ^[0-9]+$ ]] || [[ "$XARGS_NPROC" -eq "0" ]]; then
-                printf "Argument --xargs-nproc must be a positive integer greater than 0\n"
-                exit 1
-            fi
-            ;;
         *)
             printf "update: invalid option -- %s\n" "$ARG"
             exit 1
@@ -195,8 +207,8 @@ if [[ "$?" -gt "0" ]]; then
     exit 1
 fi
 
-# Locate database directory
-DBDIR=$WORKDIR/db
+# Create temporary folder
+mkdir -p $TMPDIR
 
 # Apply CheckM in case of MAGs only
 if [[ "$TYPE" = "MAGs" ]]; then
@@ -205,34 +217,34 @@ if [[ "$TYPE" = "MAGs" ]]; then
         # Run CheckM
         printf 'Running CheckM\n'
         CHECKM_START_TIME="$(date +%s.%3N)"
-        mkdir -p $WORKDIR/checkm/tmp
+        mkdir -p $TMPDIR/checkm/tmp
         # Split the set of bins in chunks with 1000 genomes at most
         println '\tOrganising genomes in chunks\n'
-        split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $WORKDIR/checkm/tmp/bins_
-        CHUNKS=`ls "$WORKDIR"/checkm/tmp/bins_*.txt 2>/dev/null | wc -l`
+        split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $TMPDIR/checkm/tmp/bins_
+        CHUNKS=`ls "$TMPDIR"/checkm/tmp/bins_*.txt 2>/dev/null | wc -l`
         CHECKMTABLES=""
-        for filepath in $WORKDIR/checkm/tmp/bins_*.txt; do
+        for filepath in $TMPDIR/checkm/tmp/bins_*.txt; do
             # Retrieve chunk id
             filename="$(basename $filepath)"
             suffix="${filename#*_}"
             suffix="${suffix%.txt}"
             println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
             # Create chunk folder
-            mkdir -p $WORKDIR/checkm/tmp/bins_${suffix}
+            mkdir -p $TMPDIR/checkm/tmp/bins_${suffix}
             for bin in `sed '/^$/d' $filepath`; do
                 # Make a symbolic link to the 1000 genomes for the current chunk
-                ln -s $bin $WORKDIR/checkm/tmp/bins_${suffix}
+                ln -s $bin $TMPDIR/checkm/tmp/bins_${suffix}
             done
             # Create the CheckM folder for the current chunk
-            mkdir -p $WORKDIR/checkm/run_$suffix/
+            mkdir -p $TMPDIR/checkm/run_$suffix/
             # Run CheckM
             checkm lineage_wf -t ${NPROC} \
-                            -x ${CHECKM_BINEXT} \
-                            --pplacer_threads ${NPROC} \
-                            --tab_table -f $WORKDIR/checkm/run_${suffix}.tsv \
-                            $WORKDIR/checkm/tmp/bins_${suffix} $WORKDIR/checkm/run_$suffix
+                              -x ${CHECKM_BINEXT} \
+                              --pplacer_threads ${NPROC} \
+                              --tab_table -f $TMPDIR/checkm/run_${suffix}.tsv \
+                              $TMPDIR/checkm/tmp/bins_${suffix} $TMPDIR/checkm/run_$suffix
             # Take trace of the CheckM output tables
-            CHECKMTABLES=$WORKDIR/checkm/run_${suffix}.tsv,$CHECKMTABLES
+            CHECKMTABLES=$TMPDIR/checkm/run_${suffix}.tsv,$CHECKMTABLES
         done
         CHECKM_END_TIME="$(date +%s.%3N)"
         CHECKM_ELAPSED="$(bc <<< "${CHECKM_END_TIME}-${CHECKM_START_TIME}")"
@@ -249,8 +261,52 @@ if [[ "$TYPE" = "MAGs" ]]; then
 fi
 
 # Use kmtricks to build a kmer matrix and compare input genomes
-# Discard genomes with the same kmers (dereplication)
-# Create a new INLIST file with the new list of genomes
+# Discard genomes with the same set of kmers (dereplication)
+HOW_MANY=$(cat ${INLIST} | wc -l)
+if ${DEREPLICATE} && [[ "${HOW_MANY}" -gt "1" ]]; then
+    GENOMES_FOF=${TMPDIR}/genomes.fof
+    # Build a fof file with the list of input genomes
+    while read -r genomepath; do
+        GENOME_NAME="$(basename $genomepath)"
+        echo "${GENOME_NAME} : $genomepath" >> ${GENOMES_FOF}
+    done <$INLIST
+
+    if [[ -f ${GENOMES_FOF} ]]; then
+        printf "\tDereplicating %s input genomes" "${HOW_MANY}"
+        # Build matrix
+        kmtricks pipeline --file ${GENOMES_FOF} \
+                          --run-dir ${TMPDIR}/matrix \
+                          --mode kmer:count:bin \
+                          --hard-min 1 \
+                          --cpr \
+                          --threads ${NPROC}
+        # Aggregate
+        kmtricks aggregate --run-dir ${TMPDIR}/matrix \
+                           --matrix kmer \
+                           --format text \
+                           --cpr-in \
+                           --sorted \
+                           --threads ${NPROC} > ${TMPDIR}/kmers_matrix.txt
+        # Add header to the kmers matrix
+        HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+        echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
+        cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
+        mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
+        # Remove duplicate columns
+        cat ${TMPDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TMPDIR}/kmers_matrix_dereplicated.txt
+        # Dereplicate genomes
+        while read -r genome; do
+            if head -n1 ${TMPDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
+                # Rebuild the absolute path to the genome file
+                realpath -s $(grep "^${genome} " ${TMPDIR}/genomes.fof | cut -d' ' -f3) >> ${TMPDIR}/genomes_dereplicated.txt
+            fi
+        done <<<"$(head -n1 ${TMPDIR}/kmers_matrix.txt | tr " " "\n")"
+        # Use the new list of dereplicated genomes
+        if [[ -f ${TMPDIR}/genomes_dereplicated.txt ]]; then
+            INLIST=${TMPDIR}/genomes_dereplicated.txt
+        fi
+    fi
+fi
 
 # In case of MAGs:
 #   For each of the input genomes
@@ -269,8 +325,21 @@ fi
 #       In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
 #       Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
 
+# Cleanup temporary data
+if ${CLEANUP}; then
+    # Remove tmp folder
+    if [[ -d $TMPDIR ]]; then
+        printf "Cleaning up temporary folder:\n"
+        printf "\t%s\n" "${TMPDIR}"
+        rm -rf ${TMPDIR}
+    fi
+fi
+
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
 printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+
+# Print credits
+credits
 
 exit 0

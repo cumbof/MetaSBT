@@ -166,10 +166,30 @@ INDEX_MAGS=false
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
 DEREPLICATE=false
+# Remove temporary data at the end of the pipeline
+CLEANUP=false
 
 # Parse input arguments
 for ARG in "$@"; do
     case "$ARG" in
+        --cleanup)
+            # Remove temporary data at the end of the pipeline
+            CLEANUP=true
+            ;;
+        --db-dir=*)
+            # Database directory
+            DBDIR="${ARG#*=}"
+            # Define helper
+            if [[ "${DBDIR}" =~ "?" ]]; then
+                printf "update helper: --db-dir=directory\n\n"
+                printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
+                exit 0
+            fi
+            # Reconstruct the full path
+            DBDIR="$( cd "$( dirname "${DBDIR}" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
+            # Trim the last slash out of the path
+            DBDIR="${DBDIR%/}"
+            ;;
         --dereplicate)
             # Dereplicate input genomes
             DEREPLICATE=true
@@ -254,24 +274,24 @@ for ARG in "$@"; do
             check_dependencies
             exit $?
             ;;
+        --tmp-dir=*)
+            # Temporary folder
+            TMPDIR="${ARG#*=}"
+            # Define helper
+            if [[ "${TMPDIR}" =~ "?" ]]; then
+                printf "update helper: --tmp-dir=directory\n\n"
+                printf "\tPath to the folder for storing temporary data.\n\n"
+                exit 0
+            fi
+            # Reconstruct the full path
+            TMPDIR="$( cd "$( dirname "${TMPDIR}" )" &> /dev/null && pwd )"/"$( basename $TMPDIR )"
+            # Trim the last slash out of the path
+            TMPDIR="${TMPDIR%/}"
+            ;;
         -v|--version)
             # Print pipeline version
             printf "index version %s (%s)\n" "$VERSION" "$DATE"
             exit 0
-            ;;
-        --work-dir=*)
-            # Working directory
-            WORKDIR="${ARG#*=}"
-            # Define helper
-            if [[ "${WORKDIR}" =~ "?" ]]; then
-                printf "index helper: --work-dir=directory\n\n"
-                printf "\tThis is the working directory that will contain genomes organised by species and their index produced by kmtricks.\n\n"
-                exit 0
-            fi
-            # Reconstruct the full path
-            WORKDIR="$( cd "$( dirname "${WORKDIR}" )" &> /dev/null && pwd )"/"$( basename $WORKDIR )"
-            # Trim the last slash out of the path
-            WORKDIR="${WORKDIR%/}"
             ;;
         --xargs-nproc=*)
             # Max number of independent runs of kmtricks
@@ -305,28 +325,30 @@ if [[ "$?" -gt "0" ]]; then
 fi
 
 # Init database directory
-DBDIR=$WORKDIR/db
+mkdir -p $DBDIR
+# Init temporary folder
+mkdir -p $TMPDIR
 
 # Download taxonomy dump from NCBI
 TAXDUMP="ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 printf "Downloading taxonomy dump from NCBI\n"
 printf "\t%s\n\n" "$TAXDUMP"
 
-wget -N $TAXDUMP -P $WORKDIR
-mkdir -p $WORKDIR/taxdump && tar zxf $WORKDIR/taxdump.tar.gz -C $WORKDIR/taxdump
+wget -N $TAXDUMP -P $TMPDIR
+mkdir -p $TMPDIR/taxdump && tar zxf $TMPDIR/taxdump.tar.gz -C $TMPDIR/taxdump
 
 # Export lineages
 printf "Exporting lineages\n"
-ncbitax2lin --nodes-file $WORKDIR/taxdump/nodes.dmp \
-            --names-file $WORKDIR/taxdump/names.dmp \
-            --output $WORKDIR/ncbi_lineages.csv.gz
+ncbitax2lin --nodes-file $TMPDIR/taxdump/nodes.dmp \
+            --names-file $TMPDIR/taxdump/names.dmp \
+            --output $TMPDIR/ncbi_lineages.csv.gz
 
 # Build a mapping between tax id and full taxonomy
 # Consider a specific kingdom only
 # Remove special characters
 # Fill empty taxa level with "unclassified"
 printf "Building tax id to full taxonomy mapping\n"
-zcat $WORKDIR/ncbi_lineages.csv.gz | \
+zcat $TMPDIR/ncbi_lineages.csv.gz | \
     awk -v kingdom="$KINGDOM" 'BEGIN { FS=","; OFS="" } 
                                      { gsub(" ", "_"); gsub(/\.|\047|\"|\(|\)|\:/, "") }
                                      {
@@ -387,7 +409,7 @@ zcat $WORKDIR/ncbi_lineages.csv.gz | \
                                                             "|g__", genus_pre, genus_suf,
                                                             "|s__", species_pre, species_suf;
                                         }
-                                     }' > $WORKDIR/taxa.tsv
+                                     }' > $TMPDIR/taxa.tsv
 
 # Download all GCAs associated to the taxa IDs in taxa.tsv
 # Use genomes that have not been excluded from RefSeq
@@ -435,7 +457,7 @@ while read tax_id, taxonomy; do
                                        --sorted \
                                        --threads ${NPROC} > ${TAXDIR}/kmers_matrix.txt
                     # Add header to the kmers matrix
-                    HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' genomes.fof)
+                    HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
                     echo "#kmer $HEADER" > ${TAXDIR}/kmers_matrix_wh.txt
                     cat ${TAXDIR}/kmers_matrix.txt >> ${TAXDIR}/kmers_matrix_wh.txt
                     mv ${TAXDIR}/kmers_matrix_wh.txt ${TAXDIR}/kmers_matrix.txt
@@ -460,7 +482,7 @@ while read tax_id, taxonomy; do
             fi
         fi
     fi
-done < $WORKDIR/taxa.tsv
+done < $TMPDIR/taxa.tsv
 
 # Run kmtricks and build a sequence bloom tree for each species
 printf "Running kmtricks at the species level\n"
@@ -490,8 +512,21 @@ for LEVEL in "${LEVELS[@]}"; do
     DEPTH=$(expr $DEPTH - 1)
 done
 
+# Cleanup temporary data
+if ${CLEANUP}; then
+    # Remove tmp folder
+    if [[ -d $TMPDIR ]]; then
+        printf "Cleaning up temporary folder:\n"
+        printf "\t%s\n" "${TMPDIR}"
+        rm -rf ${TMPDIR}
+    fi
+fi
+
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
 printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+
+# Print credits
+credits
 
 exit 0
