@@ -136,7 +136,7 @@ SYNOPSIS
            [--checkm-completeness=num] [--checkm-contamination=num]
            [--db-dir=directory] [--tmp-dir=directory] [--dereplicate] 
            [--type=value] [--extension=value] [--taxa=file]
-           [--cleanup] [--nproc=num] ...
+           [--kingdom=value] [--cleanup] [--nproc=num] ...
 
 DESCRIPTION
     The \"update\" module is used to add new genomes to the database.
@@ -171,6 +171,9 @@ DESCRIPTION
     --input-list=file
         This file contains the list of paths to the new genomes that will be added to the database
     
+    --kingdom=value
+        Select the kingdom that will be updated
+
     --kmer-len=num
         This is the length of the kmers used for building bloom filters
         
@@ -197,9 +200,9 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ meta-index update --input-list=~/mygenomes.txt --db-dir=~/myindex --tmp-dir=~/tmp 
-                            --kmer-len=31 --filter-size=10000 --dereplicate --type=references
-                            --extension=fna.gz --nproc=8 --cleanup
+        $ meta-index update --input-list=~/mygenomes.txt --db-dir=~/myindex --kingdom=Bacteria 
+                            --tmp-dir=~/tmp --kmer-len=31 --filter-size=10000 --dereplicate 
+                            --type=references --extension=fna.gz --nproc=8 --cleanup
 "
 fi
 
