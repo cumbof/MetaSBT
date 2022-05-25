@@ -59,7 +59,7 @@ $ meta-index profile --input=~/mygenome.fna \
                      --expand
 ```
 
-## Improving kraken database quality
+## Unlocking unknown species profiling with `kraken`
 
 TBA
 
