@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 24, 2022"
+DATE="May 25, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -14,7 +14,7 @@ check_dependencies () {
         printf "Checking for software dependencies\n"
     fi
     # Define the set of dependencies
-    DEPENDENCIES=("bc" "checkm" "howdesbt" "kmtricks" "ncbitax2lin" "wget")
+    DEPENDENCIES=("bc" "checkm" "gzip" "howdesbt" "kmtricks" "ncbitax2lin" "wget")
 
     # Count how many missing dependencies
     MISSING=0
