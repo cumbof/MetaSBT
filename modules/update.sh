@@ -301,26 +301,52 @@ if ${DEREPLICATE}; then
         fi
     else
         # No input genomes survived from the quality control step
-        printf "\tNo input genomes available!"
+        printf "\tNo input genomes available!\n"
         exit 0
     fi
 fi
 
-if [[ "$TYPE" = "MAGs" ]]; then
-    # For each of the input genomes
-    # Make a query to establish the closest group for each taxonomic level in the tree
-    # If it is close enough to a group in a taxonomic level, remember that this genome must be assigned to the same group
-    # Otherwise, mark the genome as unassigned
-    #
-    # Assigned all the genomes to the closest groups and rebuild the SBTs
-    # Define new groups by looking at the kmer matrix of kmtricks for the unassigned genomes
-elif [[ "$TYPE" = "references" ]]; then
-    # If the taxonomic label of the input genome already exists in the database
-    #   Add the new genome to the assigned taxonomic branch and rebuild the SBTs
-    # Otherwise,
-    #   Compare the genome with genomes in newly defined clusters at the level of the known lineage
-    #   In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
-    #   Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
+# Count how many input genomes survived in case they have been quality controlled
+HOW_MANY=$(cat ${INLIST} | wc -l)
+if [[ "${HOW_MANY}" -gt "1" ]]; then
+    # Process input genomes
+    while read GENOMEPATH; then
+        # Decompress input genome in case it is GZip compressed
+        # TODO
+        GENOMENAME="$(basename $GENOMEPATH)"
+        if [[ "$TYPE" = "MAGs" ]]; then
+            # Run the profiler to establish the closest group for each taxonomic level in the tree
+            . ${SCRIPT_DIR}/profile.sh --input=$GENOMEPATH \
+                                       --tree=$DBDIR/......./index/index.detbrief.sbt
+                                       --expand \
+                                       --output-dir=$TMPDIR/profiling/ \
+                                       --output-prefix=$GENOMENAME \
+                                       > /dev/null 2>&1 # Silence the profiler
+            # Define output file path with profiles
+            PROFILE=${TMPDIR}/profiling/${GENOMENAME}__profiles.txt
+            if [[ -f $PROFILE ]]; then
+                # If it is close enough to a group in a taxonomic level, remember that this genome must be assigned to the same group
+                # Otherwise, mark the genome as unassigned
+                #
+                # Assigned all the genomes to the closest groups and rebuild the SBTs
+                # Define new groups by looking at the kmer matrix of kmtricks for the unassigned genomes
+                #
+                # Discard the genome if the score is 1.0 compared to the closest match at the species level
+            fi
+        elif [[ "$TYPE" = "references" ]]; then
+            # If the taxonomic label of the input genome already exists in the database
+            #   Add the new genome to the assigned taxonomic branch and rebuild the SBTs
+            # Otherwise,
+            #   Compare the genome with genomes in newly defined clusters at the level of the known lineage
+            #   In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
+            #   Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
+            #
+            # Discard the genome if the score is 1.0 compared to the closest match at the species level
+        fi
+    done <$INLIST
+else
+    printf "\tNo input genomes available!\n"
+    exit 0
 fi
 
 # Cleanup temporary data
