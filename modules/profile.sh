@@ -128,8 +128,8 @@ while [[ -f ${TREE} ]]; do
     howdesbt query --tree=${TREE} \
                    --threshold=${THRESHOLD} \
                    --adjust \
-                   --sort ${INPUT} \
-                   > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
+                   --sort \
+                   ${INPUT} > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
     # Get best match
     BEST=$(grep -E "^[[:alnum:]]" ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
     MATCH=$(echo "$BEST" | cut -d' ' -f1)
@@ -158,6 +158,11 @@ while [[ -f ${TREE} ]]; do
     fi
 done
 
+# Define the output file with a mapping between the input genome name and the taxonomic characterisation
+if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt ]]; then
+    printf "# Input\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+fi
+
 # Reconstruct the lineage
 if [ ${#LINEAGE[@]} -gt 0 ]; then
     # Print closest lineage
@@ -170,6 +175,21 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
     printf "Score:\n"
     for i in "${!LINEAGE[@]}"; do
         printf "\t%s\t%s\n" "${LINEAGE[i]}" "${SCORES[i]}"
+        # Retrieve taxonomic level
+        LEVELID=${LINEAGE[i]:0:1}
+        # Expand the level ID to the full level name
+        case "$LEVELID" in
+            "k") LEVELNAME="kingdom" ;;
+            "p") LEVELNAME="phylum" ;;
+            "c") LEVELNAME="class" ;;
+            "o") LEVELNAME="order" ;;
+            "f") LEVELNAME="family" ;;
+            "g") LEVELNAME="genus" ;;
+            "s") LEVELNAME="species" ;;
+            *) LEVELNAME="NA" ;;
+        esac
+        # Report characterisation to the output file
+        printf "%s\t%s\t%s\t%s\n" "$INPUT" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
     done
     printf "\n"
 fi
