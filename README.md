@@ -35,6 +35,7 @@ The `update` module can be launched with the following command:
 ```bash
 $ meta-index update --input-list=~/mygenomes.txt \
                     --db-dir=~/myindex \
+                    --kingdom=Bacteria \
                     --tmp-dir=~/tmp \
                     --kmer-len=31 \
                     --filter-size=10000 \
