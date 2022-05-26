@@ -22,7 +22,18 @@ $ meta-index index --db-dir=~/myindex \
 
 ## Defining boundaries
 
-TBA
+The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `kmtricks` to build a kmer table for each of the taxonomic levels in the database with information about the presence/absence of a kmer in genomes that belong to a particular lineage. It finally build a new table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. The average value between all the minimum and maximum common kmers is then used to establish whether a new MAG must be assigned to a new cluster with the `update` module.
+
+The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
+```bash
+$ meta-index boundaries --db-dir=~/myindex \
+                        --kingdom=Bacteria \
+                        --min-genomes=100 \
+                        --output=~/boundaries.txt \
+                        --tmp-dir=~/tmp \
+                        --nproc=4 \
+                        --cleanup
+```
 
 ## Updating the database
 
