@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 25, 2022"
+DATE="May 26, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -13,6 +13,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Import utility functions
 source ${SCRIPT_DIR}/utils.sh
 
+# Define default value for --nproc
+NPROC=1
 # Initialize CheckM completeness and contamination to default values
 # Run CheckM if provided completeness is >0 or contamination is <100
 CHECKM_COMPLETENESS=0
