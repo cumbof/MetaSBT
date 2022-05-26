@@ -260,6 +260,7 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ meta-index profile --input=~/mag.fna --tree=~/mytree.txt --expand --output=~/matches.txt
+        $ meta-index profile --input=~/mymag.fna --tree=~/myindex/k__Bacteria/index.detbrief.sbt 
+                             --threshold=0.7 --expand --output-dir=~/profiles --output-prefix=mymag
 "
 fi
