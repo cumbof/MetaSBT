@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="May 24, 2022"
+DATE="May 25, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -111,6 +111,10 @@ PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
+    printf "Unsatisfied software dependencies!\n\n"
+    printf "Please run the following command for a list of required external software dependencies:\n\n"
+    printf "\t$ meta-index --resolve-dependencies\n\n"
+    
     exit 1
 fi
 
