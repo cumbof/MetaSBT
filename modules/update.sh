@@ -371,7 +371,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
 
         printf "\nProfiling %s\n" "$GENOMENAME"
         # Run the profiler to establish the closest genome and the closest group for each taxonomic level in the tree
-        . ${SCRIPT_DIR}/profile.sh --input=$FILEPATH \
+        . ${SCRIPT_DIR}/profile.sh --input-file=$FILEPATH \
                                    --tree=${DBDIR}/k__${KINGDOM}/index/index.detbrief.sbt
                                    --expand \
                                    --output-dir=$TMPDIR/profiling/ \
