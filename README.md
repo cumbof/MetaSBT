@@ -16,6 +16,7 @@ $ meta-index index --db-dir=~/myindex \
                    --checkm-contamination=5.0 \
                    --nproc=4 \
                    --xargs-nproc=2 \
+                   --tmp-dir=~/tmp \
                    --cleanup
 ```
 
@@ -34,6 +35,7 @@ In case of new reference genomes from isolate sequencing, the `update` module si
 The `update` module can be launched with the following command:
 ```bash
 $ meta-index update --input-list=~/mygenomes.txt \
+                    --taxa=~/taxonomies.tsv \
                     --db-dir=~/myindex \
                     --kingdom=Bacteria \
                     --tmp-dir=~/tmp \
