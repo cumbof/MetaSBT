@@ -78,7 +78,8 @@ VERSION
     "$VERSION" ("$DATE")
 
 SYNOPSIS
-    boundaries [--db-dir=directory] [--output=file] ...
+    boundaries [--db-dir=directory] [--kingdom=value] [--min-genomes=num] 
+               [--output=file] [--tmp-dir=directory] [--nproc=num] [--cleanup] ...
 
 DESCRIPTION
     The \"boundaries\" module makes use of kmtricks to build a kmer matrix for each taxonomic level
@@ -95,6 +96,13 @@ DESCRIPTION
     -h|--help
         Print this help and exit
 
+    --kingdom=value
+        Select a kingdom
+    
+    --min-genomes=num
+        Consider clusters with at least this number of genomes
+        Default: --min-genomes=100
+
     --nproc=num
         This argument refers to the number of processors used for parallelizing the pipeline when possible
         Default: --nproc=1
@@ -104,10 +112,6 @@ DESCRIPTION
     
     --tmp-dir=directory
         Path to the folder for storing temporary data
-
-    --xargs-nproc=num
-        This refers to the number of xargs processes used for launching independent runs of kmtricks
-        Default: --xargs-nproc=1
     
 EXIT STATUS
     This script exits with one of the following values:
@@ -118,8 +122,8 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ meta-index boundaries --db-dir=~/myindex --output=~/boundaries.txt 
-                                --tmp-dir=~/tmp --nproc=4 --xargs-nproc=2 --cleanup
+        $ meta-index boundaries --db-dir=~/myindex --kingdom=Bacteria --min-genomes=100
+                                --output=~/boundaries.txt --tmp-dir=~/tmp --nproc=4 --cleanup
 "
 fi
 
