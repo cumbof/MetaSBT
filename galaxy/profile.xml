@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<tool name="meta-index profile" id="meta-index_profile" version="0.1.0">
+    <description>Accurately characterizing genomes from isolate sequencing and metagenome-assembled genomes with sequence bloom trees</description>
+
+    <!-- Tool developer -->
+    <creator>
+        <person givenName="Fabio" familyName="Cumbo" 
+                url="https://fabio-cumbo.github.io/" 
+                email="fabio.cumbo@gmail.com" />
+    </creator>
+
+    <!-- Define dependencies -->
+    <requirements>
+        <requirement type="package" version="0.1.0">meta-index</requirement>
+    </requirements>
+
+    <command detect_errors="exit_code">
+<![CDATA[
+    #for $genome in $genomes:
+        meta-index profile 
+            --input-file="$genome"
+            --input-id="$genome.name"
+            --tree=.../k__${kingdom}/index/index.detbrief.sbt
+            --threshold=$threshold
+            --expand
+            --output-dir=./
+            --output-prefix=genome
+    #end for
+]]>
+    </command>
+
+    <inputs>
+        <!-- Input genomes -->
+        <param name="genomes" format="fa,fasta,fna,fa.gz,fasta.gz,fna.gz" multiple="true" type="data" 
+               label="Input genomes"
+               help="Select a set of input genomes that will be profiled at different taxonomic levels" />
+        
+        <!-- Kingdom -->
+        <param name="kingdom" type="select" 
+               label="Select a kingdom" 
+               help="Selelcting a specific kingdom will result in querying different branches of the database">
+            <option value="Bacteria">Bacteria</option>
+            <option value="Archaea">Archaea</option>
+            <option value="Fungi">Fungi</option>
+            <option value="Viruses">Viruses</option>
+        </param>
+
+        <!-- Query threshold -->
+        <param name="threshold" type="float" size="1" value="0.7" min="0.0" max="1.0" 
+               label="Search threshold" 
+               help="Fraction of kmers of the input genomes that must be present in a leaf of the sequence bloom trees in the database to be considered a match" />
+    </inputs>
+
+    <outputs>
+        <data format="tsv" name="profiles" label="${tool.name} on ${on_string}" from_work_dir="genome__profiles.tsv" />
+    </outputs>
+
+    <help><![CDATA[
+This tool aims at accurately characterising genomes from isolate sequencing and metagenome-assembled genomes a curated database 
+of microbial species indexed with sequence bloom trees.
+
+Given a set of input genomes, it returns a table with the closest lineage at different taxonomic levels, in addition to the
+closest genome in the database and its accuracy score.
+
+-----
+
+.. class:: infomark
+
+**Notes**
+
+Please visit the official GitHub repository_ for other information about `meta-index`.
+
+.. _repository: https://github.com/BlankenbergLab/meta-index
+    ]]></help>
+</tool>
