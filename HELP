@@ -234,8 +234,11 @@ DESCRIPTION
     -h|--help
         Print this help and exit
 
-    --input=file
-        This is the input file with the set of queries
+    --input-file=file
+        Path to the input genome
+    
+    --input-id=value
+        Unique identifier of the input genome
         
     --output-dir=directory
         This is the output folder with queries results
@@ -260,7 +263,7 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ meta-index profile --input=~/mymag.fna --tree=~/myindex/k__Bacteria/index.detbrief.sbt 
+        $ meta-index profile --input-file=~/mymag.fna --input-id=mymag --tree=~/myindex/k__Bacteria/index.detbrief.sbt 
                              --threshold=0.7 --expand --output-dir=~/profiles --output-prefix=mymag
 "
 fi
