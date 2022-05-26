@@ -65,12 +65,12 @@ $ meta-index update --input-list=~/mygenomes.txt \
 
 The `profile` module allows to characterize an input genome according to the taxonomic label of the closest genome in the database. It allows to process only one genome in input at a time:
 ```bash
-$ meta-index profile --input=~/mygenome.fna \
-                     --tree=~/myindex/tree.txt \
+$ meta-index profile --input=~/mymag.fna \
+                     --tree=~/myindex/k__Bacteria/index.detbrief.sbt \
                      --threshold=0.7 \
-                     --output-dir=~/myqueries \
-                     --output-prefix=query \
-                     --expand
+                     --expand \
+                     --output-dir=~/profiles \
+                     --output-prefix=mymag
 ```
 
 ## Unlocking unknown species profiling with `kraken`
