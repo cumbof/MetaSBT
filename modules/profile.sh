@@ -174,8 +174,8 @@ while [[ -f ${TREE} ]]; do
 done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
-if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt ]]; then
-    printf "# Input ID\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv ]]; then
+    printf "# Input ID\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 # Reconstruct the lineage
@@ -204,7 +204,7 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
             *) LEVELNAME="NA" ;;
         esac
         # Report characterisation to the output file
-        printf "%s\t%s\t%s\t%s\n" "$INPUTID" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+        printf "%s\t%s\t%s\t%s\n" "$INPUTID" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
     done
 fi
 
@@ -214,7 +214,7 @@ if [ ! -z "${CLOSEST_GENOME}" ]; then
     printf "\nClosest genome:\n"
     printf "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
     # Report the closest genome to the output file
-    printf "%s\t%s\t%s\t%s\n" "$INPUTID" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+    printf "%s\t%s\t%s\t%s\n" "$INPUTID" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
