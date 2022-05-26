@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 25, 2022"
+DATE="May 26, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -32,13 +32,23 @@ for ARG in "$@"; do
             source ${SCRIPT_DIR}/../HELP
             exit 0
             ;;
-        --input=*)
+        --input-file=*)
             # Input file path with queries
-            INPUT="${ARG#*=}"
+            INPUTFILE="${ARG#*=}"
             # Define helper
-            if [[ "${INPUT}" =~ "?" ]]; then
-                printf "profile helper: --input=file\n\n"
-                printf "\tThis is the input file with the set of queries.\n\n"
+            if [[ "${INPUTFILE}" =~ "?" ]]; then
+                printf "profile helper: --input-file=file\n\n"
+                printf "\tPath to the input genome.\n\n"
+                exit 0
+            fi
+            ;;
+        --input-id=*)
+            # Input id
+            INPUTID="${ARG#*=}"
+            # Define helper
+            if [[ "${INPUTID}" =~ "?" ]]; then
+                printf "profile helper: --input-id=value\n\n"
+                printf "\tUnique identifier of the input genome.\n\n"
                 exit 0
             fi
             ;;
@@ -104,7 +114,8 @@ if [[ "$?" -gt "0" ]]; then
 fi
 
 printf "Input:\n"
-printf "\t%s\n\n" "${INPUT}"
+printf "\tFile path: %s\n" "${INPUTFILE}"
+printf "\tInput ID: %s\n\n" "${INPUTID}"
 
 # Create the output directory if it does not exist
 if [[ ! -d ${OUTPUTDIR} ]]; then
@@ -133,7 +144,7 @@ while [[ -f ${TREE} ]]; do
                    --threshold=${THRESHOLD} \
                    --adjust \
                    --sort \
-                   ${INPUT} > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
+                   ${INPUTFILE} > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
     # Get best match
     BEST=$(grep -E "^[[:alnum:]]" ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
     MATCH=$(echo "$BEST" | cut -d' ' -f1)
@@ -164,7 +175,7 @@ done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
 if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt ]]; then
-    printf "# Input\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+    printf "# Input ID\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
 fi
 
 # Reconstruct the lineage
@@ -193,7 +204,7 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
             *) LEVELNAME="NA" ;;
         esac
         # Report characterisation to the output file
-        printf "%s\t%s\t%s\t%s\n" "$INPUT" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+        printf "%s\t%s\t%s\t%s\n" "$INPUTID" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
     done
 fi
 
@@ -203,7 +214,7 @@ if [ ! -z "${CLOSEST_GENOME}" ]; then
     printf "\nClosest genome:\n"
     printf "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
     # Report the closest genome to the output file
-    printf "%s\t%s\t%s\t%s\n" "$INPUT" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
+    printf "%s\t%s\t%s\t%s\n" "$INPUTID" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
