@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="May 25, 2022"
+DATE="May 26, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -157,6 +157,10 @@ export -f kmtricks_wrapper
 # Define default value for --nproc and --xargs-nproc
 NPROC=1
 XARGS_NPROC=1
+# Initialize CheckM completeness and contamination to default values
+# Run CheckM if provided completeness is >0 or contamination is <100
+CHECKM_COMPLETENESS=0
+CHECKM_CONTAMINATION=100
 # Dereplicate input genomes
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
@@ -555,17 +559,9 @@ done
 # Run howdesbt to build a sequence bloom tree for each of the lower taxonomic levels
 printf "\nRunning howdesbt on lower taxonomic levels\n"
 # Process lower taxonomic levels
-LEVELS=(
-    "g__" # Genus
-    "f__" # Family
-    "o__" # Order
-    "c__" # Class
-    "p__" # Phylum
-    "k__" # Kingdom
-)
 # Start with genera at depth 6
 DEPTH=6
-for LEVEL in "${LEVELS[@]}"; do
+for LEVEL in "g__" "f__" "o__" "c__" "p__" "k__"; do
     find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow -exec howdesbt_wrapper {} ${FILTER_SIZE} \;
     DEPTH=$(expr $DEPTH - 1)
 done
