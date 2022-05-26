@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 24, 2022"
+DATE="May 25, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -96,6 +96,10 @@ PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
+    printf "Unsatisfied software dependencies!\n\n"
+    printf "Please run the following command for a list of required external software dependencies:\n\n"
+    printf "\t$ meta-index --resolve-dependencies\n\n"
+
     exit 1
 fi
 
@@ -166,7 +170,7 @@ fi
 # Reconstruct the lineage
 if [ ${#LINEAGE[@]} -gt 0 ]; then
     # Print closest lineage
-    printf "Closest lineage:\n"
+    printf "\nClosest lineage:\n"
     CLOSEST_LINEAGE=$(printf "|%s" "${LINEAGE[@]}")
     CLOSEST_LINEAGE=${CLOSEST_LINEAGE:1}
     printf "\t%s\n\n" "${CLOSEST_LINEAGE}"
@@ -191,14 +195,15 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
         # Report characterisation to the output file
         printf "%s\t%s\t%s\t%s\n" "$INPUT" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
     done
-    printf "\n"
 fi
 
 # Show the closest genome in case the input is a species tree or the query is expanded
 if [ ! -z "${CLOSEST_GENOME}" ]; then
     # Print the closest genome and its score
-    printf "Closest genome:\n"
+    printf "\nClosest genome:\n"
     printf "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
+    # Report the closest genome to the output file
+    printf "%s\t%s\t%s\t%s\n" "$INPUT" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.txt
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
