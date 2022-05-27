@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 26, 2022"
+DATE="May 27, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -97,7 +97,7 @@ for ARG in "$@"; do
                 printf "\tAll the input genomes must have the same file extension before running this module.\n\n"
                 exit 0
             fi
-            # Allowed extensions: "fa", "fasta", "fna" and GZip compressed formats
+            # Allowed extensions: "fa", "fasta", "fna" and gzip compressed formats
             EXTENSION_LIST=("fa" "fa.gz" "fasta" "fasta.gz" "fna" "fna.gz")
             if ! echo ${EXTENSION_LIST[@]} | grep -w -q $EXTENSION; then
                 printf "File extension \"%s\" is not allowed!\n" "$TYPE"
@@ -294,20 +294,11 @@ if ${DEREPLICATE}; then
 
         if [[ -f ${GENOMES_FOF} ]]; then
             printf "\nDereplicating %s input genomes\n" "${HOW_MANY}"
-            # Build matrix
-            kmtricks pipeline --file ${GENOMES_FOF} \
-                              --run-dir ${TMPDIR}/matrix \
-                              --mode kmer:count:bin \
-                              --hard-min 1 \
-                              --cpr \
-                              --threads ${NPROC}
-            # Aggregate
-            kmtricks aggregate --run-dir ${TMPDIR}/matrix \
-                               --matrix kmer \
-                               --format text \
-                               --cpr-in \
-                               --sorted \
-                               --threads ${NPROC} > ${TMPDIR}/kmers_matrix.txt
+            # Run kmtricks to build the kmers matrix
+            kmtricks_matrix_wrapper ${GENOMES_FOF} \
+                                    ${TMPDIR}/matrix \
+                                    ${NPROC} \
+                                    ${TMPDIR}/kmers_matrix.txt
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
@@ -351,17 +342,20 @@ fi
 # Count how many input genomes survived in case they have been quality controlled and dereplicated
 HOW_MANY=$(cat ${INLIST} | wc -l)
 if [[ "${HOW_MANY}" -gt "1" ]]; then
-    # Create a temporary folder in case input genomes are GZip compressed
+    # Create a temporary folder in case input genomes are gzip compressed
     mkdir -p $TMPDIR/genomes
 
-    # Init the list of taxonomies that must be rebuilt
+    # Keep track of the lineages that must be rebuilt
     REBUILD=()
+    # Keep track of the unassigned genomes
+    # They will be assigned to new group
+    UNASSIGNED=()
     # Process input genomes
     while read GENOMEPATH; then
         GENOMEEXT="${GENOMEPATH##*.}"
         GENOMENAME="$(basename ${GENOMEPATH%.*})"
         FILEPATH=$GENOMEPATH
-        # Decompress input genome in case it is GZip compressed
+        # Decompress input genome in case it is gzip compressed
         if [[ "$GENOMEPATH" = *.gz ]]; then
             GENOMEEXT="${GENOMENAME##*.}"
             GENOMENAME="${GENOMENAME%.*}"
@@ -392,6 +386,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             # Reconstruct the closest taxa
             LEVELS=("kingdom" "phylum" "class" "order" "family" "genus" "species")
             CLOSEST_TAXA=""
+            CLOSEST_SCORE=""
             printf "\tClosest lineage:\n"
             for level in ${LEVELS[@]}; do
                 CLOSEST_LEVEL="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "$level" | cut -d$'\t' -f3)"
@@ -399,6 +394,10 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 CLOSEST_TAXA=${CLOSEST_TAXA}"|"${CLOSEST_LEVEL}
                 # Print profiler result
                 printf "\t\t%s: %s (score: %s)\n" "${level}" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_SCORE}"
+                # Keep track of the species score
+                if [[ "${CLOSEST_LEVEL}" = s__* ]]; then
+                    CLOSEST_SCORE=${CLOSEST_LEVEL_SCORE}
+                fi
             done
             # Trim the first pipe out of the closest taxonomic label
             CLOSEST_TAXA=${CLOSEST_TAXA:1}
@@ -437,14 +436,34 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             fi
 
             if ! ${SKIP_GENOME}; then
-                # Process MAGs or references
-                if [[ "$TYPE" = "MAGs" ]]; then                
-                    # If it is close enough to a group in a taxonomic level, remember that this genome must be assigned to the same group
-                    # Otherwise, mark the genome as unassigned
-                    #
-                    # Assigned all the genomes to the closest groups and rebuild the SBTs
-                    # Define new groups by looking at the kmer matrix of kmtricks for the unassigned genomes
+                # Process MAGs or reference genomes
+                if [[ "$TYPE" = "MAGs" ]]; then
+                    # Check whether the closest score is enough with respect to the boundaries of the closest lineage
                     # TODO
+
+                    if [[ "${CLOSEST_SCORE}" -ge "" ]]; then # TODO
+                        # Assign the current genome to the closest lineage
+                        TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                        cp $FILEPATH $TARGETGENOME
+                        if [[ ! "$GENOMEEXT" = "gz" ]]; then
+                            # Compress input genome
+                            gzip ${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                            TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}.gz
+                        fi
+                        # Add the current genome to the list of genomes in current taxonomy
+                        echo "$GENOMENAME : $TARGETGENOME" >> ${CLOSEST_TAXADIR}/genomes.fof
+                        echo "$TARGETGENOME" >> ${CLOSEST_TAXADIR}/mags.txt
+                        # Do not remove the index here because there could be other input genomes with the same taxonomic label
+                        REBUILD+=(${CLOSEST_TAXA})
+                        # Print assignment message
+                        printf "\tAssignment:\n"
+                        printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
+                    else
+                        # Mark the genome as unassigned
+                        UNASSIGNED+=($GENOMEPATH)
+                        # Print unassignment message
+                        printf "\tUnassigned\n\n"
+                    fi
                 elif [[ "$TYPE" = "references" ]]; then
                     # Retrieve the taxonomic label from --taxa input file
                     TAXALABEL="$(grep -w "$GENOMENAME" $TAXA | cut -d$'\t' -f2)"
@@ -460,43 +479,139 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # add the new genome to the assigned taxonomic branch and rebuild the SBTs
                         cp $FILEPATH $TARGETGENOME
                         if [[ ! "$GENOMEEXT" = "gz" ]]; then
+                            # Compress input genome
                             gzip ${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}
                             TARGETGENOME=${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}.gz
                         fi
                         # Add the current genome to the list of genomes in current taxonomy
+                        echo "$GENOMENAME : $TARGETGENOME" >> $TAXDIR/genomes.fof
                         echo "$TARGETGENOME" >> $TAXDIR/genomes.txt
                         # Do not remove the index here because there could be other input genomes with the same taxonomic label
                         REBUILD+=($TAXALABEL)
                     else
-                        # Otherwise,
-                        #   Compare the genome with genomes in newly defined clusters at the level of the known lineage
-                        #   In case there is nothing close to the genome, create a new branch with the new taxonomy for that genome
-                        #   Otherwise, merge the unknown clusters with the new genomes and assign the new taxonomy
+                        # In case the current taxonomic label does not exist in database
+                        # Check whether the closest score is enough with respect to the boundaries of the closest lineage
                         # TODO
+
+                        if [[ "${CLOSEST_SCORE}" -ge "" ]]; then # TODO
+                            # Check whether the closest taxonomy contains any reference genomes
+                            HOW_MANY_REFERENCES=$(cat ${CLOSEST_TAXADIR}/genomes.txt | wc -l)
+                            if [[ "${HOW_MANY_REFERENCES}" -eq "0" ]]; then
+                                # If the closest genome belongs to a new cluster with no reference genomes
+                                # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
+                                # TODO
+                            elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
+                                # If the closest genome belong to a cluster with at least a reference genome
+                                # If thetaxonomic labels of the current reference genome and that one of the closest genome do not match
+                                # Report the inconsistency and assign the current reference genome to the closest cluster
+                                # TODO
+                            fi
+                        else
+                            # If nothing is close enough to the current genome and its taxonomic label does not exist in the database
+                            # Create a new branch with the new taxonomy for the current genome
+                            mkdir -p $TAXDIR/genomes
+                            cp $FILEPATH $TARGETGENOME
+                            if [[ ! "$GENOMEEXT" = "gz" ]]; then
+                                # Compress input genome
+                                gzip ${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                                TARGETGENOME=${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}.gz
+                            fi
+                            # Add the current genome to the list of genomes in current taxonomy
+                            echo "$GENOMENAME : $TARGETGENOME" >> $TAXDIR/genomes.fof
+                            echo "$TARGETGENOME" >> $TAXDIR/genomes.txt
+                            # Do not remove the index here because there could be other input genomes with the same taxonomic label
+                            REBUILD+=($TAXALABEL)
+                        fi
                     fi
                 fi
             fi
         fi
 
         # Remove the uncompressed genome in temporary folder
-        if [[ "$GENOMEPATH" = *.gz ]]; then 
+        if [[ -f $TMPDIR/genomes/${GENOMENAME}.fna ]]; then 
             rm $TMPDIR/genomes/${GENOMENAME}.fna
         fi
     done <$INLIST
 
-    # Extract taxonomic levels from the list of taxa that must be rebuilt
-    # Process all the species first, then all the genera, and so on up to the kingdom
-    for POS in $(seq 7 1); do 
-        TAXALIST=()
-        for LABEL in ${REBUILD[@]}; do
-            LEVELS=($(echo $LABEL | tr "|" " "))
-            TAXALIST+=($LEVELS[$POS])
-        done
-        # Remove duplicate entries
-        TAXALIST=$(printf "%s\0" "${TAXALIST[@]}" | sort -uz | xargs -0 printf "%s ")
-        # Rebuild the sequence bloom trees
+    # Cluster unassigned genomes before rebuilding the updated lineages
+    if [[ "${#UNASSIGNED[@]}" -gt "0" ]]; then
+        # The kmers matrix already exists in case the dereplication step has been enabled
+        if [[ ! -f ${TMPDIR}/kmers_matrix.txt ]]; then
+            GENOMES_FOF=${TMPDIR}/genomes.fof
+            # Unassigned genomes are MAGs only
+            for MAGPATH in ${UNASSIGNED[@]}; do
+                # Define a genomes.fof file with the unassigned genomes
+                GENOME_NAME="$(basename $MAGPATH)"
+                echo "${GENOME_NAME} : $MAGPATH" >> ${GENOMES_FOF}
+            done
+
+            # Run kmtricks to build the kmers matrix
+            kmtricks_matrix_wrapper ${GENOMES_FOF} \
+                                    ${TMPDIR}/matrix \
+                                    ${NPROC} \
+                                    ${TMPDIR}/kmers_matrix.txt
+            
+            # Add header to the kmers matrix
+            HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+            echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
+            cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
+            mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
+        fi
+
+        # Cluster genomes according to the custom boundaries
+        # Define a cluster for each taxomomic level
+        # Look at the genomes profiles and update or build new clusters 
+        # Add full taxonomy to the REBUILD list
+        # Update the genomes.fof and the mags.txt tables
         # TODO
-    done
+    fi
+
+    # Check whether there is at least one lineage that must be rebuilt
+    if [[ "${#REBUILD[@]}" -gt "0" ]]; then
+        # Extract taxonomic levels from the list of taxa that must be rebuilt
+        # Process all the species first, then all the genera, and so on up to the kingdom
+        printf "Updating the database\n"
+        for POS in $(seq 7 1); do 
+            TAXALIST=()
+            for LABEL in ${REBUILD[@]}; do
+                LEVELS=($(echo $LABEL | tr "|" " "))
+                SUBLEVELS=("${LEVELS[@]:0:$POS}")
+                TAXONOMY=$(printf "|%s" "${SUBLEVELS[@]}")
+                TAXALIST+=(${TAXONOMY:1})
+            done
+            # Remove duplicate entries
+            TAXALIST=$(printf "%s\0" "${TAXALIST[@]}" | sort -uz | xargs -0 printf "%s ")
+            # Rebuild the sequence bloom trees
+            for TAXONOMY in ${TAXALIST[@]}; do
+                printf "\t%s\n" "$TAXONOMY"
+                if [[ -d $TAXONOMY/index ]]; then
+                    # Remove the index
+                    rm -rf $TAXONOMY/index
+                    # Remove the copy of the root node
+                    LEVELNAME="${TAXONOMY##*\|}"
+                    rm ${TAXONOMY}/${LEVELNAME}.bf
+                    if [[ "$POS" -eq "7" ]]; then
+                        # In case of species
+                        # Rebuild the index with kmtricks
+                        kmtricks_index_wrapper ${TAXONOMY}/genomes.fof \
+                                         $DBDIR \
+                                         ${KMER_LEN} \
+                                         ${FILTER_SIZE} \
+                                         $NPROC
+                    else
+                        # In case of all the other taxonomic levels
+                        # Rebuild the index with howdesbt
+                        howdesbt_wrapper $TAXONOMY ${FILTER_SIZE}
+                    fi
+                else
+                    printf "\t\t[ERROR] No index found!\n"
+                fi
+            done
+        done
+    else
+        # In case nothing must be rebuilt
+        printf "No lineages have been updated!\n"
+    fi
 else
     # No input genomes survived from the quality control step and dereplication
     printf "No input genomes available!\n"
