@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="May 26, 2022"
+DATE="May 27, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -12,147 +12,6 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Import utility functions
 source ${SCRIPT_DIR}/utils.sh
-
-# Download genomes from NCBI GenBank
-esearch_txid () {
-    DB_DIR=$1
-    TAX_ID=$2
-    FULL_TAXONOMY=$3
-    GENOME_CATEGORY=$4
-    SEARCH_CRITERIA=$5
-    # Download GCAs associated to a specific tax_id
-    esearch -db assembly -query "txid${TAX_ID} ${SEARCH_CRITERIA}" < /dev/null \
-        | esummary \
-        | xtract -pattern DocumentSummary -element FtpPath_GenBank \
-        | while read -r URL; do
-            # Create a directory for the current taxonomy
-            TAXDIR=${DB_DIR}/$(echo "${FULL_TAXONOMY}" | sed 's/|/\//g')
-            OUTDIR=$TAXDIR/genomes
-            mkdir -p $OUTDIR
-            # Download GCA
-            FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
-            GCA=${FNAME%%.*}
-            if [[ ! -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                wget -q "$URL/$FNAME" -O ${OUTDIR}/${GCA}.fna.gz
-                if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                    if gzip -t ${OUTDIR}/${GCA}.fna.gz; then
-                        # Define a file of file (fof) with the list of genomes for current species
-                        GCAPATH=$(readlink -m ${OUTDIR}/${GCA}.fna.gz)
-                        printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
-                        printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
-                        printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
-                    else
-                        # Delete corrupted genome
-                        rm ${OUTDIR}/${GCA}.fna.gz
-                        printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
-                    fi
-                else
-                    # Report missing genomes
-                    printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
-                fi
-            fi
-          done
-}
-
-# Wrapper for the howdesbt pipeline
-# This is applied on all the taxonomic level except the species
-howdesbt_wrapper () {
-    LEVEL_DIR=$1    # Taxonomic level folder
-    FILTER_SIZE=$2  # Bloom filter size
-    LEVEL_NAME=$(basename ${LEVEL_DIR})
-    for DIRECTORY in ${LEVEL_DIR}/*/; do
-        UPPER_LEVEL=$(basename $DIRECTORY)
-        # Define a list of bloom filters
-        # Each file is the result of the OR operator on all representative bloom filters in the upper taxonomic level
-        echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
-    done
-
-    mkdir -p ${LEVEL_DIR}/index
-    HOWMANY=$(wc -l ${LEVEL_DIR}/${LEVEL_NAME}.txt | cut -d" " -f1)
-    if [[ "${HOWMANY}" -gt "1" ]]; then
-        # Create a tree topology file with howdesbt
-        howdesbt cluster --list=${LEVEL_DIR}/${LEVEL_NAME}.txt \
-                         --bits=${FILTER_SIZE} \
-                         --tree=${LEVEL_DIR}/index/union.sbt \
-                         --nodename=node{number} \
-                         --keepallnodes
-        # Build the bloom filter files for the tree
-        hodesbt build --HowDe \
-                      --tree=${LEVEL_DIR}/index/union.sbt \
-                      --outtree=${LEVEL_DIR}/index/index.detbrief.sbt
-        # Merge all the leaves together by applying the OR logical operator on the bloom filter files
-        # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-        while read BFPATH; do
-            if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then
-                cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf
-            else
-                howdesbt bfoperate ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out ${LEVEL_DIR}/merged.bf
-                mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf
-            fi
-        done < ${LEVEL_DIR}/${LEVEL_NAME}.txt
-    else
-        # With only one bloom filter, it does not make sense to build an index with howdesbt
-        BFPATH=$(head -n1 "${LEVEL_DIR}/${LEVEL_NAME}.txt")
-        cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf
-    fi
-}
-# Export howdesbt_wrapper to sub-shells
-export -f howdesbt_wrapper
-
-# Wrapper for the kmtricks pipeline
-# This is applied at the species level only
-kmtricks_wrapper () {
-    INPUT=$1        # Path to the genomes.fof file for a specific species
-    DBDIR=$2        # Database root directory path
-    KMER_LEN=$3     # Length of the kmers
-    FILTER_SIZE=$4  # Bloom filter size
-    NPROC=$5        # Max nproc for multiprocessing
-    FOLDERPATH=$(dirname "${INPUT}")
-    if [[ ! -f "${FOLDERPATH}/index/kmtricks.fof" ]]; then
-        # Take track of the processed species in log
-        echo ${INPUT} >> ${DBDIR}/kmtricks.log
-
-        # Run the kmtricks pipeline
-        kmtricks pipeline --file ${INPUT} \
-                          --run-dir ${FOLDERPATH}/index \
-                          --kmer-size ${KMER_LEN} \
-                          --mode hash:bft:bin \
-                          --hard-min 1 \
-                          --bloom-size ${FILTER_SIZE} \
-                          --bf-format howdesbt \
-                          --cpr \
-                          --skip-merge \
-                          --threads ${NPROC}
-        
-        FOLDERNAME="${FOLDERPATH##*/}"
-        HOWMANY=$(wc -l ${INPUT} | cut -d" " -f1)
-        if [[ "${HOWMANY}" -gt "1" ]]; then
-            # Index genomes by building a sequence bloom tree with howdesbt
-            kmtricks index --run-dir ${FOLDERPATH}/index \
-                           --howde \
-                           --threads ${NPROC}
-            # Merge all the leaves together by applying the OR logical operator on the bloom filter files
-            # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-            while read line; do
-                GENOME=$(echo "${line}" | cut -d" " -f1)
-                if [[ ! -f ${FOLDERPATH}/${FOLDERNAME}.bf ]]; then
-                    cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf
-                else
-                    howdesbt bfoperate ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf --or --out ${FOLDERPATH}/merged.bf
-                    mv ${FOLDERPATH}/merged.bf ${FOLDERPATH}/${FOLDERNAME}.bf
-                fi
-            done < ${INPUT}
-        else
-            # With only one genome, it does not make sense to build an index with howdesbt
-            mkdir -p ${FOLDERPATH}/index/howde_index
-            cp ${INPUT} ${FOLDERPATH}/index/kmtricks.fof
-            GENOME=$(head -n1 "${INPUT}" | cut -d" " -f1)
-            cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf
-        fi
-    fi
-}
-# Export kmtricks_wrapper to sub-shells
-export -f kmtricks_wrapper
 
 # Define default value for --nproc and --xargs-nproc
 NPROC=1
@@ -491,20 +350,12 @@ while read tax_id, taxonomy; do
                 HOW_MANY=$(cat ${GENOMES_FOF} | wc -l)
                 if [[ "${HOW_MANY}" -gt "1" ]]; then
                     printf "\t[TAXID=%s] Dereplicating %s genomes\n" "${tax_id}" "${HOW_MANY}"
-                    # Build matrix
-                    kmtricks pipeline --file ${GENOMES_FOF} \
-                                      --run-dir ${TAXDIR}/matrix \
-                                      --mode kmer:count:bin \
-                                      --hard-min 1 \
-                                      --cpr \
-                                      --threads ${NPROC}
-                    # Aggregate
-                    kmtricks aggregate --run-dir ${TAXDIR}/matrix \
-                                       --matrix kmer \
-                                       --format text \
-                                       --cpr-in \
-                                       --sorted \
-                                       --threads ${NPROC} > ${TAXDIR}/kmers_matrix.txt
+                    # Run kmtricks to build the kmers matrix
+                    kmtricks_matrix_wrapper ${GENOMES_FOF} \
+                                            ${TAXDIR}/matrix \
+                                            ${NPROC} \
+                                            ${TAXDIR}/kmers_matrix.txt
+
                     # Add header to the kmers matrix
                     HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
                     echo "#kmer $HEADER" > ${TAXDIR}/kmers_matrix_wh.txt
@@ -512,6 +363,7 @@ while read tax_id, taxonomy; do
                     mv ${TAXDIR}/kmers_matrix_wh.txt ${TAXDIR}/kmers_matrix.txt
                     # Remove duplicate columns
                     cat ${TAXDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TAXDIR}/kmers_matrix_dereplicated.txt
+
                     # Dereplicate genomes
                     while read -r genome; do
                         if ! head -n1 ${TAXDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
@@ -521,6 +373,7 @@ while read tax_id, taxonomy; do
                             grep "^${genome} " ${GENOMES_FOF} >> ${TAXDIR}/genomes_dereplicated.fof
                         fi
                     done <<<"$(head -n1 ${TAXDIR}/kmers_matrix.txt | tr " " "\n")"
+
                     # Cleanup space
                     rm -rf ${TAXDIR}/matrix
                     mv ${TAXDIR}/kmers_matrix_dereplicated.txt ${TAXDIR}/kmers_matrix.txt
@@ -549,7 +402,7 @@ while [ $NFOFOUT -lt $NFOFIN ]; do
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
         'INPUT={}; \
          if [[ ! -f "$(dirname $INPUT)/index/kmtricks.fof" ]]; then \
-            kmtricks_wrapper "$INPUT" '"${DBDIR}"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"${NPROC}"'; \
+            kmtricks_index_wrapper "$INPUT" '"${DBDIR}"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"${NPROC}"'; \
          fi'
     # Search for missing species and process them one by one
     NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l`
