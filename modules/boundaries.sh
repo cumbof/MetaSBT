@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="May 26, 2022"
+DATE="May 27, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -16,7 +16,7 @@ source ${SCRIPT_DIR}/utils.sh
 # Wrapper for kmtricks
 # Build a kmer matrix for establishing boundaries
 # Consider clusters with a minimum number of genomes (100 by default)
-kmtricks_wrapper () {
+define_boundaries () {
     LEVEL_DIR=$1    # Cluster main folder
     MIN_GENOMES=$2  # Minimum number of genomes required for running kmtricks
     TMPDIR=$3       # Temporary folder
@@ -39,20 +39,11 @@ kmtricks_wrapper () {
         
         # Keep processing current taxonomic level if it contains enough genomes
         if [[ "${HOW_MANY}" -ge "${MIN_GENOMES}" ]]; then
-            # Build matrix
-            kmtricks pipeline --file ${TMP_LEVEL_DIR}/genomes.fof \
-                              --run-dir ${TMP_LEVEL_DIR}/matrix \
-                              --mode kmer:count:bin \
-                              --hard-min 1 \
-                              --cpr \
-                              --threads ${NPROC}
-            # Aggregate
-            kmtricks aggregate --run-dir ${TMP_LEVEL_DIR}/matrix \
-                               --matrix kmer \
-                               --format text \
-                               --cpr-in \
-                               --sorted \
-                               --threads ${NPROC} > ${TMP_LEVEL_DIR}/kmers_matrix.txt
+            # Run kmtricks to build the kmers matrix
+            kmtricks_matrix_wrapper ${TMP_LEVEL_DIR}/genomes.fof \
+                                    ${TMP_LEVEL_DIR}/matrix \
+                                    ${NPROC} \
+                                    ${TMP_LEVEL_DIR}/kmers_matrix.txt
             
             # Check whether the kmers matrix has been generated
             if [[ -f ${TMP_LEVEL_DIR}/kmers_matrix.txt ]]; then
@@ -275,7 +266,7 @@ if [[ ! -f $OUTPUT ]]; then
     # Process all taxonomic levels
     for LEVEL in "s__" "g__" "f__" "o__" "c__" "p__" "k__"; do
         find ${DBDIR}/k__${KINGDOM} -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow -exec \
-            kmtricks_wrapper {} "${MIN_GENOMES}" "$TMPDIR" "$OUTPUT" "$NPROC" "$CLEANUP" \;
+            define_boundaries {} "${MIN_GENOMES}" "$TMPDIR" "$OUTPUT" "$NPROC" "$CLEANUP" \;
     done
 
     # Print output table path with boundaries
