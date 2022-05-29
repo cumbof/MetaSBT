@@ -1,6 +1,102 @@
 # meta-index
 A pipeline for automatically indexing genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
 
+## Installing meta-index
+
+The pipeline is available as a `conda` package through the following command:
+```bash
+conda install -c bioconda meta-index
+```
+
+You may need to add the `bioconda` channel first by running:
+```bash
+conda config --add  channels bioconda
+```
+
+The `meta-index` pipeline is also available by simply cloning this repository and make all the scripts executables:
+```bash
+# Clone the meta-index repository
+mkdir -p ~/git && cd ~/git
+git clone https://github.com/BlankenbergLab/meta-index
+
+# Make the scripts executable
+chmod +x meta-index
+cd modules && chmod +x *
+
+# Add meta-index to the PATH env variable
+PATH=$PATH:~/git/meta-index
+```
+
+In this last case, remember to check that the following dependencies are installed and available on your system:
+- bc
+- [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.1.3)
+- gzip
+- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
+- [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
+- [ncbitax2lin](https://github.com/zyxue/ncbitax2lin)
+- python (version >=3.7)
+- pip
+- wget
+
+You can check whether all these dependencies are available by running the following command in your terminal:
+```bash
+meta-index --resolve-dependencies
+```
+
+For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
+
+First, you need to download the last available database from the following repository [https://data.ace.uq.edu.au/public/CheckM_databases/](https://data.ace.uq.edu.au/public/CheckM_databases/), decompress it on a dedicated location, and finally inform CheckM about where its database is located by typing:
+```bash
+checkm data setRoot <checkm_data_dir>
+```
+
+Once everything is installed, `meta-index` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
+```bash
+meta-index --version
+```
+
+We strongly suggest to permanently add the `meta-index` folder to the PATH environment variable by adding the following line to your `~/.profile` or `~/.bash_profile` (if `bash` is your default shell):
+```bash
+echo "PATH=$PATH:~/git/meta-index" >> ~/.bash_profile
+```
+
+You may finally need to reload your profile to make these changes effective:
+```bash
+source ~/.bash_profile
+```
+
+### Warning (for macOS users)
+
+Unfortunately, the CheckM conda package is still not fully compatible with macOS because of its software dependency `pplacer`. For this reason, macOS users are strongly encouraged to build a Docker container by running the following command from the `meta-index` root directory in which the Dockerfile is located:
+```bash
+docker build . -t meta-index
+```
+
+Once the container is built, you can finally open an interactive shell on the Ubuntu based container already configured to run `meta-index`:
+```bash
+docker run -it meta-index
+```
+
+In case you are able to install all the `meta-index` dependencies without the help of Docker, please remember that the `meta-index` modules makes use of the `date` command in order to take track of the amount of time the whole pipeline requires to run. Unfortunately, on macOS systems, the `date` command uses a different syntax to produce a timestamp accurate to the nanoseconds compared to the GNU equivalent command. For this reason, in order to make the script fully compatible also with macOS systems, users should follow the next additional steps.
+
+Use homebrew to install `coreutils` from your terminal:
+```bash
+brew install coreutils
+```
+
+The GNU equivalent date will be named `gdate`. At this point, we strongly encourage users to not replace the built-in version of `date` with the GNU equivalent in order to avoid issues with other software components that rely on the original version of `date`.
+
+We instead suggest to add an alias with the following command:
+```bash
+alias date='gdate'
+```
+
+In order to make the alias effective every time you open the shell, this last command should be added to your `.bash_profile` (in case `bash` is your default shell). 
+```bash
+echo "alias date='gdate'" >> ~/.bash_profile
+source ~/.bash_profile
+```
+
 ## Building a database
 
 The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `kmtricks` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed with `howdesbt` by building new sequence bloom trees considering only the root nodes of the upper taxonomic levels.
@@ -59,6 +155,17 @@ $ meta-index update --input-list=~/mygenomes.txt \
                     --extension=fna.gz \
                     --nproc=8 \
                     --cleanup
+```
+
+Please remember that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following command in your terminal:
+```bash
+INPUTS_DIR=~/mygenomes
+CURRENT_EXTENSION="fa"
+NEW_EXTENSION="fna"
+find ${INPUTS_DIR} \
+    -type f -iname "*.${CURRENT_EXTENSION}" -follow | xargs -n 1 -i sh -c \
+        'INPUT={}; \
+         mv "$INPUT" "${INPUT%.'"${CURRENT_EXTENSION}"'}.'"${NEW_EXTENSION}"'";'
 ```
 
 ## Profiling genomes
