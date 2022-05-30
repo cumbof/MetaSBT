@@ -147,6 +147,14 @@ DESCRIPTION
 
     The following options are available:
 
+    --boundaries=file
+        Path to the output table produced by the boundaries module.
+        It is required in case of MAGs as input genomes only
+    
+    --boundary-uncertainty=num
+        Define the percentage of kmers to enlarge and reduce boundaries
+        Default: --boundary-uncertainty=0
+
     --checkm-completeness=num
         Input genomes must have a minimum completeness percentage before being processed and added to the database
     
