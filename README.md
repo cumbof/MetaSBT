@@ -10,7 +10,7 @@ conda install -c bioconda meta-index
 
 You may need to add the `bioconda` channel first by running:
 ```bash
-conda config --add  channels bioconda
+conda config --add channels bioconda
 ```
 
 The `meta-index` pipeline is also available by simply cloning this repository and make all the scripts executables:
