@@ -158,6 +158,12 @@ for ARG in "$@"; do
             DBDIR="$( cd "$( dirname "${DBDIR}" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
             # Trim the last slash out of the path
             DBDIR="${DBDIR%/}"
+            # Check whether the input directory exist
+            if [[ ! -d $DBDIR ]]; then
+                printf "Input folder does not exist!\n"
+                printf "--db-dir=%s\n" "$DBDIR"
+                exit 1
+            fi
             ;;
         -h|--help)
             # Print extended help
@@ -208,9 +214,9 @@ for ARG in "$@"; do
             ;;
         --output=*)
             # Output file
-            OUTPUTFILE="${ARG#*=}"
+            OUTPUT="${ARG#*=}"
             # Define helper
-            if [[ "${OUTPUTFILE}" =~ "?" ]]; then
+            if [[ "${OUTPUT}" =~ "?" ]]; then
                 printf "boundaries helper: --output=file\n\n"
                 printf "\tOutput file with kmer boundaries for each of the taxonomic labels in the database.\n\n"
                 exit 0
@@ -248,6 +254,9 @@ if [[ "$?" -gt "0" ]]; then
     
     exit 1
 fi
+
+# Create temporary folder
+mkdir -p $TMPDIR
 
 # Print inputs
 printf "Defining boundaries:\n"

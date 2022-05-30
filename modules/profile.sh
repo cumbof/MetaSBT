@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 26, 2022"
+DATE="May 30, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -40,6 +40,12 @@ for ARG in "$@"; do
                 printf "profile helper: --input-file=file\n\n"
                 printf "\tPath to the input genome.\n\n"
                 exit 0
+            fi
+            # Check whether the input file exists
+            if [[ ! -f $INPUTFILE ]]; then
+                printf "Input file does not exist!\n"
+                printf "--input-file=%s\n" "$INPUTFILE"
+                exit 1
             fi
             ;;
         --input-id=*)
@@ -92,6 +98,12 @@ for ARG in "$@"; do
                 printf "profile helper: --tree=file\n\n"
                 printf "\tThis is the tree definition file.\n\n"
                 exit 0
+            fi
+            # Check whether the input file exists
+            if [[ ! -f $TREE ]]; then
+                printf "Input file does not exist!\n"
+                printf "--tree=%s\n" "$TREE"
+                exit 1
             fi
             ;;
         *)
