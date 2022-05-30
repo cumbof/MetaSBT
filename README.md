@@ -13,7 +13,7 @@ You may need to add the `bioconda` channel first by running:
 conda config --add channels bioconda
 ```
 
-The `meta-index` pipeline is also available by simply cloning this repository and make all the scripts executables:
+The `meta-index` pipeline is also available by simply cloning this repository and making all the scripts executables:
 ```bash
 # Clone the meta-index repository
 mkdir -p ~/git && cd ~/git
