@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 27, 2022"
+DATE="May 30, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -15,6 +15,8 @@ source ${SCRIPT_DIR}/utils.sh
 
 # Define default value for --nproc
 NPROC=1
+# Define default boundary uncertainty percentage
+BOUNDARY_UNCERTAINTY_PERC=0
 # Initialize CheckM completeness and contamination to default values
 # Run CheckM if provided completeness is >0 or contamination is <100
 CHECKM_COMPLETENESS=0
@@ -33,6 +35,38 @@ CLEANUP=false
 # Parse input arguments
 for ARG in "$@"; do
     case "$ARG" in
+        --boundaries=*)
+            # Clusters boundaries computed through the boundaries module
+            BOUNDARIES="${ARG#*=}"
+            # Define helper
+            if [[ "${BOUNDARIES}" =~ "?" ]]; then
+                printf "update helper: --boundaries=file\n\n"
+                printf "\tPath to the output table produced by the boundaries module.\n"
+                printf "\tIt is required in case of MAGs as input genomes only\n\n"
+                exit 0
+            fi
+            # Check whether the input file exists
+            if [[ ! -f $BOUNDARIES ]]; then
+                printf "Input file does not exist!\n"
+                printf "--boundaries=%s\n" "$BOUNDARIES"
+                exit 1
+            fi
+            ;;
+        --boundary-uncertainty=*)
+            # Boundary uncertainty percentage
+            BOUNDARY_UNCERTAINTY_PERC="${ARG#*=}"
+            # Define helper
+            if [[ "${BOUNDARY_UNCERTAINTY_PERC}" =~ "?" ]]; then
+                printf "update helper: --boundary-uncertainty=num\n\n"
+                printf "\tDefine the percentage of kmers to enlarge and reduce boundaries\n\n"
+                exit 0
+            fi
+            # Check whether --boundary-uncertainty is an integer between 0 and 100
+            if [[ ! ${BOUNDARY_UNCERTAINTY_PERC} =~ ^[0-9]+$ ]] || [[ "${BOUNDARY_UNCERTAINTY_PERC}" -lt "0" ]] || [[ "${BOUNDARY_UNCERTAINTY_PERC}" -gt "100" ]]; then
+                printf "Argument --boundary-uncertainty must be a positive integer between 0 and 100\n"
+                exit 1
+            fi
+            ;;
         --checkm-completeness=*)
             # CheckM completeness
             CHECKM_COMPLETENESS="${ARG#*=}"
@@ -80,6 +114,12 @@ for ARG in "$@"; do
             DBDIR="$( cd "$( dirname "${DBDIR}" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
             # Trim the last slash out of the path
             DBDIR="${DBDIR%/}"
+            # Check whether the input directory exist
+            if [[ ! -d $DBDIR ]]; then
+                printf "Input folder does not exist!\n"
+                printf "--db-dir=%s\n" "$DBDIR"
+                exit 1
+            fi
             ;;
         --dereplicate)
             # Dereplicate input genomes
@@ -135,6 +175,12 @@ for ARG in "$@"; do
                 printf "\tThis file contains the list of paths to the new genomes that will be added to the database.\n\n"
                 exit 0
             fi
+            # Check whether the input file exists
+            if [[ ! -f $BOUNDARIES ]]; then
+                printf "Input file does not exist!\n"
+                printf "--input-list=%s\n" "$INLIST"
+                exit 1
+            fi
             ;;
         --kingdom=*)
             # Consider genomes whose lineage belong to a specific kingdom only
@@ -186,6 +232,12 @@ for ARG in "$@"; do
                 printf "\tInput file with the mapping between input genome IDs and their taxonomic label.\n"
                 printf "\tThis is used in case of reference genomes only \"--type=references\".\n\n"
                 exit 0
+            fi
+            # Check whether the input file exists
+            if [[ ! -f $BOUNDARIES ]]; then
+                printf "Input file does not exist!\n"
+                printf "--taxa=%s\n" "$TAXA"
+                exit 1
             fi
             ;;
         --tmp-dir=*)
