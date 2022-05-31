@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 30, 2022"
+DATE="May 31, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -137,10 +137,15 @@ fi
 # Take track of the best matches
 # Closest taxa
 LINEAGE=()
+# Common kmers with the closest taxa
+COMMON_KMERS=()
 # Scores of the closest taxa
 SCORES=()
+
 # Closest genome
 CLOSEST_GENOME=""
+# Common kmers with the closest genome
+CLOSEST_GENOME_COMMON_KMERS=0
 # Score of the closest genome
 CLOSEST_GENOME_SCORE=0
 
@@ -157,19 +162,25 @@ while [[ -f ${TREE} ]]; do
                    --adjust \
                    --sort \
                    ${INPUTFILE} > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
-    # Get best match
+    # Get best match line
     BEST=$(grep -E "^[[:alnum:]]" ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
+    # Best match ID
     MATCH=$(echo "$BEST" | cut -d' ' -f1)
+    # Common kmers with the best match
+    KMERS=$(echo "$BEST" | cut -d' ' -f4 | cut -d'/' -f1)
+    # Score
     SCORE=$(echo "$BEST" | cut -d' ' -f5)
 
     if [[ "$LEVEL" = s__* ]]; then
         # There is nothing after the species tree
         CLOSEST_GENOME=$MATCH
+        CLOSEST_GENOME_COMMON_KMERS=$KMERS
         CLOSEST_GENOME_SCORE=$SCORE
         break
     else
         # Update the lineage
         LINEAGE+=("$MATCH")
+        COMMON_KMERS+=("$KMERS")
         SCORES+=("$SCORE")
 
         # Keep querying if --expand
@@ -187,7 +198,7 @@ done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
 if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv ]]; then
-    printf "# Input ID\tLevel\tTaxonomy\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+    printf "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 # Reconstruct the lineage
@@ -216,7 +227,12 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
             *) LEVELNAME="NA" ;;
         esac
         # Report characterisation to the output file
-        printf "%s\t%s\t%s\t%s\n" "$INPUTID" "$LEVELNAME" "${LINEAGE[i]}" "${SCORES[i]}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+        printf "%s\t%s\t%s\t%s\n" "$INPUTID" \
+                                  "$LEVELNAME" \
+                                  "${LINEAGE[i]}" \
+                                  "${COMMON_KMERS[i]}" \
+                                  "${SCORES[i]}" \
+                                  >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
     done
 fi
 
@@ -226,7 +242,12 @@ if [ ! -z "${CLOSEST_GENOME}" ]; then
     printf "\nClosest genome:\n"
     printf "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
     # Report the closest genome to the output file
-    printf "%s\t%s\t%s\t%s\n" "$INPUTID" "genome" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}" >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+    printf "%s\t%s\t%s\t%s\n" "$INPUTID" \
+                              "genome" \
+                              "${CLOSEST_GENOME}" \
+                              "${CLOSEST_GENOME_COMMON_KMERS}" \
+                              "${CLOSEST_GENOME_SCORE}" \
+                              >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
