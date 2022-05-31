@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 30, 2022"
+DATE="May 31, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -12,6 +12,64 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Import utility functions
 source ${SCRIPT_DIR}/utils.sh
+
+# Get the min and max kmers boundaries for a given taxonomy
+# Result is reported in MIN_BOUND and MAX_BOUND
+get_boundaries () {
+    BOUNDARIES=$1   # Path to the output table of the boundaries module
+    TAXLABEL=$2     # Current taxonomic label
+    # Split taxonomy
+    TAXONOMY_SPLIT=($(echo $TAXLABEL | tr "|" " "))
+
+    # Keep track of the min and max common kmers
+    MIN_BOUNDS=()
+    MAX_BOUNDS=()
+    while [[ "${#MIN_BOUNDS[@]}" -eq "0" ]] && [[ "${#MAX_BOUNDS[@]}" -eq "0" ]]; do
+        if echo "$TAXLABEL" | grep -q "|s__"; then
+            # Add a tab at the end of the taxonomic label in case of species
+            TAX_BOUNDARIES="$(grep "${TAXLABEL}"$'\t' $BOUNDARIES)"
+        else
+            # Add a pipe at the end of the taxonomic label for all the other levels
+            TAX_BOUNDARIES="$(grep "${TAXLABEL}|" $BOUNDARIES)"
+        fi
+
+        if [[ ! -z "${TAX_BOUNDARIES}" ]]; then
+            # In case the current taxonomy is in the boundaries file
+            while read line; do
+                # Get minimum and maximum common kmers for the closest taxonomy
+                MIN_BOUNDS+=("$(echo "${TAX_BOUNDARIES}" | cut -d$'\t' -f2)")
+                MAX_BOUNDS+=("$(echo "${TAX_BOUNDARIES}" | cut -d$'\t' -f3)")
+            done <${TAX_BOUNDARIES}
+        else
+            # Count the current number of levels in taxonomy
+            TLEN=${#TAXONOMY_SPLIT[@]}
+            if [[ "$TLEN" -eq "1" ]]; then
+                # Get out of the while loop if there are no other levels available
+                break
+            fi
+            # Remove the last level
+            TAXONOMY_SPLIT=("${TAXONOMY_SPLIT[@]:0:$TLEN-1}")
+            # Rebuild the taxonomic label
+            TAXLABEL=$(printf "|%s" "${TAXONOMY_SPLIT[@]}")
+        fi
+    done
+
+    # Concatenate array values with the plus symbol
+    # Append a zero at the end of the string because of the last plus symbol
+    MIN_BOUNDS_SUM=$( echo "${MIN_BOUNDS[@]/%/+} 0" | bc -l)
+    # Count how many elements in the array
+    MIN_BOUNDS_LEN=${#MIN_BOUNDS[@]}
+    # Compute the mean value
+    MIN_BOUND=$((${MIN_BOUNDS_SUM} / ${MIN_BOUNDS_LEN}))
+
+    # Concatenate array values with the plus symbol
+    # Append a zero at the end of the string because of the last plus symbol
+    MAX_BOUNDS_SUM=$( echo "${MAX_BOUNDS[@]/%/+} 0" | bc -l)
+    # Count how many elements in the array
+    MAX_BOUNDS_LEN=${#MAX_BOUNDS[@]}
+    # Compute the mean value
+    MAX_BOUND=$((${MAX_BOUNDS_SUM} / ${MAX_BOUNDS_LEN}))
+}
 
 # Define default value for --nproc
 NPROC=1
@@ -426,29 +484,34 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                                    > /dev/null 2>&1 # Silence the profiler
         # Define output file path with profiles
         PROFILE=${TMPDIR}/profiling/${GENOMENAME}__profiles.tsv
+        printf "\t%s\n" "${PROFILE}"
         
         if [[ -f $PROFILE ]]; then
             # Discard the genome if the score is 1.0 compared to the closest match at the species level
             # Do not discard the input genome if it is a reference genome and the closest genome in the database
             # is a MAG with a perfect overlap of kmers (score 1.0)
-            CLOSEST_GENOME="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "genome" | cut -d$'\t' -f3)"
-            CLOSEST_GENOME_SCORE="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "genome" | cut -d$'\t' -f4)"
+            CLOSEST_GENOME_DATA="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "genome")"
+            CLOSEST_GENOME="$(echo "${CLOSEST_GENOME_DATA}" | cut -d$'\t' -f3)"
+            CLOSEST_GENOME_COMMON_KMERS="$(echo "${CLOSEST_GENOME_DATA}" | cut -d$'\t' -f4)"
+            CLOSEST_GENOME_SCORE="$(echo "${CLOSEST_GENOME_DATA}" | cut -d$'\t' -f5)"
             # Print closest genome
-            printf "\tClosest genome: %s (score: %s)\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
+            printf "\tClosest genome: %s (common kmers: %s; score: %s)\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_COMMON_KMERS}" "${CLOSEST_GENOME_SCORE}"
             # Reconstruct the closest taxa
             LEVELS=("kingdom" "phylum" "class" "order" "family" "genus" "species")
             CLOSEST_TAXA=""
-            CLOSEST_SCORE=""
+            CLOSEST_COMMON_KMERS=""
             printf "\tClosest lineage:\n"
             for level in ${LEVELS[@]}; do
-                CLOSEST_LEVEL="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "$level" | cut -d$'\t' -f3)"
-                CLOSEST_LEVEL_SCORE="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "$level" | cut -d$'\t' -f4)"
+                CLOSEST_LEVEL_DATA="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "$level")"
+                CLOSEST_LEVEL="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f3)"
+                CLOSEST_LEVEL_COMMON_KMERS="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f4)"
+                CLOSEST_LEVEL_SCORE="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f5)"
                 CLOSEST_TAXA=${CLOSEST_TAXA}"|"${CLOSEST_LEVEL}
                 # Print profiler result
-                printf "\t\t%s: %s (score: %s)\n" "${level}" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_SCORE}"
+                printf "\t\t%s: %s (common kmers: %s; score: %s)\n" "${level}" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_COMMON_KMERS}" "${CLOSEST_LEVEL_SCORE}"
                 # Keep track of the species score
                 if [[ "${CLOSEST_LEVEL}" = s__* ]]; then
-                    CLOSEST_SCORE=${CLOSEST_LEVEL_SCORE}
+                    CLOSEST_COMMON_KMERS=${CLOSEST_LEVEL_COMMON_KMERS}
                 fi
             done
             # Trim the first pipe out of the closest taxonomic label
@@ -466,14 +529,14 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         ${SKIP_GENOME}=true
                         # Print the reason why we discard the input genome
                         printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome is a MAG and the closest genome is a reference\n"
+                        printf "\t\tInput genome is a MAG and the closest genome is a reference genome\n"
                     elif [[ -f "${CLOSEST_TAXADIR}/mags.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/mags.txt; then
                         # If the input genome is a MAG and the closest genome is a MAG
                         # Discard the input genome
                         ${SKIP_GENOME}=true
                         # Print the reason why we discard the input genome
                         printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome is a MAG and the closest genome is a MAG\n"
+                        printf "\t\tInput genome and the closest genome are both MAGs\n"
                     fi
                 elif [[ "$TYPE" = "references" ]]; then
                     if [[ -f "${CLOSEST_TAXADIR}/genomes.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/genomes.txt; then
@@ -482,18 +545,19 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         ${SKIP_GENOME}=true
                         # Print the reason why we discard the input genome
                         printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome is a reference and the closest genome is a reference\n"
+                        printf "\t\tInput genome and closest genome are both reference genomes\n"
                     fi
                 fi
             fi
 
             if ! ${SKIP_GENOME}; then
+                # Retrieve the min and max common kmers for the closest taxa
+                MIN_BOUND=""; MAX_BOUND=""
+                get_boundaries $BOUNDARIES $CLOSEST_TAXA
+
                 # Process MAGs or reference genomes
                 if [[ "$TYPE" = "MAGs" ]]; then
-                    # Check whether the closest score is enough with respect to the boundaries of the closest lineage
-                    # TODO
-
-                    if [[ "${CLOSEST_SCORE}" -ge "" ]]; then # TODO
+                    if [[ "${CLOSEST_COMMON_KMERS}" -le "${MAX_BOUND}" ]] && [[ "${CLOSEST_COMMON_KMERS}" -ge "${MIN_BOUND}" ]]; then
                         # Assign the current genome to the closest lineage
                         TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
                         cp $FILEPATH $TARGETGENOME
@@ -524,11 +588,45 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     TARGETGENOME=${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}
                     # Print input genome taxonomic label
                     printf "\tTaxonomic label:\n"
-                    printf "\t\t%s\n\n" "$TAXALABEL"
+                    printf "\t\t%s\n" "$TAXALABEL"
 
-                    if [[ -d $TAXDIR ]]; then
-                        # If the taxonomic label of the input genome already exists in the database
-                        # add the new genome to the assigned taxonomic branch and rebuild the SBTs
+                    if [[ "${CLOSEST_COMMON_KMERS}" -le "${MAX_BOUND}" ]] && [[ "${CLOSEST_COMMON_KMERS}" -ge "${MIN_BOUND}" ]]; then
+                        # Check whether the closest taxonomy contains any reference genomes
+                        HOW_MANY_REFERENCES=$(cat ${CLOSEST_TAXADIR}/genomes.txt | wc -l)
+                        if [[ "${HOW_MANY_REFERENCES}" -eq "0" ]]; then
+                            # If the closest genome belongs to a new cluster with no reference genomes
+                            # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
+                            # TODO
+                        elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
+                            # If the closest genome belong to a cluster with at least a reference genome
+                            if [[ "${TAXALABEL}" != "${CLOSEST_TAXA}" ]]; then
+                                # If the taxonomic labels of the current reference genome and that one of the closest genome do not match
+                                # Report the inconsistency
+                                printf "\tInconsistency found:\n"
+                                printf "\t\tInput genome: %s\n" "${TAXALABEL}"
+                                printf "\t\tClosest lineage: %s\n" "${CLOSEST_TAXA}"
+                            fi
+                            # Assign the current genome to the closest lineage
+                            TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                            cp $FILEPATH $TARGETGENOME
+                            if [[ ! "$GENOMEEXT" = "gz" ]]; then
+                                # Compress input genome
+                                gzip ${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                                TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}.gz
+                            fi
+                            # Add the current genome to the list of genomes in current taxonomy
+                            echo "$GENOMENAME : $TARGETGENOME" >> ${CLOSEST_TAXADIR}/genomes.fof
+                            echo "$TARGETGENOME" >> ${CLOSEST_TAXADIR}/genomes.txt
+                            # Do not remove the index here because there could be other input genomes with the same taxonomic label
+                            REBUILD+=(${CLOSEST_TAXA})
+                            # Assign the current reference genome to the closest cluster
+                            printf "\tAssignment:\n"
+                            printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
+                        fi
+                    else
+                        # If nothing is close enough to the current genome and its taxonomic label does not exist in the database
+                        # Create a new branch with the new taxonomy for the current genome
+                        mkdir -p $TAXDIR/genomes
                         cp $FILEPATH $TARGETGENOME
                         if [[ ! "$GENOMEEXT" = "gz" ]]; then
                             # Compress input genome
@@ -540,40 +638,6 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         echo "$TARGETGENOME" >> $TAXDIR/genomes.txt
                         # Do not remove the index here because there could be other input genomes with the same taxonomic label
                         REBUILD+=($TAXALABEL)
-                    else
-                        # In case the current taxonomic label does not exist in database
-                        # Check whether the closest score is enough with respect to the boundaries of the closest lineage
-                        # TODO
-
-                        if [[ "${CLOSEST_SCORE}" -ge "" ]]; then # TODO
-                            # Check whether the closest taxonomy contains any reference genomes
-                            HOW_MANY_REFERENCES=$(cat ${CLOSEST_TAXADIR}/genomes.txt | wc -l)
-                            if [[ "${HOW_MANY_REFERENCES}" -eq "0" ]]; then
-                                # If the closest genome belongs to a new cluster with no reference genomes
-                                # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
-                                # TODO
-                            elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
-                                # If the closest genome belong to a cluster with at least a reference genome
-                                # If thetaxonomic labels of the current reference genome and that one of the closest genome do not match
-                                # Report the inconsistency and assign the current reference genome to the closest cluster
-                                # TODO
-                            fi
-                        else
-                            # If nothing is close enough to the current genome and its taxonomic label does not exist in the database
-                            # Create a new branch with the new taxonomy for the current genome
-                            mkdir -p $TAXDIR/genomes
-                            cp $FILEPATH $TARGETGENOME
-                            if [[ ! "$GENOMEEXT" = "gz" ]]; then
-                                # Compress input genome
-                                gzip ${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}
-                                TARGETGENOME=${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}.gz
-                            fi
-                            # Add the current genome to the list of genomes in current taxonomy
-                            echo "$GENOMENAME : $TARGETGENOME" >> $TAXDIR/genomes.fof
-                            echo "$TARGETGENOME" >> $TAXDIR/genomes.txt
-                            # Do not remove the index here because there could be other input genomes with the same taxonomic label
-                            REBUILD+=($TAXALABEL)
-                        fi
                     fi
                 fi
             fi
@@ -588,6 +652,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
     # Cluster unassigned genomes before rebuilding the updated lineages
     if [[ "${#UNASSIGNED[@]}" -gt "0" ]]; then
         # The kmers matrix already exists in case the dereplication step has been enabled
+        # Otherwise, run kmtricks
         if [[ ! -f ${TMPDIR}/kmers_matrix.txt ]]; then
             GENOMES_FOF=${TMPDIR}/genomes.fof
             # Unassigned genomes are MAGs only
