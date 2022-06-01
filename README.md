@@ -120,6 +120,7 @@ The following command will trigger the generation of the database with all the a
 $ meta-index index --db-dir=~/myindex \
                    --kmer-len=31 \
                    --estimate-filter-size \
+                   --increase-filter-size=5 \
                    --kingdom=Bacteria \
                    --dereplicate \
                    --checkm-completeness=50.0 \
