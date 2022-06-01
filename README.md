@@ -1,7 +1,18 @@
 # meta-index
 A pipeline for automatically indexing genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
 
-## Installing meta-index
+## Contents
+
+- [Installing `meta-index`](https://github.com/BlankenbergLab/meta-index#installing-meta-index)
+- [Building a database](https://github.com/BlankenbergLab/meta-index#building-a-database)
+- [Defining boundaries](https://github.com/BlankenbergLab/meta-index#defining-boundaries)
+- [Updating the database](https://github.com/BlankenbergLab/meta-index#updating-the-database)
+- [Profiling genomes](https://github.com/BlankenbergLab/meta-index#profiling-genomes)
+- [Unlocking unknown species profiling with `kraken`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken)
+- [Credits](https://github.com/BlankenbergLab/meta-index#credits)
+- [Contributing](https://github.com/BlankenbergLab/meta-index#support)
+
+## Installing `meta-index`
 
 The pipeline is available as a `conda` package through the following command:
 ```bash
