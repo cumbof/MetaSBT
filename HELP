@@ -79,7 +79,7 @@ EXAMPLES
     Try running this script by typing:
 
         $ meta-index index --db-dir=~/myindex --kingdom=Bacteria --kmer-len=31 --estimate-filter-size 
-                           --dereplicate --tmp-dir=~/tmp --nproc=4 --xargs-nproc=2 --cleanup
+                           --increase-filter-size=5 --dereplicate --tmp-dir=~/tmp --nproc=4 --xargs-nproc=2 --cleanup
 "
 fi
 
