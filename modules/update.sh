@@ -24,9 +24,11 @@ get_boundaries () {
     # Keep track of the min and max common kmers
     MIN_BOUNDS=()
     MAX_BOUNDS=()
+    # Try searching for boundaries again with a redefined taxonomic label
+    RETRY=false
     while [[ "${#MIN_BOUNDS[@]}" -eq "0" ]] && [[ "${#MAX_BOUNDS[@]}" -eq "0" ]]; do
-        if echo "$TAXLABEL" | grep -q "|s__"; then
-            # Add a tab at the end of the taxonomic label in case of species
+        if ! $RETRY; then
+            # Add a tab at the end to avoid multiple matched at first
             TAX_BOUNDARIES="$(grep "${TAXLABEL}"$'\t' $BOUNDARIES)"
         else
             # Add a pipe at the end of the taxonomic label for all the other levels
@@ -51,6 +53,8 @@ get_boundaries () {
             TAXONOMY_SPLIT=("${TAXONOMY_SPLIT[@]:0:$TLEN-1}")
             # Rebuild the taxonomic label
             TAXLABEL=$(printf "|%s" "${TAXONOMY_SPLIT[@]}")
+            # Retry with a redefined taxonomic label
+            RETRY=true
         fi
     done
 
@@ -772,7 +776,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
         fi
 
-        # Cluster genomes according to the custom boundaries
+        # Cluster genomes according to the boundaries defined by the boundaries module
         # Define a cluster for each taxomomic level
         # Look at the genomes profiles and update or build new clusters 
         # Add full taxonomy to the REBUILD list
