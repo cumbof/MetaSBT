@@ -14,6 +14,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get clean
 
 # Installing basic dependancies
 RUN apt-get install -y \ 
+        autoconf \
+        automake \
         bc \
         build-essential \
         curl \
@@ -68,6 +70,15 @@ CMD checkm data setRoot /home/checkm-data
 
 # Install ncbitax2lin
 RUN pip install ncbitax2lin
+
+# Install ntCard
+RUN mkdir -p /home/git && cd /home/git && \
+    git clone https://github.com/bcgsc/ntCard && \
+    cd /home/git/ntCard && \
+    ./autogen.sh && \
+    ./configure --prefix=/usr/local/bin/ntCard && \
+    make && make install && \
+    ln -s /usr/local/bin/ntCard/bin/ntcard /usr/local/bin
 
 # Install miniconda
 ENV PATH="/root/miniconda3/bin:${PATH}"
