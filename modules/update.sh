@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 31, 2022"
+DATE="Jun 1, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -456,6 +456,10 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
     # Create a temporary folder in case input genomes are gzip compressed
     mkdir -p $TMPDIR/genomes
 
+    # In case one or more reference genomes are assigned to an unknown cluster
+    # Keep track of the unknown taxonomy and change the lineage with 
+    # the most occurring taxa among the assinged reference genomes
+    declare -A TO_KNOWN_TAXA
     # Keep track of the lineages that must be rebuilt
     REBUILD=()
     # Keep track of the unassigned genomes
@@ -528,14 +532,14 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # If the input genome is a MAG and the closest genome is a reference
                         # Discard the input genome
                         ${SKIP_GENOME}=true
-                        # Print the reason why we discard the input genome
+                        # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome is a MAG and the closest genome is a reference genome\n"
                     elif [[ -f "${CLOSEST_TAXADIR}/mags.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/mags.txt; then
                         # If the input genome is a MAG and the closest genome is a MAG
                         # Discard the input genome
                         ${SKIP_GENOME}=true
-                        # Print the reason why we discard the input genome
+                        # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome and the closest genome are both MAGs\n"
                     fi
@@ -544,7 +548,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # If the input genome is a reference and the closest genome is a reference
                         # Discard the input genome
                         ${SKIP_GENOME}=true
-                        # Print the reason why we discard the input genome
+                        # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome and closest genome are both reference genomes\n"
                     fi
@@ -597,7 +601,19 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         if [[ "${HOW_MANY_REFERENCES}" -eq "0" ]]; then
                             # If the closest genome belongs to a new cluster with no reference genomes
                             # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
-                            # TODO
+                            # Do not change lineage here because there could be more than one reference genome assigned to the same unknown cluster
+                            # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
+                            if [[ ! -z "${TO_KNOWN_TAXA[${CLOSEST_TAXA}]}" ]]; then
+                                TO_KNOWN_TAXA[${CLOSEST_TAXA}]="$GENOMENAME"
+                            else
+                                # If already exists in the associative array
+                                # Concatenate values with a comma
+                                TO_KNOWN_TAXA[${CLOSEST_TAXA}]=${TO_KNOWN_TAXA[${CLOSEST_TAXA}]}",$GENOMENAME"
+                            fi
+                            # Print the assignment
+                            # Taxonomy will change according to the majority voting result
+                            printf "\tAssignment:\n"
+                            printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
                         elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
                             # If the closest genome belong to a cluster with at least a reference genome
                             if [[ "${TAXALABEL}" != "${CLOSEST_TAXA}" ]]; then
@@ -650,6 +666,86 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
         fi
     done <$INLIST
 
+    # In case a reference has been assigned to an unknown cluster
+    # Update the cluster taxonomy by applying a majority rule on the reference genomes taxa
+    if [[ "${#TO_KNOWN_TAXA[@]}" -gt "0" ]]; then
+        # Iterate over the unknown clusters in the associative array
+        for UNKNOWN_TAXONOMY in "${!TO_KNOWN_TAXA[@]}"; do
+            # Rebuild the folder path to the unknown taxonomy in the database
+            UNKNOWN_TAXONOMY_PATH=$DBDIR/$(echo "${UNKNOWN_TAXONOMY}" | sed 's/|/\//g')
+            # Take track of the reference genomes taxonomic labels
+            KNOWN_TAXA=()
+            # Split the list of genomes assigned to the unknown cluster
+            GENOMES=($(echo ${TO_KNOWN_TAXA[$UNKNOWN_TAXONOMY]} | tr "," " "))
+            for GENOME in GENOMES; do
+                # Retrieve the genome taxonomy from the --taxa input file
+                KNOWN_TAXA+=("$(grep -w "$GENOME" $TAXA | cut -d$'\t' -f2)")
+            done
+            # Get the most occurring taxonomic label
+            ASSIGNED_TAXONOMY="$(printf '%s\n' "${TO_KNOWN_TAXA[@]}" | sort | uniq -c | sort -k1,1nr -k2 | awk '{print $2; exit}')"
+            # Retrieve genomes file paths from the input list of genomes and update the genomes.fof file
+            while read GENOMEPATH; then
+                FULLPATH=$(realpath -s $GENOMEPATH)
+                GENOMENAME="$(basename $FULLPATH)"
+                GENOMENAME=${GENOMENAME%"$EXTENSION"}
+                # If the current genome is in the list of genomes assigned to the unknown cluster
+                if [[ " ${GENOMES[@]} " =~ " $GENOMENAME " ]]; then
+                    cp $GENOMEPATH ${UNKNOWN_TAXONOMY_PATH}/genomes
+                    GENOMEDBPATH=${UNKNOWN_TAXONOMY_PATH}/genomes/${GENOMENAME}.${EXTENSION}
+                    if [[ ! "$EXTENSION" ~= "gz" ]]; then
+                        gzip $GENOMEDBPATH
+                        GENOMEDBPATH=${GENOMEDBPATH}.gz
+                    fi
+                    echo "$GENOMENAME : $GENOMEDBPATH" >> ${UNKNOWN_TAXONOMY_PATH}/genomes.fof
+                    echo "$GENOMEDBPATH" >> ${UNKNOWN_TAXONOMY_PATH}/genomes.txt
+                fi
+            done <$INLIST
+
+            # Split taxonomies to levels
+            UNKNOWN_LEVELS=($(echo ${UNKNOWN_TAXONOMY} | tr "|" " "))
+            ASSIGNED_LEVELS=($(echo ${ASSIGNED_TAXONOMY} | tr "|" " "))
+
+            # Characterise unknown clusters
+            for POS in $(seq 7 1); do
+                if [[ "${UNKNOWN_LEVELS[$POS]}" = "${ASSIGNED_LEVELS[$POS]}" ]]; then
+                    break
+                else
+                    # Get the partial levels for the new taxonomy
+                    NEW_LEVELS=("${ASSIGNED_LEVELS[@]:$POS}")
+                    # Build the partial levels path for the new taxonomy
+                    NEW_LEVELS_SUBPATH=$(printf "/%s" "${NEW_LEVELS[@]}")
+                    # Trim the first slash out of the partial path
+                    NEW_LEVELS_SUBPATH=${NEW_LEVELS_SUBPATH:1}
+                    mkdir -p $DBDIR/${NEW_LEVELS_SUBPATH}
+
+                    # Get the partial levels for the old unknown taxonomy
+                    OLD_LEVELS=("${UNKNOWN_LEVELS[@]:$POS}")
+                    # Build the partial levels path for the old unknown taxonomy
+                    OLD_LEVELS_SUBPATH=$(printf "/%s" "${OLD_LEVELS[@]}")
+                    # Trim the first slash out of the partial path
+                    OLD_LEVELS_SUBPATH=${OLD_LEVELS_SUBPATH:1}
+
+                    # Move everything starting with folders to the new taxonomy folder
+                    find $DBDIR/${OLD_LEVELS_SUBPATH} -type d -exec mv {} $DBDIR/${NEW_LEVELS_SUBPATH} \;
+                    # Also move remaining files in case of species levels (pos 7)
+                    # genomes.fof, genomes.txt, and mags.txt files
+                    find $DBDIR/${OLD_LEVELS_SUBPATH} -type f -exec mv {} $DBDIR/${NEW_LEVELS_SUBPATH} \;
+
+                    # Remove the old bloom filters root nodes
+                    if [[ -f $DBDIR/${NEW_LEVELS_SUBPATH}/${UNKNOWN_LEVELS[$POS]}.bf ]]; then 
+                        rm -f $DBDIR/${NEW_LEVELS_SUBPATH}/${UNKNOWN_LEVELS[$POS]}.bf
+                    fi
+
+                    # Finally remove the old taxonomy folder which is now empty
+                    rm -rf $DBDIR/${OLD_LEVELS_SUBPATH}
+                fi
+            done
+            
+            # Add the new renamed cluster to the REBUILD array
+            REBUILD+=(${ASSIGNED_TAXONOMY})
+        done
+    fi
+
     # Cluster unassigned genomes before rebuilding the updated lineages
     if [[ "${#UNASSIGNED[@]}" -gt "0" ]]; then
         # The kmers matrix already exists in case the dereplication step has been enabled
@@ -693,6 +789,12 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             TAXALIST=()
             for LABEL in ${REBUILD[@]}; do
                 LEVELS=($(echo $LABEL | tr "|" " "))
+                # Temporarily skip partial taxonomic labels if the number of levels is lower than POS
+                # Waiting for the right POS
+                if [[ "${#LEVELS[@]}" -lt "$POS" ]]; then
+                    continue
+                fi
+                # Build the partial taxonomic label
                 SUBLEVELS=("${LEVELS[@]:0:$POS}")
                 TAXONOMY=$(printf "|%s" "${SUBLEVELS[@]}")
                 TAXALIST+=(${TAXONOMY:1})
@@ -702,27 +804,28 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             # Rebuild the sequence bloom trees
             for TAXONOMY in ${TAXALIST[@]}; do
                 printf "\t%s\n" "$TAXONOMY"
-                if [[ -d $TAXONOMY/index ]]; then
-                    # Remove the index
-                    rm -rf $TAXONOMY/index
-                    # Remove the copy of the root node
-                    LEVELNAME="${TAXONOMY##*\|}"
-                    rm ${TAXONOMY}/${LEVELNAME}.bf
-                    if [[ "$POS" -eq "7" ]]; then
-                        # In case of species
-                        # Rebuild the index with kmtricks
-                        kmtricks_index_wrapper ${TAXONOMY}/genomes.fof \
-                                         $DBDIR \
-                                         ${KMER_LEN} \
-                                         ${FILTER_SIZE} \
-                                         $NPROC
-                    else
-                        # In case of all the other taxonomic levels
-                        # Rebuild the index with howdesbt
-                        howdesbt_wrapper $TAXONOMY ${FILTER_SIZE}
-                    fi
+                # Remove the index
+                if [[ -d $TAXONOMY/index ]]; then 
+                    rm -rf rm -rf $TAXONOMY/index
+                fi
+                # Remove the copy of the root node
+                LEVELNAME="${TAXONOMY##*\|}"
+                if [[ -f $TAXONOMY/${LEVELNAME}.bf ]]; then 
+                    rm -f $TAXONOMY/${LEVELNAME}.bf
+                fi
+                # Rebuild the index
+                if [[ "$POS" -eq "7" ]]; then
+                    # In case of species
+                    # Rebuild the index with kmtricks
+                    kmtricks_index_wrapper ${TAXONOMY}/genomes.fof \
+                                        $DBDIR \
+                                        ${KMER_LEN} \
+                                        ${FILTER_SIZE} \
+                                        $NPROC
                 else
-                    printf "\t\t[ERROR] No index found!\n"
+                    # In case of all the other taxonomic levels
+                    # Rebuild the index with howdesbt
+                    howdesbt_wrapper $TAXONOMY ${FILTER_SIZE}
                 fi
             done
         done
