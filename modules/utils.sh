@@ -166,9 +166,9 @@ howdesbt_wrapper () {
                          --nodename=node{number} \
                          --keepallnodes
         # Build the bloom filter files for the tree
-        hodesbt build --HowDe \
-                      --tree=${LEVEL_DIR}/index/union.sbt \
-                      --outtree=${LEVEL_DIR}/index/index.detbrief.sbt
+        howdesbt build --HowDe \
+                       --tree=${LEVEL_DIR}/index/union.sbt \
+                       --outtree=${LEVEL_DIR}/index/index.detbrief.sbt
         # Merge all the leaves together by applying the OR logical operator on the bloom filter files
         # The resulting bloom filter is the representative one, which is the same as the root node of the tree
         while read BFPATH; do
