@@ -90,40 +90,52 @@ displaytime () {
 
 # Download genomes from NCBI GenBank
 esearch_txid () {
-    DB_DIR=$1
-    TAX_ID=$2
-    FULL_TAXONOMY=$3
-    GENOME_CATEGORY=$4
-    SEARCH_CRITERIA=$5
+    DB_DIR=$1           # Path to the database root directory
+    HOW_MANY=$2         # Limit the number of genomes per species (-1 by default, unlimited)
+    TAX_ID=$3           # NCBI taxonomy ID
+    FULL_TAXONOMY=$4    # Full NCBI taxonomy
+    GENOME_CATEGORY=$5  # Genome category ("references" or "mags")
+    SEARCH_CRITERIA=$6  # Search criteria
+
+    COUNT_GENOMES=0     # Stop downloading if the number of genomes exceeds the limit
     # Download GCAs associated to a specific tax_id
     esearch -db assembly -query "txid${TAX_ID} ${SEARCH_CRITERIA}" < /dev/null \
         | esummary \
         | xtract -pattern DocumentSummary -element FtpPath_GenBank \
         | while read -r URL; do
-            # Create a directory for the current taxonomy
-            TAXDIR=${DB_DIR}/$(echo "${FULL_TAXONOMY}" | sed 's/|/\//g')
-            OUTDIR=$TAXDIR/genomes
-            mkdir -p $OUTDIR
-            # Download GCA
-            FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
-            GCA=${FNAME%%.*}
-            if [[ ! -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                wget -q "$URL/$FNAME" -O ${OUTDIR}/${GCA}.fna.gz
-                if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                    if gzip -t ${OUTDIR}/${GCA}.fna.gz; then
-                        # Define a file of file (fof) with the list of genomes for current species
-                        GCAPATH=$(readlink -m ${OUTDIR}/${GCA}.fna.gz)
-                        printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
-                        printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
-                        printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
+            # Check whether the number of downloaded genomes exceeded the limit
+            if [[ "${COUNT_GENOMES}" -ge "${HOW_MANY}" ]] && [[ "${HOW_MANY}" -gt "0" ]]; then
+                # Stop downloading genomes
+                break
+            else
+                # Create a directory for the current taxonomy
+                TAXDIR=${DB_DIR}/$(echo "${FULL_TAXONOMY}" | sed 's/|/\//g')
+                OUTDIR=$TAXDIR/genomes
+                mkdir -p $OUTDIR
+                # Download GCA
+                FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
+                GCA=${FNAME%%.*}
+                if [[ ! -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
+                    wget -q "$URL/$FNAME" -O ${OUTDIR}/${GCA}.fna.gz
+                    if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
+                        if gzip -t ${OUTDIR}/${GCA}.fna.gz; then
+                            # Define a file of file (fof) with the list of genomes for current species
+                            GCAPATH=$(readlink -m ${OUTDIR}/${GCA}.fna.gz)
+                            printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
+                            printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
+                            printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
+
+                            # Increment the genome counter
+                            COUNT_GENOMES=$((COUNT_GENOMES + 1))
+                        else
+                            # Delete corrupted genome
+                            rm ${OUTDIR}/${GCA}.fna.gz
+                            printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
+                        fi
                     else
-                        # Delete corrupted genome
-                        rm ${OUTDIR}/${GCA}.fna.gz
-                        printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
+                        # Report missing genomes
+                        printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
                     fi
-                else
-                    # Report missing genomes
-                    printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
                 fi
             fi
           done
