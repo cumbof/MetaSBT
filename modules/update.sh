@@ -470,7 +470,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
     # They will be assigned to new group
     UNASSIGNED=()
     # Process input genomes
-    while read GENOMEPATH; then
+    while read GENOMEPATH; do
         GENOMEEXT="${GENOMEPATH##*.}"
         GENOMENAME="$(basename ${GENOMEPATH%.*})"
         FILEPATH=$GENOMEPATH
@@ -688,7 +688,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             # Get the most occurring taxonomic label
             ASSIGNED_TAXONOMY="$(printf '%s\n' "${TO_KNOWN_TAXA[@]}" | sort | uniq -c | sort -k1,1nr -k2 | awk '{print $2; exit}')"
             # Retrieve genomes file paths from the input list of genomes and update the genomes.fof file
-            while read GENOMEPATH; then
+            while read GENOMEPATH; do
                 FULLPATH=$(realpath -s $GENOMEPATH)
                 GENOMENAME="$(basename $FULLPATH)"
                 GENOMENAME=${GENOMENAME%"$EXTENSION"}
