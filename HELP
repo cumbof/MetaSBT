@@ -7,7 +7,7 @@ VERSION
     "$VERSION" ("$DATE")
 
 SYNOPSIS
-    index [--db-dir=directory] [--kingdom=value] [--kmer-len=num] [--filter-size=num] 
+    index [--db-dir=directory] [--kingdom=value] [--kmer-len=num] [--filter-size=num] [--how-many=num]
           [--estimate-filter-size] [--checkm-completeness=value] [--checkm-contamination=value] 
           [--dereplicate] [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
 
@@ -40,6 +40,10 @@ DESCRIPTION
 
     -h|--help
         Print this help and exit
+    
+    --how-many=num
+        Limit the number of genomes per species.
+        The number of genomes per species is not limited by default
     
     --kingdom=value
         Consider genomes whose lineage belongs to a specific kingdom only
