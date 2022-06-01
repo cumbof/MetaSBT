@@ -34,6 +34,7 @@ In this last case, remember to check that the following dependencies are install
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin)
+- [ntcard](https://github.com/bcgsc/ntCard)
 - python (version >=3.7)
 - pip
 - wget
@@ -105,7 +106,7 @@ The following command will trigger the generation of the database with all the a
 ```bash
 $ meta-index index --db-dir=~/myindex \
                    --kmer-len=31 \
-                   --filter-size=10000 \
+                   --estimate-filter-size \
                    --kingdom=Bacteria \
                    --dereplicate \
                    --checkm-completeness=50.0 \
@@ -157,7 +158,9 @@ $ meta-index update --input-list=~/mygenomes.txt \
                     --cleanup
 ```
 
-Please remember that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following command in your terminal:
+Please note that the `--filter-size` value must be the same used while running the `index` module.
+
+Remember also that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following command in your terminal:
 ```bash
 INPUTS_DIR=~/mygenomes
 CURRENT_EXTENSION="fa"
