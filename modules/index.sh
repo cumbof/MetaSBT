@@ -18,6 +18,8 @@ NPROC=1
 XARGS_NPROC=1
 # Limit the number of genomes per species
 HOW_MANY=-1
+# Increase the estimated bloom filter size by this percentage
+INCREASE_FILTER_SIZE=0
 # Initialize CheckM completeness and contamination to default values
 # Run CheckM if provided completeness is >0 or contamination is <100
 CHECKM_COMPLETENESS=0
@@ -124,6 +126,24 @@ for ARG in "$@"; do
             # Check whether --how-many is an integer
             if [[ ! ${HOW_MANY} =~ ^[0-9]+$ ]] || [[ "${HOW_MANY}" -eq "0" ]]; then
                 printf "Argument --how-many must be a positive integer greater than 0\n"
+                exit 1
+            fi
+            ;;
+        --increase-filter-size=*)
+            # Increase the estimated filter size by the specified percentage
+            INCREASE_FILTER_SIZE="${ARG#*=}"
+            # Define helper
+            if [[ "${INCREASE_FILTER_SIZE}" =~ "?" ]]; then
+                printf "index helper: --increase-filter-size=num\n\n"
+                printf "\tIncrease the estimated filter size by the specified percentage.\n"
+                printf "\tThis is used in conjunction with the --estimate-filter-size argument only.\n"
+                printf "\tIt is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes.\n"
+                printf "\tDefault: --increase-filter-size=0\n\n"
+                exit 0
+            fi
+            # Check whether --increase-filter-size is an integer
+            if [[ ! ${INCREASE_FILTER_SIZE} =~ ^[0-9]+$ ]] || [[ "${INCREASE_FILTER_SIZE}" -gt "100" ]]; then
+                printf "Argument --increase-filter-size must be a positive integer greater than 0 (up to 100)\n"
                 exit 1
             fi
             ;;
@@ -432,6 +452,11 @@ if ${ESTIMATE_FILTER_SIZE}; then
         F0=$(grep "^F0" $TMPDIR/genomes_k${KMER_LEN}.hist | cut -f2)
         f1=$(grep "^1" $TMPDIR/genomes_k${KMER_LEN}.hist | head -n 1 | cut -f2)
         FILTER_SIZE=$(( ${F0}-${f1} ))
+        # Compute the increment
+        # The result is an integer
+        INCREMENT=$(( ${FILTER_SIZE}*${INCREASE_FILTER_SIZE}/100 ))
+        # Increment the estimated bloom filter size
+        FILTER_SIZE=$(( ${FILTER_SIZE}+${INCREMENT} ))
     else
         printf "\n[ERROR] An error has occurred while running ntCard\n\n"
         # Print the standard error message and exit

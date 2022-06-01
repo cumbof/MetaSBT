@@ -9,7 +9,8 @@ VERSION
 SYNOPSIS
     index [--db-dir=directory] [--kingdom=value] [--kmer-len=num] [--filter-size=num] [--how-many=num]
           [--estimate-filter-size] [--checkm-completeness=value] [--checkm-contamination=value] 
-          [--dereplicate] [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
+          [--dereplicate] [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] 
+          [--increase-filter-size=num] ...
 
 DESCRIPTION
     The \"index\" pipeline is used to automatically retrieve reference genomes and metagenome-assembled genomes from NCBI GenBank 
@@ -44,6 +45,12 @@ DESCRIPTION
     --how-many=num
         Limit the number of genomes per species.
         The number of genomes per species is not limited by default
+
+    --increase-filter-size=num
+        Increase the estimated filter size by the specified percentage.
+        This is used in conjunction with the --estimate-filter-size argument only.
+        It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes.
+        Default: --increase-filter-size=0
     
     --kingdom=value
         Consider genomes whose lineage belongs to a specific kingdom only
