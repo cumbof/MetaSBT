@@ -240,8 +240,8 @@ kmtricks_index_wrapper () {
         fi
     fi
 }
-# Export kmtricks_wrapper to sub-shells
-export -f kmtricks_wrapper
+# Export kmtricks_index_wrapper to sub-shells
+export -f kmtricks_index_wrapper
 
 # Build a kmers matrix with kmtricks
 kmtricks_matrix_wrapper () {
