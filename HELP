@@ -8,8 +8,8 @@ VERSION
 
 SYNOPSIS
     index [--db-dir=directory] [--kingdom=value] [--kmer-len=num] [--filter-size=num] 
-          [--checkm-completeness=value] [--checkm-contamination=value] [--dereplicate] 
-          [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
+          [--estimate-filter-size] [--checkm-completeness=value] [--checkm-contamination=value] 
+          [--dereplicate] [--nproc=num] [--xargs-nproc=num] [--tmp-dir=directory] [--cleanup] ...
 
 DESCRIPTION
     The \"index\" pipeline is used to automatically retrieve reference genomes and metagenome-assembled genomes from NCBI GenBank 
@@ -31,6 +31,9 @@ DESCRIPTION
 
     --dereplicate
         Dereplicate input genomes based on the presence/absence of kmers
+
+    --estimate-filter-size
+        Automatically estimate the bloom filter size with ntCard
 
     --filter-size=num
         This is the size of the bloom filters
@@ -64,7 +67,7 @@ EXIT STATUS
 EXAMPLES
     Try running this script by typing:
 
-        $ meta-index index --db-dir=~/myindex --kingdom=Bacteria --kmer-len=31 --filter-size=10000 
+        $ meta-index index --db-dir=~/myindex --kingdom=Bacteria --kmer-len=31 --estimate-filter-size 
                            --dereplicate --tmp-dir=~/tmp --nproc=4 --xargs-nproc=2 --cleanup
 "
 fi
@@ -175,7 +178,8 @@ DESCRIPTION
         All the input genomes must have the same file extension before running this module
 
     --filter-size=num
-        This is the size of the bloom filters
+        This is the size of the bloom filters.
+        It must be the same size used while running the index module
     
     -h|--help
         Print this help and exit

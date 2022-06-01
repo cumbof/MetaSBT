@@ -209,7 +209,8 @@ for ARG in "$@"; do
             # Define helper
             if [[ "${FILTER_SIZE}" =~ "?" ]]; then
                 printf "update helper: --filter-size=num\n\n"
-                printf "\tThis is the size of the bloom filters.\n\n"
+                printf "\tThis is the size of the bloom filters.\n"
+                printf "\tIt must be the same size used while running the index module.\n\n"
                 exit 0
             fi
             # Check whether --filter-size is an integer
