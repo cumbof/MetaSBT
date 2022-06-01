@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="May 31, 2022"
+DATE="Jun 1, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -312,6 +312,14 @@ run_checkm () {
     println '\tTotal elapsed time: %s\n\n' "$(displaytime ${CHECKM_ELAPSED})"
     # Trim the last comma out of the list of CheckM output table file paths
     CHECKMTABLES="${CHECKMTABLES%?}"
+}
+
+# Print a standard error message and redirect the user to the Issues and Discussions pages on GitHub
+standard_error_message () {
+    printf "If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
+    printf "We would be happy to answer your questions and help you troubleshoot any kind of issues with the meta-index framework.\n\n"
+    printf "https://github.com/BlankenbergLab/meta-index/issues\n"
+    printf "https://github.com/BlankenbergLab/meta-index/discussions\n\n"
 }
 
 # Transpose matrix file

@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="May 31, 2022"
+DATE="Jun 1, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -415,7 +415,9 @@ if ${ESTIMATE_FILTER_SIZE}; then
         f1=$(grep "^1" $TMPDIR/genomes_k${KMER_LEN}.hist | head -n 1 | cut -f2)
         FILTER_SIZE=$(( ${F0}-${f1} ))
     else
-        printf "\n[ERROR] An error has occurred while running ntCard\n"
+        printf "\n[ERROR] An error has occurred while running ntCard\n\n"
+        # Print the standard error message and exit
+        standard_error_message
         exit 1
     fi
 fi
