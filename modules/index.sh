@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="May 27, 2022"
+DATE="May 31, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -24,6 +24,8 @@ CHECKM_CONTAMINATION=100
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
 DEREPLICATE=false
+# Estimate the bloom filter size
+ESTIMATE_FILTER_SIZE=false
 # Remove temporary data at the end of the pipeline
 CLEANUP=false
 
@@ -81,6 +83,10 @@ for ARG in "$@"; do
         --dereplicate)
             # Dereplicate input genomes
             DEREPLICATE=true
+            ;;
+        --estimate-filter-size)
+            # Automatically estimate the best bloom filter size with ntCard
+            ESTIMATE_FILTER_SIZE=true
             ;;
         --filter-size=*)
             # Bloom filter size
@@ -393,6 +399,26 @@ while read tax_id, taxonomy; do
         fi
     fi
 done < $TMPDIR/taxa.tsv
+
+# Automatically estimate the best bloom filter size with ntCard
+if ${ESTIMATE_FILTER_SIZE}; then
+    printf "\nRunning ntCard for estimating the bloom filter size\n"
+    # Create a list with the file paths to all the downloaded genomes
+    find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -I {} bash -c \
+        'INPUT={}; \
+         cat $INPUT | cut -d" " -f3 >> '"$TMPDIR"'/genomes.txt'
+    # Call ntCard
+    # With --kmer=31 it will produce genomes_k21.hist
+    ntcard --kmer=${KMER_LEN} --threads=$NPROC --pref==$TMPDIR/genomes @$TMPDIR/genomes.txt
+    if [[ -f $TMPDIR/genomes_k${KMER_LEN}.hist ]]; then
+        F0=$(grep "^F0" $TMPDIR/genomes_k${KMER_LEN}.hist | cut -f2)
+        f1=$(grep "^1" $TMPDIR/genomes_k${KMER_LEN}.hist | head -n 1 | cut -f2)
+        FILTER_SIZE=$(( ${F0}-${f1} ))
+    else
+        printf "\n[ERROR] An error has occurred while running ntCard\n"
+        exit 1
+    fi
+fi
 
 # Run kmtricks and build a sequence bloom tree for each species
 printf "\nRunning kmtricks at the species level\n"
