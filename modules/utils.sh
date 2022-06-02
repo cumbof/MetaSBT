@@ -355,6 +355,15 @@ standard_error_message () {
     println "https://github.com/BlankenbergLab/meta-index/discussions\n\n"
 }
 
+# Print the list of supported file extensions for input genomes
+supported_extensions () {
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ ! "$line" =~ ^#.* ]]; then
+            println '%s\n' "$line"
+        fi
+    done < $1
+}
+
 # Transpose matrix file
 # Credits: https://stackoverflow.com/a/28167793
 transpose () {
