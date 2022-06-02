@@ -393,7 +393,10 @@ while read tax_id, taxonomy; do
                         GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Get value under column 1
                         COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Get value under column 12
                         CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Get value under column 13
-                        if [[ "$COMPLETENESS" -lt "${CHECKM_COMPLETENESS}" ]] || [[ "$CONTAMINATION" -gt "${CHECKM_CONTAMINATION}" ]]; then
+                        # Use bc command for comparing floating point numbers
+                        COMPLETENESS_CHECK="$(echo "$COMPLETENESS < ${CHECKM_COMPLETENESS}" | bc)"
+                        CONTAMINATION_CHECK="$(echo "$CONTAMINATION > ${CHECKM_CONTAMINATION}" | bc)"
+                        if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
                             # Remove genome from directory
                             rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
                         else

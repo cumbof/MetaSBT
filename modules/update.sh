@@ -396,7 +396,10 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
             GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Genome ID column 1
             COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Completeness column 12
             CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Contamination column 13
-            if [[ "$COMPLETENESS" -ge "${CHECKM_COMPLETENESS}" ]] && [[ "$CONTAMINATION" -le "${CHECKM_CONTAMINATION}" ]]; then
+            # Use bc command for comparing floating point numbers
+            COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
+            CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
+            if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
                 # Current genome passed the quality control
                 grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
             fi
