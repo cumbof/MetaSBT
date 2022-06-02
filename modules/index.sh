@@ -343,6 +343,12 @@ zcat $TMPDIR/ncbi_lineages.csv.gz | \
                                         }
                                      }' > $TMPDIR/taxa.tsv
 
+# Remove duplicate taxonomies
+# Subspecies have the same taxonomic label but different NCBI taxa ID
+# Keep the first occurrence of each taxonomic label
+# They are all already sorted in ascending order on the NCBI taxa ID
+awk '!seen[$2]++' $TMPDIR/taxa.tsv > $TMPDIR/taxa_unique.tsv
+
 # Download all GCAs associated to the taxa IDs in taxa.tsv
 # Use genomes that have not been excluded from RefSeq
 # https://www.ncbi.nlm.nih.gov/assembly/help/anomnotrefseq/
@@ -457,7 +463,7 @@ while read tax_id, taxonomy; do
             fi
         fi
     fi
-done < $TMPDIR/taxa.tsv
+done < $TMPDIR/taxa_unique.tsv
 
 # Automatically estimate the best bloom filter size with ntCard
 if ${ESTIMATE_FILTER_SIZE}; then
