@@ -10,23 +10,24 @@ VERSION="0.1.0"
 # Check for external software dependencies
 check_dependencies () {
     VERBOSE=$1
-    if ${VERBOSE}; then
+    if $VERBOSE; then
         printf "Checking for software dependencies\n"
     fi
     # Define the set of dependencies
-    DEPENDENCIES=("bc" "checkm" "gzip" "howdesbt" "kmtricks" "ncbitax2lin" "ntcard" "wget")
+    # esearch, esummary, and xtract come from the Entrez Direct (EDirect) utility
+    DEPENDENCIES=("bc" "checkm" "esearch" "esummary" "gzip" "howdesbt" "kmtricks" "ncbitax2lin" "ntcard" "wget" "xtract")
 
     # Count how many missing dependencies
     MISSING=0
     for dep in "${DEPENDENCIES[@]}"; do
         # Check for dependency
         if ! command -v $dep &> /dev/null ; then
-            if ${VERBOSE}; then
+            if $VERBOSE; then
                 printf "\t[--] %s\n" "$dep"
             fi
             MISSING=$(($MISSING + 1))
         else
-            if ${VERBOSE}; then
+            if $VERBOSE; then
                 printf "\t[OK] %s\n" "$dep"
             fi
         fi
@@ -34,14 +35,14 @@ check_dependencies () {
     
     # Return 1 in case of missing dependencies
     if [ "$MISSING" -gt "0" ]; then
-        if ${VERBOSE}; then
+        if $VERBOSE; then
             printf "\nPlease, install all the missing dependencies and try again.\n\n"
         fi
         return 1
     fi
     
     # Return 0 if all external software dependencies are satisfied
-    if ${VERBOSE}; then
+    if $VERBOSE; then
         printf "\nAll required dependencies satisfied!\n\n"
     fi
     return 0
@@ -53,8 +54,8 @@ check_for_software_updates () {
     VERSION=$1
     if [ ! -z ${LAST_SOFTWARE_VERSION} ]; then
         if [[ "${LAST_SOFTWARE_VERSION}" != $VERSION ]]; then
-            println "A new version of meta-index is available!\n" "${LAST_SOFTWARE_VERSION}"
-            println "https://github.com/BlankenbergLab/meta-index/releases\n\n"
+            printf "A new version of meta-index is available!\n" "${LAST_SOFTWARE_VERSION}"
+            printf "https://github.com/BlankenbergLab/meta-index/releases\n\n"
         fi
     fi
 }
@@ -90,14 +91,21 @@ displaytime () {
 
 # Download genomes from NCBI GenBank
 esearch_txid () {
-    DB_DIR=$1           # Path to the database root directory
+    DBDIR=$1            # Path to the database root directory
     HOW_MANY=$2         # Limit the number of genomes per species (-1 by default, unlimited)
     TAX_ID=$3           # NCBI taxonomy ID
     FULL_TAXONOMY=$4    # Full NCBI taxonomy
     GENOME_CATEGORY=$5  # Genome category ("references" or "mags")
-    SEARCH_CRITERIA=$6  # Search criteria
 
-    COUNT_GENOMES=0     # Stop downloading if the number of genomes exceeds the limit
+    # Define a search criteria which is empty by default for MAGs
+    SEARCH_CRITERIA=""
+    if [[ "${GENOME_CATEGORY}" = "references" ]]; then
+        # Retrieve genomes excluded from RefSeq in case of references
+        SEARCH_CRITERIA="NOT excluded-from-refseq [PROP]"
+    fi
+
+    # Stop downloading if the number of genomes exceeds the limit
+    COUNT_GENOMES=0
     # Download GCAs associated to a specific tax_id
     esearch -db assembly -query "txid${TAX_ID} ${SEARCH_CRITERIA}" < /dev/null \
         | esummary \
@@ -107,35 +115,34 @@ esearch_txid () {
             if [[ "${COUNT_GENOMES}" -ge "${HOW_MANY}" ]] && [[ "${HOW_MANY}" -gt "0" ]]; then
                 # Stop downloading genomes
                 break
-            else
-                # Create a directory for the current taxonomy
-                TAXDIR=${DB_DIR}/$(echo "${FULL_TAXONOMY}" | sed 's/|/\//g')
-                OUTDIR=$TAXDIR/genomes
-                mkdir -p $OUTDIR
-                # Download GCA
-                FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
-                GCA=${FNAME%%.*}
-                if [[ ! -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                    wget -q "$URL/$FNAME" -O ${OUTDIR}/${GCA}.fna.gz
-                    if [[ -f "${OUTDIR}/${GCA}.fna.gz" ]]; then
-                        if gzip -t ${OUTDIR}/${GCA}.fna.gz; then
-                            # Define a file of file (fof) with the list of genomes for current species
-                            GCAPATH=$(readlink -m ${OUTDIR}/${GCA}.fna.gz)
-                            printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
-                            printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
-                            printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
+            fi
+            # Create a directory for the current taxonomy
+            TAXDIR=$DBDIR/$(echo "${FULL_TAXONOMY}" | sed 's/|/\//g')
+            OUTDIR=$TAXDIR/genomes
+            mkdir -p $OUTDIR
+            # Download GCA
+            FNAME=$(echo $URL | grep -o 'GCA_.*' | sed 's/$/_genomic.fna.gz/')
+            GCA=${FNAME%%.*}
+            if [[ ! -f "$OUTDIR/${GCA}.fna.gz" ]]; then
+                wget -q "$URL/$FNAME" -O $OUTDIR/${GCA}.fna.gz
+                if [[ -f "$OUTDIR/${GCA}.fna.gz" ]]; then
+                    if gzip -t $OUTDIR/${GCA}.fna.gz; then
+                        # Define a file of file (fof) with the list of genomes for current species
+                        GCAPATH=$(readlink -m $OUTDIR/${GCA}.fna.gz)
+                        printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
+                        printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
+                        printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
 
-                            # Increment the genome counter
-                            COUNT_GENOMES=$((COUNT_GENOMES + 1))
-                        else
-                            # Delete corrupted genome
-                            rm ${OUTDIR}/${GCA}.fna.gz
-                            printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
-                        fi
+                        # Increment the genome counter
+                        COUNT_GENOMES=$((COUNT_GENOMES + 1))
                     else
-                        # Report missing genomes
-                        printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
+                        # Delete corrupted genome
+                        rm $OUTDIR/${GCA}.fna.gz
+                        printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
                     fi
+                else
+                    # Report missing genomes
+                    printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
                 fi
             fi
           done
@@ -170,7 +177,7 @@ howdesbt_wrapper () {
 
     mkdir -p ${LEVEL_DIR}/index
     HOWMANY=$(wc -l ${LEVEL_DIR}/${LEVEL_NAME}.txt | cut -d" " -f1)
-    if [[ "${HOWMANY}" -gt "1" ]]; then
+    if [[ "$HOWMANY" -gt "1" ]]; then
         # Create a tree topology file with howdesbt
         howdesbt cluster --list=${LEVEL_DIR}/${LEVEL_NAME}.txt \
                          --bits=${FILTER_SIZE} \
@@ -185,16 +192,16 @@ howdesbt_wrapper () {
         # The resulting bloom filter is the representative one, which is the same as the root node of the tree
         while read BFPATH; do
             if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then
-                cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf
+                cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
             else
-                howdesbt bfoperate ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out ${LEVEL_DIR}/merged.bf
+                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out ${LEVEL_DIR}/merged.bf
                 mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf
             fi
         done < ${LEVEL_DIR}/${LEVEL_NAME}.txt
     else
         # With only one bloom filter, it does not make sense to build an index with howdesbt
         BFPATH=$(head -n1 "${LEVEL_DIR}/${LEVEL_NAME}.txt")
-        cp ${BFPATH} ${LEVEL_DIR}/${LEVEL_NAME}.bf
+        cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
     fi
 }
 # Export howdesbt_wrapper to sub-shells
@@ -208,14 +215,14 @@ kmtricks_index_wrapper () {
     KMER_LEN=$3     # Length of the kmers
     FILTER_SIZE=$4  # Bloom filter size
     NPROC=$5        # Max nproc for multiprocessing
-    FOLDERPATH=$(dirname "${INPUT}")
-    if [[ ! -f "${FOLDERPATH}/index/kmtricks.fof" ]]; then
+    FOLDERPATH=$(dirname "$INPUT")
+    if [[ ! -f "$FOLDERPATH/index/kmtricks.fof" ]]; then
         # Take track of the processed species in log
-        echo ${INPUT} >> ${DBDIR}/kmtricks.log
+        echo $INPUT >> $DBDIR/kmtricks.log
 
         # Run the kmtricks pipeline
-        kmtricks pipeline --file ${INPUT} \
-                          --run-dir ${FOLDERPATH}/index \
+        kmtricks pipeline --file $INPUT \
+                          --run-dir $FOLDERPATH/index \
                           --kmer-size ${KMER_LEN} \
                           --mode hash:bft:bin \
                           --hard-min 1 \
@@ -223,32 +230,32 @@ kmtricks_index_wrapper () {
                           --bf-format howdesbt \
                           --cpr \
                           --skip-merge \
-                          --threads ${NPROC}
+                          --threads $NPROC
         
         FOLDERNAME="${FOLDERPATH##*/}"
-        HOWMANY=$(wc -l ${INPUT} | cut -d" " -f1)
-        if [[ "${HOWMANY}" -gt "1" ]]; then
+        HOWMANY=$(wc -l $INPUT | cut -d" " -f1)
+        if [[ "$HOWMANY" -gt "1" ]]; then
             # Index genomes by building a sequence bloom tree with howdesbt
-            kmtricks index --run-dir ${FOLDERPATH}/index \
+            kmtricks index --run-dir $FOLDERPATH/index \
                            --howde \
-                           --threads ${NPROC}
+                           --threads $NPROC
             # Merge all the leaves together by applying the OR logical operator on the bloom filter files
             # The resulting bloom filter is the representative one, which is the same as the root node of the tree
             while read line; do
-                GENOME=$(echo "${line}" | cut -d" " -f1)
-                if [[ ! -f ${FOLDERPATH}/${FOLDERNAME}.bf ]]; then
-                    cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf
+                GENOME=$(echo "$line" | cut -d" " -f1)
+                if [[ ! -f $FOLDERPATH/${FOLDERNAME}.bf ]]; then
+                    cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
                 else
-                    howdesbt bfoperate ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf --or --out ${FOLDERPATH}/merged.bf
-                    mv ${FOLDERPATH}/merged.bf ${FOLDERPATH}/${FOLDERNAME}.bf
+                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out $FOLDERPATH/merged.bf
+                    mv $FOLDERPATH/merged.bf $FOLDERPATH/${FOLDERNAME}.bf
                 fi
-            done < ${INPUT}
+            done < $INPUT
         else
             # With only one genome, it does not make sense to build an index with howdesbt
-            mkdir -p ${FOLDERPATH}/index/howde_index
-            cp ${INPUT} ${FOLDERPATH}/index/kmtricks.fof
-            GENOME=$(head -n1 "${INPUT}" | cut -d" " -f1)
-            cp ${FOLDERPATH}/index/filters/${GENOME}.bf ${FOLDERPATH}/${FOLDERNAME}.bf
+            mkdir -p $FOLDERPATH/index/howde_index
+            cp $INPUT $FOLDERPATH/index/kmtricks.fof
+            GENOME=$(head -n1 "$INPUT" | cut -d" " -f1)
+            cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
         fi
     fi
 }
@@ -268,14 +275,14 @@ kmtricks_matrix_wrapper () {
                       --mode kmer:count:bin \
                       --hard-min 1 \
                       --cpr \
-                      --threads ${NPROC}
+                      --threads $NPROC
     # Aggregate
     kmtricks aggregate --run-dir ${RUN_DIR} \
                        --matrix kmer \
                        --format text \
                        --cpr-in \
                        --sorted \
-                       --threads ${NPROC} > ${OUT_TABLE}
+                       --threads $NPROC > ${OUT_TABLE}
 }
 
 # Run CheckM for quality control base on completeness and contamination
@@ -283,41 +290,44 @@ kmtricks_matrix_wrapper () {
 # for accessing the result as a list of file paths separated by comma
 run_checkm () {
     INLIST=$1       # Path to the file with the list of paths to the input genomes
-    EXTENSION=$2    # Extension of input genome files
-    TMPDIR=$3       # Temporary folder
-    NPROC=$4        # Number of parallel processes for CheckM
+    RUNID=$2        # Unique ID of the current CheckM run
+    EXTENSION=$3    # Extension of input genome files
+    TMPDIR=$4       # Temporary folder
+    NPROC=$5        # Number of parallel processes for CheckM
 
     # Run CheckM
     printf 'Running CheckM\n'
     CHECKM_START_TIME="$(date +%s.%3N)"
-    mkdir -p $TMPDIR/checkm/tmp
+    # Define temporary run directory
+    RUNDIR=$TMPDIR/checkm/$RUNID
+    mkdir -p $RUNDIR/tmp
     # Split the set of bins in chunks with 1000 genomes at most
-    println '\tOrganising genomes in chunks\n'
-    split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $TMPDIR/checkm/tmp/bins_
-    CHUNKS=`ls "$TMPDIR"/checkm/tmp/bins_*.txt 2>/dev/null | wc -l`
+    printf '\tOrganising genomes in chunks\n'
+    split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $RUNDIR/tmp/bins_
+    CHUNKS=`ls "$TMPDIR"/checkm/"$RUNID"/tmp/bins_*.txt 2>/dev/null | wc -l`
     CHECKMTABLES=""
-    for filepath in $TMPDIR/checkm/tmp/bins_*.txt; do
+    for filepath in $RUNDIR/tmp/bins_*.txt; do
         # Retrieve chunk id
         filename="$(basename $filepath)"
         suffix="${filename#*_}"
         suffix="${suffix%.txt}"
-        println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
+        printf '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
         # Create chunk folder
-        mkdir -p $TMPDIR/checkm/tmp/bins_${suffix}
+        mkdir -p $RUNDIR/tmp/bins_${suffix}
         for bin in `sed '/^$/d' $filepath`; do
             # Make a symbolic link to the 1000 genomes for the current chunk
-            ln -s $bin $TMPDIR/checkm/tmp/bins_${suffix}
+            ln -s $bin $RUNDIR/tmp/bins_${suffix}
         done
         # Create the CheckM folder for the current chunk
-        mkdir -p $TMPDIR/checkm/run_$suffix/
+        mkdir -p $RUNDIR/run_$suffix/
         # Run CheckM
-        checkm lineage_wf -t ${NPROC} \
-                          -x ${EXTENSION} \
-                          --pplacer_threads ${NPROC} \
-                          --tab_table -f $TMPDIR/checkm/run_${suffix}.tsv \
-                          $TMPDIR/checkm/tmp/bins_${suffix} $TMPDIR/checkm/run_$suffix
+        checkm lineage_wf -t $NPROC \
+                          -x $EXTENSION \
+                          --pplacer_threads $NPROC \
+                          --tab_table -f $RUNDIR/run_${suffix}.tsv \
+                          $RUNDIR/tmp/bins_${suffix} $RUNDIR/run_$suffix
         # Take trace of the CheckM output tables
-        CHECKMTABLES=$TMPDIR/checkm/run_${suffix}.tsv,$CHECKMTABLES
+        CHECKMTABLES=$RUNDIR/run_${suffix}.tsv,$CHECKMTABLES
     done
     CHECKM_END_TIME="$(date +%s.%3N)"
     CHECKM_ELAPSED="$(bc <<< "${CHECKM_END_TIME}-${CHECKM_START_TIME}")"

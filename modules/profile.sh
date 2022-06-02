@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="May 31, 2022"
+DATE="Jun 1, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -36,7 +36,7 @@ for ARG in "$@"; do
             # Input file path with queries
             INPUTFILE="${ARG#*=}"
             # Define helper
-            if [[ "${INPUTFILE}" =~ "?" ]]; then
+            if [[ "$INPUTFILE" =~ "?" ]]; then
                 printf "profile helper: --input-file=file\n\n"
                 printf "\tPath to the input genome.\n\n"
                 exit 0
@@ -52,7 +52,7 @@ for ARG in "$@"; do
             # Input id
             INPUTID="${ARG#*=}"
             # Define helper
-            if [[ "${INPUTID}" =~ "?" ]]; then
+            if [[ "$INPUTID" =~ "?" ]]; then
                 printf "profile helper: --input-id=value\n\n"
                 printf "\tUnique identifier of the input genome.\n\n"
                 exit 0
@@ -62,7 +62,7 @@ for ARG in "$@"; do
             # Output folder
             OUTPUTDIR="${ARG#*=}"
             # Define helper
-            if [[ "${OUTPUTDIR}" =~ "?" ]]; then
+            if [[ "$OUTPUTDIR" =~ "?" ]]; then
                 printf "profile helper: --output-dir=directory\n\n"
                 printf "\tThis is the output folder with queries results.\n\n"
                 exit 0
@@ -72,7 +72,7 @@ for ARG in "$@"; do
             # Output folder
             OUTPUTPREFIX="${ARG#*=}"
             # Define helper
-            if [[ "${OUTPUTPREFIX}" =~ "?" ]]; then
+            if [[ "$OUTPUTPREFIX" =~ "?" ]]; then
                 printf "profile helper: --output-prefix=value\n\n"
                 printf "\tPrefix of the output files with query matches.\n\n"
                 exit 0
@@ -82,7 +82,7 @@ for ARG in "$@"; do
             # Theta threshold
             THRESHOLD="${ARG#*=}"
             # Define helper
-            if [[ "${THRESHOLD}" =~ "?" ]]; then
+            if [[ "$THRESHOLD" =~ "?" ]]; then
                 printf "profile helper: --threshold=number\n\n"
                 printf "\tFraction of query kmers that must be present in a leaf to be considered a match.\n"
                 printf "\tThis must be between 0 and 1.\n"
@@ -94,7 +94,7 @@ for ARG in "$@"; do
             # Tree definition file path
             TREE="${ARG#*=}"
             # Define helper
-            if [[ "${TREE}" =~ "?" ]]; then
+            if [[ "$TREE" =~ "?" ]]; then
                 printf "profile helper: --tree=file\n\n"
                 printf "\tThis is the tree definition file.\n\n"
                 exit 0
@@ -126,12 +126,12 @@ if [[ "$?" -gt "0" ]]; then
 fi
 
 printf "Input:\n"
-printf "\tFile path: %s\n" "${INPUTFILE}"
-printf "\tInput ID: %s\n\n" "${INPUTID}"
+printf "\tFile path: %s\n" "$INPUTFILE"
+printf "\tInput ID: %s\n\n" "$INPUTID"
 
 # Create the output directory if it does not exist
-if [[ ! -d ${OUTPUTDIR} ]]; then
-    mkdir -p ${OUTPUTDIR}
+if [[ ! -d $OUTPUTDIR ]]; then
+    mkdir -p $OUTPUTDIR
 fi
 
 # Take track of the best matches
@@ -151,19 +151,19 @@ CLOSEST_GENOME_SCORE=0
 
 printf "Querying trees:\n"
 # Start querying the tree
-while [[ -f ${TREE} ]]; do
+while [[ -f $TREE ]]; do
     IDXDIR="$(dirname $TREE)"
     LEVELDIR="$(dirname $IDXDIR)"
     LEVEL="$(basename $LEVELDIR)"
     # Query the sequence bloom tree
-    printf "\t%s\n" "${TREE}"
-    howdesbt query --tree=${TREE} \
-                   --threshold=${THRESHOLD} \
+    printf "\t%s\n" "$TREE"
+    howdesbt query --tree=$TREE \
+                   --threshold=$THRESHOLD \
                    --adjust \
                    --sort \
-                   ${INPUTFILE} > ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt
+                   $INPUTFILE > $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt
     # Get best match line
-    BEST=$(grep -E "^[[:alnum:]]" ${OUTPUTDIR}/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
+    BEST=$(grep -E "^[[:alnum:]]" $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
     # Best match ID
     MATCH=$(echo "$BEST" | cut -d' ' -f1)
     # Common kmers with the best match
@@ -184,9 +184,9 @@ while [[ -f ${TREE} ]]; do
         SCORES+=("$SCORE")
 
         # Keep querying if --expand
-        TREE=${LEVELDIR}/${MATCH}/index/index.detbrief.sbt
+        TREE=$LEVELDIR/$MATCH/index/index.detbrief.sbt
         if [[ "$MATCH" = s__* ]]; then
-            TREE=${LEVELDIR}/${MATCH}/index/howde_index/index.detbrief.sbt
+            TREE=$LEVELDIR/$MATCH/index/howde_index/index.detbrief.sbt
         fi
 
         # Stop querying trees
@@ -197,8 +197,8 @@ while [[ -f ${TREE} ]]; do
 done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
-if [[ ! -f ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv ]]; then
-    printf "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+if [[ ! -f $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv ]]; then
+    printf "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 # Reconstruct the lineage
@@ -232,7 +232,7 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
                                   "${LINEAGE[i]}" \
                                   "${COMMON_KMERS[i]}" \
                                   "${SCORES[i]}" \
-                                  >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+                                  >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
     done
 fi
 
@@ -247,7 +247,7 @@ if [ ! -z "${CLOSEST_GENOME}" ]; then
                               "${CLOSEST_GENOME}" \
                               "${CLOSEST_GENOME_COMMON_KMERS}" \
                               "${CLOSEST_GENOME_SCORE}" \
-                              >> ${OUTPUTDIR}/${OUTPUTPREFIX}__profiles.tsv
+                              >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"

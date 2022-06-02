@@ -29,10 +29,10 @@ get_boundaries () {
     while [[ "${#MIN_BOUNDS[@]}" -eq "0" ]] && [[ "${#MAX_BOUNDS[@]}" -eq "0" ]]; do
         if ! $RETRY; then
             # Add a tab at the end to avoid multiple matched at first
-            TAX_BOUNDARIES="$(grep "${TAXLABEL}"$'\t' $BOUNDARIES)"
+            TAX_BOUNDARIES="$(grep "$TAXLABEL"$'\t' $BOUNDARIES)"
         else
             # Add a pipe at the end of the taxonomic label for all the other levels
-            TAX_BOUNDARIES="$(grep "${TAXLABEL}|" $BOUNDARIES)"
+            TAX_BOUNDARIES="$(grep "$TAXLABEL|" $BOUNDARIES)"
         fi
 
         if [[ ! -z "${TAX_BOUNDARIES}" ]]; then
@@ -101,7 +101,7 @@ for ARG in "$@"; do
             # Clusters boundaries computed through the boundaries module
             BOUNDARIES="${ARG#*=}"
             # Define helper
-            if [[ "${BOUNDARIES}" =~ "?" ]]; then
+            if [[ "$BOUNDARIES" =~ "?" ]]; then
                 printf "update helper: --boundaries=file\n\n"
                 printf "\tPath to the output table produced by the boundaries module.\n"
                 printf "\tIt is required in case of MAGs as input genomes only\n\n"
@@ -167,13 +167,13 @@ for ARG in "$@"; do
             # Database directory
             DBDIR="${ARG#*=}"
             # Define helper
-            if [[ "${DBDIR}" =~ "?" ]]; then
+            if [[ "$DBDIR" =~ "?" ]]; then
                 printf "update helper: --db-dir=directory\n\n"
                 printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
-            DBDIR="$( cd "$( dirname "${DBDIR}" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
+            DBDIR="$( cd "$( dirname "$DBDIR" )" &> /dev/null && pwd )"/"$( basename $DBDIR )"
             # Trim the last slash out of the path
             DBDIR="${DBDIR%/}"
             # Check whether the input directory exist
@@ -193,7 +193,7 @@ for ARG in "$@"; do
             # All the input genomes must have the same file extension
             EXTENSION="${ARG#*=}"
             # Define helper
-            if [[ "${EXTENSION}" =~ "?" ]]; then
+            if [[ "$EXTENSION" =~ "?" ]]; then
                 printf "update helper: --extension=value\n\n"
                 printf "\tSpecify the input genome files extension.\n"
                 printf "\tAll the input genomes must have the same file extension before running this module.\n\n"
@@ -202,7 +202,7 @@ for ARG in "$@"; do
             # Allowed extensions: "fa", "fasta", "fna" and gzip compressed formats
             EXTENSION_LIST=("fa" "fa.gz" "fasta" "fasta.gz" "fna" "fna.gz")
             if ! echo ${EXTENSION_LIST[@]} | grep -w -q $EXTENSION; then
-                printf "File extension \"%s\" is not allowed!\n" "$TYPE"
+                printf "File extension \"%s\" is not allowed!\n" "$EXTENSION"
                 printf "Please have a look at the helper of the --extension argument for a list of valid input file extensions.\n"
                 exit 1
             fi
@@ -233,13 +233,13 @@ for ARG in "$@"; do
             # Input file with the list of paths to the new genomes
             INLIST="${ARG#*=}"
             # Define helper
-            if [[ "${INLIST}" =~ "?" ]]; then
+            if [[ "$INLIST" =~ "?" ]]; then
                 printf "update helper: --input-list=file\n\n"
                 printf "\tThis file contains the list of paths to the new genomes that will be added to the database.\n\n"
                 exit 0
             fi
             # Check whether the input file exists
-            if [[ ! -f $BOUNDARIES ]]; then
+            if [[ ! -f $INLIST ]]; then
                 printf "Input file does not exist!\n"
                 printf "--input-list=%s\n" "$INLIST"
                 exit 1
@@ -249,7 +249,7 @@ for ARG in "$@"; do
             # Consider genomes whose lineage belong to a specific kingdom only
             KINGDOM="${ARG#*=}"
             # Define helper
-            if [[ "${KINGDOM}" =~ "?" ]]; then
+            if [[ "$KINGDOM" =~ "?" ]]; then
                 printf "update helper: --kingdom=value\n\n"
                 printf "\tSelect the kingdom that will be updated.\n\n"
                 exit 0
@@ -274,7 +274,7 @@ for ARG in "$@"; do
             # Max nproc for all parallel instructions
             NPROC="${ARG#*=}"
             # Define helper
-            if [[ "${NPROC}" =~ "?" ]]; then
+            if [[ "$NPROC" =~ "?" ]]; then
                 printf "update helper: --nproc=num\n\n"
                 printf "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
                 printf "\tDefault: --nproc=1\n\n"
@@ -290,14 +290,14 @@ for ARG in "$@"; do
             # Input file with the mapping between input reference genome IDs and their taxonomic label
             TAXA="${ARG#*=}"
             # Define helper
-            if [[ "${TAXA}" =~ "?" ]]; then
+            if [[ "$TAXA" =~ "?" ]]; then
                 printf "update helper: --taxa=file\n\n"
                 printf "\tInput file with the mapping between input genome IDs and their taxonomic label.\n"
                 printf "\tThis is used in case of reference genomes only \"--type=references\".\n\n"
                 exit 0
             fi
             # Check whether the input file exists
-            if [[ ! -f $BOUNDARIES ]]; then
+            if [[ ! -f $TAXA ]]; then
                 printf "Input file does not exist!\n"
                 printf "--taxa=%s\n" "$TAXA"
                 exit 1
@@ -307,13 +307,13 @@ for ARG in "$@"; do
             # Temporary folder
             TMPDIR="${ARG#*=}"
             # Define helper
-            if [[ "${TMPDIR}" =~ "?" ]]; then
+            if [[ "$TMPDIR" =~ "?" ]]; then
                 printf "update helper: --tmp-dir=directory\n\n"
                 printf "\tPath to the folder for storing temporary data.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
-            TMPDIR="$( cd "$( dirname "${TMPDIR}" )" &> /dev/null && pwd )"/"$( basename $TMPDIR )"
+            TMPDIR="$( cd "$( dirname "$TMPDIR" )" &> /dev/null && pwd )"/"$( basename $TMPDIR )"
             # Trim the last slash out of the path
             TMPDIR="${TMPDIR%/}"
             ;;
@@ -356,38 +356,38 @@ fi
 mkdir -p $TMPDIR
 
 # Count how many genomes in input
-HOW_MANY=$(cat ${INLIST} | wc -l)
+HOW_MANY=$(cat $INLIST | wc -l)
 printf "Processing %s genomes\n" "${HOW_MANY}"
-printf "\t%s\n\n" "${INLIST}"
+printf "\t%s\n\n" "$INLIST"
 
 # Input genomes must be quality-controlled before being added to the database
 if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
     CHECKMTABLES="" # This is the result of the "run_checkm" function as a list of file paths separated by comma
-    run_checkm $INLIST $EXTENSION $TMPDIR $NPROC
+    run_checkm $INLIST "update" $EXTENSION $TMPDIR $NPROC
     
     # Read all the CheckM output tables and filter genomes on their completeness and contamination scores 
     # according to the those provided in input
-    touch ${TMPDIR}/genomes_qc.txt
+    touch $TMPDIR/genomes_qc.txt
     CHECKMTABLES_ARR=($(echo $CHECKMTABLES | tr "," " "))
     for table in ${CHECKMTABLES_ARR[@]}; do
         # Skip header line with sed
         # Discard genomes according to their completeness and contamination
         sed 1d $table | while read line; do
             # Retrieve completeness and contamination of current genome
-            GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Get value under column 1
-            COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Get value under column 12
-            CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Get value under column 13
+            GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Genome ID column 1
+            COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Completeness column 12
+            CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Contamination column 13
             if [[ "$COMPLETENESS" -ge "${CHECKM_COMPLETENESS}" ]] && [[ "$CONTAMINATION" -le "${CHECKM_CONTAMINATION}" ]]; then
                 # Current genome passed the quality control
-                grep -w "${GENOMEID}.${EXTENSION}" ${INLIST} >> ${TMPDIR}/genomes_qc.txt
+                grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
             fi
         done
     done
 
     # Create a new INLIST file with the new list of genomes
-    INLIST=${TMPDIR}/genomes_qc.txt
+    INLIST=$TMPDIR/genomes_qc.txt
     # Count how many genomes passed the quality control
-    HOW_MANY=$(cat ${INLIST} | wc -l)
+    HOW_MANY=$(cat $INLIST | wc -l)
 
     printf "\t%s genomes passed the quality control\n" "${HOW_MANY}"
     printf "\t\tMinimum completeness: %s\n" "${CHECKM_COMPLETENESS}"
@@ -396,11 +396,11 @@ fi
 
 # Use kmtricks to build a kmer matrix and compare input genomes
 # Discard genomes with the same set of kmers (dereplication)
-if ${DEREPLICATE}; then
+if $DEREPLICATE; then
     # Count how many input genomes survived in case they have been quality controlled
-    HOW_MANY=$(cat ${INLIST} | wc -l)
+    HOW_MANY=$(cat $INLIST | wc -l)
     if [[ "${HOW_MANY}" -gt "1" ]]; then        
-        GENOMES_FOF=${TMPDIR}/genomes.fof
+        GENOMES_FOF=$TMPDIR/genomes.fof
         # Build a fof file with the list of input genomes
         while read -r genomepath; do
             GENOME_NAME="$(basename $genomepath)"
@@ -411,33 +411,33 @@ if ${DEREPLICATE}; then
             printf "\nDereplicating %s input genomes\n" "${HOW_MANY}"
             # Run kmtricks to build the kmers matrix
             kmtricks_matrix_wrapper ${GENOMES_FOF} \
-                                    ${TMPDIR}/matrix \
-                                    ${NPROC} \
-                                    ${TMPDIR}/kmers_matrix.txt
+                                    $TMPDIR/matrix \
+                                    $NPROC \
+                                    $TMPDIR/kmers_matrix.txt
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
-            echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
-            cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
-            mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
+            echo "#kmer $HEADER" > $TMPDIR/kmers_matrix_wh.txt
+            cat $TMPDIR/kmers_matrix.txt >> $TMPDIR/kmers_matrix_wh.txt
+            mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
             # Remove duplicate columns
-            cat ${TMPDIR}/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > ${TMPDIR}/kmers_matrix_dereplicated.txt
+            cat $TMPDIR/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > $TMPDIR/kmers_matrix_dereplicated.txt
             
             # Dereplicate genomes
             while read -r genome; do
-                if head -n1 ${TMPDIR}/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
+                if head -n1 $TMPDIR/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
                     # Rebuild the absolute path to the genome file
-                    realpath -s $(grep "^${genome} " ${TMPDIR}/genomes.fof | cut -d' ' -f3) >> ${TMPDIR}/genomes_dereplicated.txt
+                    realpath -s $(grep "^$genome " $TMPDIR/genomes.fof | cut -d' ' -f3) >> $TMPDIR/genomes_dereplicated.txt
                 fi
-            done <<<"$(head -n1 ${TMPDIR}/kmers_matrix.txt | tr " " "\n")"
+            done <<<"$(head -n1 $TMPDIR/kmers_matrix.txt | tr " " "\n")"
             
             # Use the new list of dereplicated genomes
-            if [[ -f ${TMPDIR}/genomes_dereplicated.txt ]]; then
-                INLIST=${TMPDIR}/genomes_dereplicated.txt
+            if [[ -f $TMPDIR/genomes_dereplicated.txt ]]; then
+                INLIST=$TMPDIR/genomes_dereplicated.txt
             fi
 
             # Count how many genomes passed the dereplication
-            HOW_MANY=$(cat ${INLIST} | wc -l)
+            HOW_MANY=$(cat $INLIST | wc -l)
             printf "\t%s genomes passed the dereplication\n" "${HOW_MANY}"
         fi
     else
@@ -455,7 +455,7 @@ if ${DEREPLICATE}; then
 fi
 
 # Count how many input genomes survived in case they have been quality controlled and dereplicated
-HOW_MANY=$(cat ${INLIST} | wc -l)
+HOW_MANY=$(cat $INLIST | wc -l)
 if [[ "${HOW_MANY}" -gt "1" ]]; then
     # Create a temporary folder in case input genomes are gzip compressed
     mkdir -p $TMPDIR/genomes
@@ -486,14 +486,14 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
         # Run the profiler to establish the closest genome and the closest group for each taxonomic level in the tree
         . ${SCRIPT_DIR}/profile.sh --input-file=$FILEPATH \
                                    --input-id=$FILEPATH \
-                                   --tree=${DBDIR}/k__${KINGDOM}/index/index.detbrief.sbt
+                                   --tree=$DBDIR/k__$KINGDOM/index/index.detbrief.sbt
                                    --expand \
                                    --output-dir=$TMPDIR/profiling/ \
                                    --output-prefix=$GENOMENAME \
                                    > /dev/null 2>&1 # Silence the profiler
         # Define output file path with profiles
-        PROFILE=${TMPDIR}/profiling/${GENOMENAME}__profiles.tsv
-        printf "\t%s\n" "${PROFILE}"
+        PROFILE=$TMPDIR/profiling/${GENOMENAME}__profiles.tsv
+        printf "\t%s\n" "$PROFILE"
         
         if [[ -f $PROFILE ]]; then
             # Discard the genome if the score is 1.0 compared to the closest match at the species level
@@ -517,7 +517,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 CLOSEST_LEVEL_SCORE="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f5)"
                 CLOSEST_TAXA=${CLOSEST_TAXA}"|"${CLOSEST_LEVEL}
                 # Print profiler result
-                printf "\t\t%s: %s (common kmers: %s; score: %s)\n" "${level}" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_COMMON_KMERS}" "${CLOSEST_LEVEL_SCORE}"
+                printf "\t\t%s: %s (common kmers: %s; score: %s)\n" "$level" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_COMMON_KMERS}" "${CLOSEST_LEVEL_SCORE}"
                 # Keep track of the species score
                 if [[ "${CLOSEST_LEVEL}" = s__* ]]; then
                     CLOSEST_COMMON_KMERS=${CLOSEST_LEVEL_COMMON_KMERS}
@@ -526,7 +526,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             # Trim the first pipe out of the closest taxonomic label
             CLOSEST_TAXA=${CLOSEST_TAXA:1}
             # Define taxa path
-            CLOSEST_TAXADIR=${DBDIR}/$(echo "${CLOSEST_TAXA}" | sed 's/|/\//g')
+            CLOSEST_TAXADIR=$DBDIR/$(echo "${CLOSEST_TAXA}" | sed 's/|/\//g')
 
             SKIP_GENOME=false
             # Check whether the input genome must be discarded
@@ -535,14 +535,14 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     if [[ -f "${CLOSEST_TAXADIR}/genomes.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/genomes.txt; then
                         # If the input genome is a MAG and the closest genome is a reference
                         # Discard the input genome
-                        ${SKIP_GENOME}=true
+                        SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome is a MAG and the closest genome is a reference genome\n"
                     elif [[ -f "${CLOSEST_TAXADIR}/mags.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/mags.txt; then
                         # If the input genome is a MAG and the closest genome is a MAG
                         # Discard the input genome
-                        ${SKIP_GENOME}=true
+                        SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome and the closest genome are both MAGs\n"
@@ -551,7 +551,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     if [[ -f "${CLOSEST_TAXADIR}/genomes.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/genomes.txt; then
                         # If the input genome is a reference and the closest genome is a reference
                         # Discard the input genome
-                        ${SKIP_GENOME}=true
+                        SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
                         printf "\tDiscarding genome:\n"
                         printf "\t\tInput genome and closest genome are both reference genomes\n"
@@ -562,7 +562,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             if ! ${SKIP_GENOME}; then
                 # Retrieve the min and max common kmers for the closest taxa
                 MIN_BOUND=""; MAX_BOUND=""
-                get_boundaries $BOUNDARIES $CLOSEST_TAXA
+                get_boundaries $BOUNDARIES ${CLOSEST_TAXA}
 
                 # Process MAGs or reference genomes
                 if [[ "$TYPE" = "MAGs" ]]; then
@@ -593,8 +593,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     # Retrieve the taxonomic label from --taxa input file
                     TAXALABEL="$(grep -w "$GENOMENAME" $TAXA | cut -d$'\t' -f2)"
                     # Define taxonomy folder
-                    TAXDIR=${DBDIR}/$(echo "${TAXALABEL}" | sed 's/|/\//g')
-                    TARGETGENOME=${TAXDIR}/genomes/${GENOMENAME}.${GENOMEEXT}
+                    TAXDIR=$DBDIR/$(echo "${TAXALABEL}" | sed 's/|/\//g')
+                    TARGETGENOME=$TAXDIR/genomes/${GENOMENAME}.${GENOMEEXT}
                     # Print input genome taxonomic label
                     printf "\tTaxonomic label:\n"
                     printf "\t\t%s\n" "$TAXALABEL"
@@ -620,11 +620,11 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                             printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
                         elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
                             # If the closest genome belong to a cluster with at least a reference genome
-                            if [[ "${TAXALABEL}" != "${CLOSEST_TAXA}" ]]; then
+                            if [[ "$TAXALABEL" != "${CLOSEST_TAXA}" ]]; then
                                 # If the taxonomic labels of the current reference genome and that one of the closest genome do not match
                                 # Report the inconsistency
                                 printf "\tInconsistency found:\n"
-                                printf "\t\tInput genome: %s\n" "${TAXALABEL}"
+                                printf "\t\tInput genome: %s\n" "$TAXALABEL"
                                 printf "\t\tClosest lineage: %s\n" "${CLOSEST_TAXA}"
                             fi
                             # Assign the current genome to the closest lineage
@@ -681,7 +681,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             KNOWN_TAXA=()
             # Split the list of genomes assigned to the unknown cluster
             GENOMES=($(echo ${TO_KNOWN_TAXA[$UNKNOWN_TAXONOMY]} | tr "," " "))
-            for GENOME in GENOMES; do
+            for GENOME in ${GENOMES[@]}; do
                 # Retrieve the genome taxonomy from the --taxa input file
                 KNOWN_TAXA+=("$(grep -w "$GENOME" $TAXA | cut -d$'\t' -f2)")
             done
@@ -754,8 +754,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
     if [[ "${#UNASSIGNED[@]}" -gt "0" ]]; then
         # The kmers matrix already exists in case the dereplication step has been enabled
         # Otherwise, run kmtricks
-        if [[ ! -f ${TMPDIR}/kmers_matrix.txt ]]; then
-            GENOMES_FOF=${TMPDIR}/genomes.fof
+        if [[ ! -f $TMPDIR/kmers_matrix.txt ]]; then
+            GENOMES_FOF=$TMPDIR/genomes.fof
             # Unassigned genomes are MAGs only
             for MAGPATH in ${UNASSIGNED[@]}; do
                 # Define a genomes.fof file with the unassigned genomes
@@ -765,15 +765,15 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
 
             # Run kmtricks to build the kmers matrix
             kmtricks_matrix_wrapper ${GENOMES_FOF} \
-                                    ${TMPDIR}/matrix \
-                                    ${NPROC} \
-                                    ${TMPDIR}/kmers_matrix.txt
+                                    $TMPDIR/matrix \
+                                    $NPROC \
+                                    $TMPDIR/kmers_matrix.txt
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
-            echo "#kmer $HEADER" > ${TMPDIR}/kmers_matrix_wh.txt
-            cat ${TMPDIR}/kmers_matrix.txt >> ${TMPDIR}/kmers_matrix_wh.txt
-            mv ${TMPDIR}/kmers_matrix_wh.txt ${TMPDIR}/kmers_matrix.txt
+            echo "#kmer $HEADER" > $TMPDIR/kmers_matrix_wh.txt
+            cat $TMPDIR/kmers_matrix.txt >> $TMPDIR/kmers_matrix_wh.txt
+            mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
         fi
 
         # Cluster genomes according to the boundaries defined by the boundaries module
@@ -821,11 +821,11 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 if [[ "$POS" -eq "7" ]]; then
                     # In case of species
                     # Rebuild the index with kmtricks
-                    kmtricks_index_wrapper ${TAXONOMY}/genomes.fof \
-                                        $DBDIR \
-                                        ${KMER_LEN} \
-                                        ${FILTER_SIZE} \
-                                        $NPROC
+                    kmtricks_index_wrapper $TAXONOMY/genomes.fof \
+                                           $DBDIR \
+                                           ${KMER_LEN} \
+                                           ${FILTER_SIZE} \
+                                           $NPROC
                 else
                     # In case of all the other taxonomic levels
                     # Rebuild the index with howdesbt
@@ -851,12 +851,12 @@ else
 fi
 
 # Cleanup temporary data
-if ${CLEANUP}; then
+if $CLEANUP; then
     # Remove tmp folder
     if [[ -d $TMPDIR ]]; then
         printf "Cleaning up temporary folder:\n"
-        printf "\t%s\n" "${TMPDIR}"
-        rm -rf ${TMPDIR}
+        printf "\t%s\n" "$TMPDIR"
+        rm -rf $TMPDIR
     fi
 fi
 
