@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================
 
-DATE="May 24, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -14,35 +14,12 @@ MODULES_DIR=${SCRIPT_DIR}/modules
 # Import utility functions
 source ${MODULES_DIR}/utils.sh
 
-# Parse input arguments
-for ARG in "$@"; do
-    case "$ARG" in
-        --credits)
-            # Print credits
-            credits
-            exit 0
-            ;;
-        --license)
-            # Print license
-            printf "%s\n" "$(cat ${SCRIPT_DIR}/LICENSE)"
-            exit 0
-            ;;
-        --resolve-dependencies)
-            # Check for external software dependencies and python modules
-            check_dependencies true
-            exit $?
-            ;;
-        -v|--version)
-            # Print pipeline version
-            printf "meta-index version %s (%s)\n" "$VERSION" "$DATE"
-            exit 0
-            ;;
-        *)
-            # Try to run a module
-            continue
-            ;;
-    esac
-done
+# In case of no arguments provided in input
+if [ $# -eq 0 ]; then
+    println "No arguments supplied!\n"
+    println "Type 'meta-index --help' for a list of available arguments.\n"
+    exit 1
+fi
 
 # Take track of the full command line
 CMD=("$@")
@@ -52,28 +29,69 @@ MODULE="${CMD[0]}"
 # Build module path
 MODULE_PATH=${MODULES_DIR}/${MODULE}.sh
 
-# All the other arguments
-ARGS="${CMD[@]:1}"
-
-# Check for new software updates
-check_for_software_updates "$VERSION"
-
 if [[ -f ${MODULE_PATH} ]]; then
+    # All the other arguments
+    ARGS="${CMD[@]:1}"
+
+    # Check for new software updates
+    check_for_software_updates "$VERSION"
+
     # Run module with the same shell
     . ${MODULE_PATH} $ARGS
 else
-    printf "meta-index version %s (%s)\n\n" "$VERSION" "$DATE"
-    printf "[ERROR] Unknown module!\n\n"
-    printf "Available modules:\n"
-    for module in ${MODULES_DIR}/*.sh; do
-        MODULE_NAME=$(basename $module)
-        MODULE_NAME="${MODULE_NAME%.*}"
-        if [[ "${MODULE_NAME}" != "utils" ]]; then
-            # Exclude utils
-            printf "\t%s\n" "${MODULE_NAME}"
-        fi
+    # Parse input arguments
+    for ARG in "$@"; do
+        case "$ARG" in
+            --credits)
+                # Print credits
+                credits
+                exit 0
+                ;;
+            -h|--help)
+                # Print extended help
+                MAIN_HELP=true
+                source ${SCRIPT_DIR}/../HELP
+                exit 0
+                ;;
+            --license)
+                # Print license
+                println "%s\n" "$(cat ${SCRIPT_DIR}/LICENSE)"
+                exit 0
+                ;;
+            --modules)
+                # Print the list of all available modules
+                println "List of available modules:\n"
+                for module in ${MODULES_DIR}/*.sh; do
+                    MODULE_NAME=$(basename $module)
+                    MODULE_NAME="${MODULE_NAME%.*}"
+                    if [[ "${MODULE_NAME}" != "utils" ]]; then
+                        # Exclude utils
+                        println "\t%s\n" "${MODULE_NAME}"
+                    fi
+                done
+                exit 0
+                ;;
+            --resolve-dependencies)
+                # Check for external software dependencies and python modules
+                check_dependencies true
+                exit $?
+                ;;
+            -v|--version)
+                # Print pipeline version
+                println "meta-index version %s (%s)\n" "$VERSION" "$DATE"
+                exit 0
+                ;;
+            *)
+                println "meta-index: invalid option -- %s\n" "$ARG"
+                exit 1
+                ;;
+        esac
     done
-    printf "\nTry running a module with --help to expand the list of its available arguments\n"
-fi
 
-exit 0
+    # Unknown module
+    println "meta-index version %s (%s)\n\n" "$VERSION" "$DATE"
+    println "[ERROR] Unknown module!\n\n"
+    println "Type 'meta-index --modules' for a list of available modules.\n"
+    println "Run a module with the --help option in order to access all its available arguments.\n"
+    exit 1
+fi
