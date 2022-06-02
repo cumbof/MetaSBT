@@ -359,3 +359,47 @@ EXAMPLES
                              --threshold=0.7 --expand --output-dir=~/profiles --output-prefix=mymag
 "
 fi
+
+if [ ! -z ${REPORT_HELP} ] && ${REPORT_HELP}; then
+    echo "
+NAME
+    report -- Build the database report table
+
+VERSION
+    "$VERSION" ("$DATE")
+
+SYNOPSIS
+    profile [--db-dir=directory] [--output-file=file] ...
+
+DESCRIPTION
+    The \"profile\" module is used to query a sequence bloom tree at different taxonomic levels.
+
+    The following options are available:
+
+    --db-dir=directory
+        This is the database directory with the taxonomically organised sequence bloom trees
+
+    -h|--help
+        Print this help and exit
+
+    --log=file
+        Path to the log file
+
+    --output-file=file
+        This is the path to the output table
+
+    -v|--version
+        Print the module version
+
+EXIT STATUS
+    This script exits with one of the following values:
+
+    0    The pipeline has been correctly applied.
+    >0   An error occurred.
+
+EXAMPLES
+    Try running this script by typing:
+
+        $ meta-index report --db-dir=~/myindex --output-file=~/report.tsv
+"
+fi
