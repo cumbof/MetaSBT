@@ -1,3 +1,48 @@
+if [ ! -z ${MAIN_HELP} ] && ${MAIN_HELP}; then
+    echo "
+NAME
+    meta-index -- A pipeline for automatically indexing genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
+
+VERSION
+    "$VERSION" ("$DATE")
+
+SYNOPSIS
+    meta-index [--modules] [--resolve-dependencies] ...
+
+DESCRIPTION
+    This is the meta-index controller for running modules.
+
+    The following options are available:
+
+    --credits
+        Print software references.
+        You are kindly asked to cite this software in your manuscript in case it results useful for your analyses
+
+    --license
+        Print the software license
+
+    --modules
+        List all the available modules
+
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
+
+    -v|--version
+        Print the software version
+
+EXIT STATUS
+    This script exits with one of the following values:
+
+    0    The pipeline has been correctly applied.
+    >0   An error occurred.
+
+EXAMPLES
+    Try running this script by typing:
+
+        $ meta-index --modules
+"
+fi
+
 if [ ! -z ${INDEX_HELP} ] && ${INDEX_HELP}; then
     echo "
 NAME
@@ -20,7 +65,7 @@ DESCRIPTION
 
     --checkm-completeness=num
         Input genomes must have a minimum completeness percentage before being processed and added to the database
-    
+
     --checkm-contamination=num
         Input genomes must have a maximum contamination percentage before being processed and added to the database
 
@@ -41,7 +86,7 @@ DESCRIPTION
 
     -h|--help
         Print this help and exit
-    
+
     --how-many=num
         Limit the number of genomes per species.
         The number of genomes per species is not limited by default
@@ -51,19 +96,25 @@ DESCRIPTION
         This is used in conjunction with the --estimate-filter-size argument only.
         It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes.
         Default: --increase-filter-size=0
-    
+
     --kingdom=value
         Consider genomes whose lineage belongs to a specific kingdom only
 
     --kmer-len=num
         This is the length of the kmers used for building bloom filters
-    
+
+    --log=file
+        Path to the log file
+
     --nproc=num
         This argument refers to the number of processors used for parallelizing the pipeline when possible
         Default: --nproc=1
 
     --tmp-dir=directory
         Path to the folder for storing temporary data
+
+    -v|--version
+        Print the module version
 
     --xargs-nproc=num
         This refers to the number of xargs processes used for launching independent runs of kmtricks
@@ -106,13 +157,16 @@ DESCRIPTION
 
     --db-dir=directory
         This is the database directory with the taxonomically organised sequence bloom trees
-    
+
     -h|--help
         Print this help and exit
 
     --kingdom=value
         Select a kingdom
-    
+
+    --log=file
+        Path to the log file
+
     --min-genomes=num
         Consider clusters with at least this number of genomes
         Default: --min-genomes=100
@@ -123,10 +177,13 @@ DESCRIPTION
 
     --output=file
         Output file with kmer boundaries for each of the taxonomic labels in the database
-    
+
     --tmp-dir=directory
         Path to the folder for storing temporary data
-    
+
+    -v|--version
+        Print the module version
+
 EXIT STATUS
     This script exits with one of the following values:
 
@@ -164,26 +221,26 @@ DESCRIPTION
     --boundaries=file
         Path to the output table produced by the boundaries module.
         It is required in case of MAGs as input genomes only
-    
+
     --boundary-uncertainty=num
         Define the percentage of kmers to enlarge and reduce boundaries
         Default: --boundary-uncertainty=0
 
     --checkm-completeness=num
         Input genomes must have a minimum completeness percentage before being processed and added to the database
-    
+
     --checkm-contamination=num
         Input genomes must have a maximum contamination percentage before being processed and added to the database
-    
+
     --cleanup
         Remove temporary data at the end of the pipeline
-    
+
     --db-dir=directory
         This is the database directory with the taxonomically organised sequence bloom trees
-    
+
     --dereplicate
         Dereplicate input genomes based on the presence/absence of kmers
-    
+
     --extension=value
         Specify the input genome files extension.
         All the input genomes must have the same file extension before running this module
@@ -191,39 +248,45 @@ DESCRIPTION
     --filter-size=num
         This is the size of the bloom filters.
         It must be the same size used while running the index module
-    
+
     -h|--help
         Print this help and exit
-    
+
     --input-list=file
         This file contains the list of paths to the new genomes that will be added to the database
-    
+
     --kingdom=value
         Select the kingdom that will be updated
 
     --kmer-len=num
         This is the length of the kmers used for building bloom filters
-        
+
+    --log=file
+        Path to the log file
+
     --nproc=num
         This argument refers to the number of processors used for parallelizing the pipeline when possible.
         Default: --nproc=1
-        
+
     --tmp-dir=directory
         Path to the folder for storing temporary data
-    
+
     --taxa=file
         Input file with the mapping between input genome IDs and their taxonomic label.
         This is used in case of reference genomes only \"--type=references\"
 
     --type=value
         Define the nature of the input genomes. Only \"references\" and \"MAGs\" are allowed
-    
+
+    -v|--version
+        Print the module version
+
 EXIT STATUS
     This script exits with one of the following values:
 
     0    The pipeline has been correctly applied.
     >0   An error occurred.
-    
+
 EXAMPLES
     Try running this script by typing:
 
@@ -253,22 +316,25 @@ DESCRIPTION
     --expand
         Expand the input query on all the taxonomic levels
         Default: false
-    
+
     -h|--help
         Print this help and exit
 
     --input-file=file
         Path to the input genome
-    
+
     --input-id=value
         Unique identifier of the input genome
-        
+
+    --log=file
+        Path to the log file
+
     --output-dir=directory
         This is the output folder with queries results
 
     --output-prefix=value
         Prefix of the output files with query matches
-    
+
     --threshold=num
         Fraction of query kmers that must be present in a leaf to be considered a match
         This must be between 0 and 1
@@ -276,7 +342,10 @@ DESCRIPTION
 
     --tree=file
         This is the tree definition file
-    
+
+    -v|--version
+        Print the module version
+
 EXIT STATUS
     This script exits with one of the following values:
 
