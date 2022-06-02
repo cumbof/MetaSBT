@@ -1,0 +1,6 @@
+# List of supported file extensions for input genomes
+# Do not use dots in front of the lines
+# Gzip compressed sequences are also supported
+fa
+fasta
+fna
