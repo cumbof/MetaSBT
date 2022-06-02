@@ -307,13 +307,13 @@ run_checkm () {
     NPROC=$5        # Number of parallel processes for CheckM
 
     # Run CheckM
-    println 'Running CheckM\n'
+    println "Running CheckM on %s\n" "$INLIST"
     CHECKM_START_TIME="$(date +%s.%3N)"
     # Define temporary run directory
     RUNDIR=$TMPDIR/checkm/$RUNID
     mkdir -p $RUNDIR/tmp
     # Split the set of bins in chunks with 1000 genomes at most
-    println '\tOrganising genomes in chunks\n'
+    println "\tOrganising genomes in chunks\n"
     split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $RUNDIR/tmp/bins_
     CHUNKS=`ls "$TMPDIR"/checkm/"$RUNID"/tmp/bins_*.txt 2>/dev/null | wc -l`
     CHECKMTABLES=""
@@ -322,7 +322,7 @@ run_checkm () {
         filename="$(basename $filepath)"
         suffix="${filename#*_}"
         suffix="${suffix%.txt}"
-        println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
+        println "\tProcessing chunk %s/%s\n" "$((10#$suffix))" "$CHUNKS"
         # Create chunk folder
         mkdir -p $RUNDIR/tmp/bins_${suffix}
         for bin in `sed '/^$/d' $filepath`; do
@@ -342,7 +342,7 @@ run_checkm () {
     done
     CHECKM_END_TIME="$(date +%s.%3N)"
     CHECKM_ELAPSED="$(bc <<< "${CHECKM_END_TIME}-${CHECKM_START_TIME}")"
-    println '\tTotal elapsed time: %s\n\n' "$(displaytime ${CHECKM_ELAPSED})"
+    println "\tTotal elapsed time: %s\n\n" "$(displaytime ${CHECKM_ELAPSED})"
     # Trim the last comma out of the list of CheckM output table file paths
     CHECKMTABLES="${CHECKMTABLES%?}"
 }
