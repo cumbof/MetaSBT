@@ -385,26 +385,42 @@ while read tax_id, taxonomy; do
 
                 # Process all the CheckM tables
                 CHECKMTABLES_ARR=($(echo $CHECKMTABLES | tr "," " "))
-                for table in ${CHECKMTABLES_ARR[@]}; do
-                    # Skip header line with sed
-                    # Discard genomes according to their completeness and contamination
-                    sed 1d $table | while read line; do
-                        # Retrieve completeness and contamination of current genome
-                        GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Get value under column 1
-                        COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Get value under column 12
-                        CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Get value under column 13
-                        # Use bc command for comparing floating point numbers
-                        COMPLETENESS_CHECK="$(echo "$COMPLETENESS < ${CHECKM_COMPLETENESS}" | bc)"
-                        CONTAMINATION_CHECK="$(echo "$CONTAMINATION > ${CHECKM_CONTAMINATION}" | bc)"
-                        if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
+                # In case there is at least one CheckM output table
+                if [[ "${#CHECKMTABLES_ARR[@]}" -gt "0" ]]; then
+                    # Merge all tables
+                    # Retrieve header from the first file in list
+                    echo "$(head -n1 ${CHECKMTABLES_ARR[0]})" > $TAXDIR/checkm.tsv
+                    for table in ${CHECKMTABLES_ARR[@]}; do
+                        # Get all the lines except the first one
+                        echo "$(tail -n +2 $table)" >> $TAXDIR/checkm.tsv
+                    done
+
+                    # Iterate over input genome IDs
+                    for GENOMEID in $(cut -f1 ${GENOMES_FOF}); do
+                        # Search for current genome ID into the CheckM output table
+                        GENOME_DATA="$(grep "$GENOMEID"$'\t' $TAXDIR/checkm.tsv)"
+                        if [[ ! -z "${GENOME_DATA}" ]]; then
+                            # In case the current genome has been processed
+                            # Retrieve completeness and contamination of current genome
+                            COMPLETENESS="$(echo ${GENOME_DATA} | cut -d$'\t' -f12)"     # Get value under column 12
+                            CONTAMINATION="$(echo ${GENOME_DATA} | cut -d$'\t' -f13)"    # Get value under column 13
+                            # Use bc command for comparing floating point numbers
+                            COMPLETENESS_CHECK="$(echo "$COMPLETENESS < ${CHECKM_COMPLETENESS}" | bc)"
+                            CONTAMINATION_CHECK="$(echo "$CONTAMINATION > ${CHECKM_CONTAMINATION}" | bc)"
+                            if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
+                                # Remove genome from directory
+                                rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
+                            else
+                                # Current genome passed the quality control
+                                grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> $TAXDIR/genomes_qc.fof
+                            fi
+                        else
+                            # CheckM failed in processing the current genome
                             # Remove genome from directory
                             rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
-                        else
-                            # Current genome passed the quality control
-                            grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> $TAXDIR/genomes_qc.fof
                         fi
                     done
-                done
+                fi
 
                 # Proceed if at least one input genome passed the quality control
                 if [[ -f $TAXDIR/genomes_qc.fof ]]; then
