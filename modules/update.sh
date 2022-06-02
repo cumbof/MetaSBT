@@ -633,6 +633,20 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # Add the current genome to the list of genomes in current taxonomy
                         echo "$GENOMENAME : $TARGETGENOME" >> ${CLOSEST_TAXADIR}/genomes.fof
                         echo "$TARGETGENOME" >> ${CLOSEST_TAXADIR}/mags.txt
+                        # Also add it CheckM statistics if available
+                        if [[ -f $TMPDIR/checkm.tsv ]]; then
+                            if [[ ! -f ${CLOSEST_TAXADIR}/checkm.tsv ]]; then
+                                # In case the CheckM table does not exist in the closest taxa folder
+                                # Create the CheckM table and add the header line
+                                echo "$(head -n1 $TMPDIR/checkm.tsv)" > ${CLOSEST_TAXADIR}/checkm.tsv
+                            fi
+                            # Check whether the current genome is in the CheckM table
+                            CHECKM_DATA="$(grep "$GENOMENAME"$'\t' $TMPDIR/checkm.tsv)"
+                            if [[ ! -z "${CHECKM_DATA}" ]]; then
+                                # Append the CheckM statistics for the current genome in the CheckM table of the closest table
+                                echo "${CHECKM_DATA}" >> ${CLOSEST_TAXADIR}/checkm.tsv
+                            fi
+                        fi
                         # Do not remove the index here because there could be other input genomes with the same taxonomic label
                         REBUILD+=(${CLOSEST_TAXA})
                         # Print assignment message
@@ -641,6 +655,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     else
                         # Mark the genome as unassigned
                         UNASSIGNED+=($GENOMEPATH)
+                        # The CheckM statistics for this genome will be reported after the assignment
                         # Print unassignment message
                         println "\tUnassigned\n\n"
                     fi
@@ -699,6 +714,21 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                             println "\tAssignment:\n"
                             println "\t\t%s\n\n" "${CLOSEST_TAXA}"
                         fi
+                        
+                        # Also add it CheckM statistics if available
+                        if [[ -f $TMPDIR/checkm.tsv ]]; then
+                            if [[ ! -f ${CLOSEST_TAXADIR}/checkm.tsv ]]; then
+                                # In case the CheckM table does not exist in the closest taxa folder
+                                # Create the CheckM table and add the header line
+                                echo "$(head -n1 $TMPDIR/checkm.tsv)" > ${CLOSEST_TAXADIR}/checkm.tsv
+                            fi
+                            # Check whether the current genome is in the CheckM table
+                            CHECKM_DATA="$(grep "$GENOMENAME"$'\t' $TMPDIR/checkm.tsv)"
+                            if [[ ! -z "${CHECKM_DATA}" ]]; then
+                                # Append the CheckM statistics for the current genome in the CheckM table of the closest table
+                                echo "${CHECKM_DATA}" >> ${CLOSEST_TAXADIR}/checkm.tsv
+                            fi
+                        fi
                     else
                         # If nothing is close enough to the current genome and its taxonomic label does not exist in the database
                         # Create a new branch with the new taxonomy for the current genome
@@ -714,6 +744,21 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         echo "$TARGETGENOME" >> $TAXDIR/genomes.txt
                         # Do not remove the index here because there could be other input genomes with the same taxonomic label
                         REBUILD+=($TAXALABEL)
+
+                        # Also add it CheckM statistics if available
+                        if [[ -f $TMPDIR/checkm.tsv ]]; then
+                            if [[ ! -f $TAXDIR/checkm.tsv ]]; then
+                                # In case the CheckM table does not exist in the closest taxa folder
+                                # Create the CheckM table and add the header line
+                                echo "$(head -n1 $TMPDIR/checkm.tsv)" > $TAXDIR/checkm.tsv
+                            fi
+                            # Check whether the current genome is in the CheckM table
+                            CHECKM_DATA="$(grep "$GENOMENAME"$'\t' $TMPDIR/checkm.tsv)"
+                            if [[ ! -z "${CHECKM_DATA}" ]]; then
+                                # Append the CheckM statistics for the current genome in the CheckM table of the closest table
+                                echo "${CHECKM_DATA}" >> $TAXDIR/checkm.tsv
+                            fi
+                        fi
                     fi
                 fi
             fi
@@ -836,6 +881,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
         # Look at the genomes profiles and update or build new clusters 
         # Add full taxonomy to the REBUILD list
         # Update the genomes.fof and the mags.txt tables
+        # Also report the CheckM statistics of the genomes in the new clusters
         # TODO
     fi
 
