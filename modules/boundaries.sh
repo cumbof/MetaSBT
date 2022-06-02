@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="Jun 1, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -24,7 +24,7 @@ define_boundaries () {
     NPROC=$5        # Max nproc for multiprocessing
     CLEANUP=$6      # Remove temporary data at the end of the pipeline if true
     
-    printf "Processing %s\n" "${LEVEL_DIR}"
+    println "Processing %s\n" "${LEVEL_DIR}"
     # Create a temporary folder for current taxonomy
     LEVEL_NAME="$(basename ${LEVEL_DIR})"
     TMP_LEVEL_DIR=$TMPDIR/${LEVEL_NAME}
@@ -35,7 +35,7 @@ define_boundaries () {
     if [[ -f ${TMP_LEVEL_DIR}/genomes.fof ]]; then
         # Process current level if if contains a genomes.fof file
         HOW_MANY=$(cat ${TMP_LEVEL_DIR}/genomes.fof | wc -l)
-        printf "\tGenomes: %s\n" "${HOW_MANY}"
+        println "\tGenomes: %s\n" "${HOW_MANY}"
         
         # Keep processing current taxonomic level if it contains enough genomes
         if [[ "${HOW_MANY}" -ge "${MIN_GENOMES}" ]]; then
@@ -106,14 +106,14 @@ define_boundaries () {
                 # Remove the first pipe out of the lineage
                 LINEAGE=${LINEAGE:1}
                 # Dump result to the output file
-                printf "%s\t%s\t%s\n" "$LINEAGE" "${MIN_KMERS}" "${MAX_KMERS}" >> $OUTPUT
+                println "%s\t%s\t%s\n" "$LINEAGE" "${MIN_KMERS}" "${MAX_KMERS}" >> $OUTPUT
 
                 # Print results
-                printf "\tMinimum common kmers: %s\n" "${MIN_KMERS}"
-                printf "\tMaximum common kmers: %s\n\n" "${MAX_KMERS}"
+                println "\tMinimum common kmers: %s\n" "${MIN_KMERS}"
+                println "\tMaximum common kmers: %s\n\n" "${MAX_KMERS}"
             else
                 # kmtricks failed in building the kmers matrix
-                printf "\t[ERROR] An error has occurred while building the kmers matrix\n\n"
+                println "\t[ERROR] An error has occurred while building the kmers matrix\n\n"
             fi
 
             # Cleanup temporary data
@@ -123,11 +123,11 @@ define_boundaries () {
             fi
         else
             # Stop processing current taxonomic level
-            printf "\t[ERROR] Not enough genomes\n\n"
+            println "\t[ERROR] Not enough genomes\n\n"
         fi
     else
         # Current taxonomic level cannot be processed
-        printf "\t[ERROR] Genomes definition file not found\n\n"
+        println "\t[ERROR] Genomes definition file not found\n\n"
     fi
 }
 
@@ -150,8 +150,8 @@ for ARG in "$@"; do
             DBDIR="${ARG#*=}"
             # Define helper
             if [[ "$DBDIR" =~ "?" ]]; then
-                printf "boundaries helper: --db-dir=directory\n\n"
-                printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
+                println "boundaries helper: --db-dir=directory\n\n"
+                println "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -160,8 +160,8 @@ for ARG in "$@"; do
             DBDIR="${DBDIR%/}"
             # Check whether the input directory exist
             if [[ ! -d $DBDIR ]]; then
-                printf "Input folder does not exist!\n"
-                printf "--db-dir=%s\n" "$DBDIR"
+                println "Input folder does not exist!\n"
+                println "--db-dir=%s\n" "$DBDIR"
                 exit 1
             fi
             ;;
@@ -176,9 +176,23 @@ for ARG in "$@"; do
             KINGDOM="${ARG#*=}"
             # Define helper
             if [[ "$KINGDOM" =~ "?" ]]; then
-                printf "boundaries helper: --kingdom=value\n\n"
-                printf "\tSelect a kingdom.\n\n"
+                println "boundaries helper: --kingdom=value\n\n"
+                println "\tSelect a kingdom.\n\n"
                 exit 0
+            fi
+            ;;
+        --log=*)
+            # Path to the log file
+            LOG_FILEPATH="${ARG#*=}"
+            # Define helper
+            if [[ "${LOG_FILEPATH}" =~ "?" ]]; then
+                println "boundaries helper: --log=file\n\n"
+                println "\tPath to the log file.\n\n"
+                exit 0
+            fi
+            # Remove the log file if it already exists
+            if [[ -f ${LOG_FILEPATH} ]]; then
+                rm ${LOG_FILEPATH}
             fi
             ;;
         --min-genomes=*)
@@ -186,13 +200,13 @@ for ARG in "$@"; do
             MIN_GENOMES="${ARG#*=}"
             # Define helper
             if [[ "${MIN_GENOMES}" =~ "?" ]]; then
-                printf "boundaries helper: --min-genomes=num\n\n"
-                printf "\tConsider clusters with at least this number of genomes.\n\n"
+                println "boundaries helper: --min-genomes=num\n\n"
+                println "\tConsider clusters with at least this number of genomes.\n\n"
                 exit 0
             fi
             # Check whether --min-genomes is an integer
             if [[ ! ${MIN_GENOMES} =~ ^[0-9]+$ ]] || [[ "${MIN_GENOMES}" -le "1" ]]; then
-                printf "Argument --min-genomes must be a positive integer greater than 1\n"
+                println "Argument --min-genomes must be a positive integer greater than 1\n"
                 exit 1
             fi
             ;;
@@ -201,14 +215,14 @@ for ARG in "$@"; do
             NPROC="${ARG#*=}"
             # Define helper
             if [[ "$NPROC" =~ "?" ]]; then
-                printf "boundaries helper: --nproc=num\n\n"
-                printf "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
-                printf "\tDefault: --nproc=1\n\n"
+                println "boundaries helper: --nproc=num\n\n"
+                println "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
+                println "\tDefault: --nproc=1\n\n"
                 exit 0
             fi
             # Check whether --proc is an integer
             if [[ ! $NPROC =~ ^[0-9]+$ ]] || [[ "$NPROC" -eq "0" ]]; then
-                printf "Argument --nproc must be a positive integer greater than 0\n"
+                println "Argument --nproc must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -217,8 +231,8 @@ for ARG in "$@"; do
             OUTPUT="${ARG#*=}"
             # Define helper
             if [[ "$OUTPUT" =~ "?" ]]; then
-                printf "boundaries helper: --output=file\n\n"
-                printf "\tOutput file with kmer boundaries for each of the taxonomic labels in the database.\n\n"
+                println "boundaries helper: --output=file\n\n"
+                println "\tOutput file with kmer boundaries for each of the taxonomic labels in the database.\n\n"
                 exit 0
             fi
             ;;
@@ -227,8 +241,8 @@ for ARG in "$@"; do
             TMPDIR="${ARG#*=}"
             # Define helper
             if [[ "$TMPDIR" =~ "?" ]]; then
-                printf "boundaries helper: --tmp-dir=directory\n\n"
-                printf "\tPath to the folder for storing temporary data.\n\n"
+                println "boundaries helper: --tmp-dir=directory\n\n"
+                println "\tPath to the folder for storing temporary data.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -236,21 +250,26 @@ for ARG in "$@"; do
             # Trim the last slash out of the path
             TMPDIR="${TMPDIR%/}"
             ;;
+        -v|--version)
+            # Print pipeline version
+            println "boundaries version %s (%s)\n" "$VERSION" "$DATE"
+            exit 0
+            ;;
         *)
-            printf "boundaries: invalid option -- %s\n" "$ARG"
+            println "boundaries: invalid option -- %s\n" "$ARG"
             exit 1
             ;;
     esac
 done
 
-printf "boundaries version %s (%s)\n\n" "$VERSION" "$DATE"
+println "boundaries version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
-    printf "Unsatisfied software dependencies!\n\n"
-    printf "Please run the following command for a list of required external software dependencies:\n\n"
-    printf "\t$ meta-index --resolve-dependencies\n\n"
+    println "Unsatisfied software dependencies!\n\n"
+    println "Please run the following command for a list of required external software dependencies:\n\n"
+    println "\t$ meta-index --resolve-dependencies\n\n"
     
     exit 1
 fi
@@ -259,19 +278,19 @@ fi
 mkdir -p $TMPDIR
 
 # Print inputs
-printf "Defining boundaries:\n"
-printf "\t--db-dir=%s\n" "$DBDIR"
-printf "\t--kingdom=%s\n" "$KINGDOM"
-printf "\t--min-genomes=%s\n\n" "${MIN_GENOMES}"
+println "Defining boundaries:\n"
+println "\t--db-dir=%s\n" "$DBDIR"
+println "\t--kingdom=%s\n" "$KINGDOM"
+println "\t--min-genomes=%s\n\n" "${MIN_GENOMES}"
 
 # Check whether the output file already exists
 if [[ ! -f $OUTPUT ]]; then
     # Init output table
-    printf "# boundaries version %s (%s)\n" "$VERSION" "$DATE" > $OUTPUT
-    printf "# --db-dir=%s\n" "$DBDIR" >> $OUTPUT
-    printf "# --kingdom=%s\n" "$KINGDOM" >> $OUTPUT
-    printf "# --min-genomes=%s\n" "${MIN_GENOMES}" >> $OUTPUT
-    printf "# Lineage\tMin kmers\tMax kmers\n" >> $OUTPUT
+    println "# boundaries version %s (%s)\n" "$VERSION" "$DATE" > $OUTPUT
+    println "# --db-dir=%s\n" "$DBDIR" >> $OUTPUT
+    println "# --kingdom=%s\n" "$KINGDOM" >> $OUTPUT
+    println "# --min-genomes=%s\n" "${MIN_GENOMES}" >> $OUTPUT
+    println "# Lineage\tMin kmers\tMax kmers\n" >> $OUTPUT
     # Process all taxonomic levels
     for LEVEL in "s__" "g__" "f__" "o__" "c__" "p__" "k__"; do
         find $DBDIR/k__$KINGDOM -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow -exec \
@@ -279,29 +298,29 @@ if [[ ! -f $OUTPUT ]]; then
     done
 
     # Print output table path with boundaries
-    printf "\nOutput table:\n"
-    printf "\t%s\n" "$OUTPUT"
+    println "\nOutput table:\n"
+    println "\t%s\n" "$OUTPUT"
 
     # Cleanup temporary data
     if $CLEANUP; then
         # Remove tmp folder
         if [[ -d $TMPDIR ]]; then
-            printf "Cleaning up temporary folder:\n"
-            printf "\t%s\n" "$TMPDIR"
+            println "Cleaning up temporary folder:\n"
+            println "\t%s\n" "$TMPDIR"
             rm -rf $TMPDIR
         fi
     fi
 else
     # Output file already exists
-    printf "[ERROR] Output file already exists\n"
-    printf "\t%s\n" "$OUTPUT"
+    println "[ERROR] Output file already exists\n"
+    println "\t%s\n" "$OUTPUT"
 
     exit 1
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
 
 # Print credits
 credits

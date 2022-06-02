@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="Jun 1, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -41,13 +41,13 @@ for ARG in "$@"; do
             CHECKM_COMPLETENESS="${ARG#*=}"
             # Define helper
             if [[ "${CHECKM_COMPLETENESS}" =~ "?" ]]; then
-                printf "index helper: --checkm-completeness=num\n\n"
-                printf "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
+                println "index helper: --checkm-completeness=num\n\n"
+                println "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-completeness is an integer
             if [[ ! ${CHECKM_COMPLETENESS} =~ ^[0-9]+$ ]] || [[ "${CHECKM_COMPLETENESS}" -gt "100" ]]; then
-                printf "Argument --checkm-completeness must be a positive integer greater than 0 (up to 100)\n"
+                println "Argument --checkm-completeness must be a positive integer greater than 0 (up to 100)\n"
                 exit 1
             fi
             ;;
@@ -56,13 +56,13 @@ for ARG in "$@"; do
             CHECKM_CONTAMINATION="${ARG#*=}"
             # Define helper
             if [[ "${CHECKM_CONTAMINATION}" =~ "?" ]]; then
-                printf "index helper: --checkm-contamination=num\n\n"
-                printf "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
+                println "index helper: --checkm-contamination=num\n\n"
+                println "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-contamination is an integer
             if [[ ! ${CHECKM_CONTAMINATION} =~ ^[0-9]+$ ]] || [[ "${CHECKM_CONTAMINATION}" -gt "100" ]]; then
-                printf "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
+                println "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
                 exit 1
             fi
             ;;
@@ -75,8 +75,8 @@ for ARG in "$@"; do
             DBDIR="${ARG#*=}"
             # Define helper
             if [[ "$DBDIR" =~ "?" ]]; then
-                printf "update helper: --db-dir=directory\n\n"
-                printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
+                println "update helper: --db-dir=directory\n\n"
+                println "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -97,13 +97,13 @@ for ARG in "$@"; do
             FILTER_SIZE="${ARG#*=}"
             # Define helper
             if [[ "${FILTER_SIZE}" =~ "?" ]]; then
-                printf "index helper: --filter-size=num\n\n"
-                printf "\tThis is the size of the bloom filters.\n\n"
+                println "index helper: --filter-size=num\n\n"
+                println "\tThis is the size of the bloom filters.\n\n"
                 exit 0
             fi
             # Check whether --filter-size is an integer
             if [[ ! ${FILTER_SIZE} =~ ^[0-9]+$ ]] || [[ "${FILTER_SIZE}" -eq "0" ]]; then
-                printf "Argument --filter-size must be a positive integer greater than 0\n"
+                println "Argument --filter-size must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -118,14 +118,14 @@ for ARG in "$@"; do
             HOW_MANY_GENOMES_PER_SPECIES="${ARG#*=}"
             # Define helper
             if [[ "${HOW_MANY_GENOMES_PER_SPECIES}" =~ "?" ]]; then
-                printf "index helper: --how-many=num\n\n"
-                printf "\tLimit the number of genomes per species.\n"
-                printf "\tThe number of genomes per species is not limited by default.\n\n"
+                println "index helper: --how-many=num\n\n"
+                println "\tLimit the number of genomes per species.\n"
+                println "\tThe number of genomes per species is not limited by default.\n\n"
                 exit 0
             fi
             # Check whether --how-many is an integer
             if [[ ! ${HOW_MANY_GENOMES_PER_SPECIES} =~ ^[0-9]+$ ]] || [[ "${HOW_MANY_GENOMES_PER_SPECIES}" -eq "0" ]]; then
-                printf "Argument --how-many must be a positive integer greater than 0\n"
+                println "Argument --how-many must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -134,16 +134,16 @@ for ARG in "$@"; do
             INCREASE_FILTER_SIZE="${ARG#*=}"
             # Define helper
             if [[ "${INCREASE_FILTER_SIZE}" =~ "?" ]]; then
-                printf "index helper: --increase-filter-size=num\n\n"
-                printf "\tIncrease the estimated filter size by the specified percentage.\n"
-                printf "\tThis is used in conjunction with the --estimate-filter-size argument only.\n"
-                printf "\tIt is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes.\n"
-                printf "\tDefault: --increase-filter-size=0\n\n"
+                println "index helper: --increase-filter-size=num\n\n"
+                println "\tIncrease the estimated filter size by the specified percentage.\n"
+                println "\tThis is used in conjunction with the --estimate-filter-size argument only.\n"
+                println "\tIt is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes.\n"
+                println "\tDefault: --increase-filter-size=0\n\n"
                 exit 0
             fi
             # Check whether --increase-filter-size is an integer
             if [[ ! ${INCREASE_FILTER_SIZE} =~ ^[0-9]+$ ]] || [[ "${INCREASE_FILTER_SIZE}" -gt "100" ]]; then
-                printf "Argument --increase-filter-size must be a positive integer greater than 0 (up to 100)\n"
+                println "Argument --increase-filter-size must be a positive integer greater than 0 (up to 100)\n"
                 exit 1
             fi
             ;;
@@ -152,8 +152,8 @@ for ARG in "$@"; do
             KINGDOM="${ARG#*=}"
             # Define helper
             if [[ "$KINGDOM" =~ "?" ]]; then
-                printf "index helper: --kingdom=value\n\n"
-                printf "\tConsider genomes whose lineage belongs to a specific kingdom only.\n\n"
+                println "index helper: --kingdom=value\n\n"
+                println "\tConsider genomes whose lineage belongs to a specific kingdom only.\n\n"
                 exit 0
             fi
             ;;
@@ -162,14 +162,28 @@ for ARG in "$@"; do
             KMER_LEN="${ARG#*=}"
             # Define helper
             if [[ "${KMER_LEN}" =~ "?" ]]; then
-                printf "index helper: --kmer-len=num\n\n"
-                printf "\tThis is the length of the kmers used for building bloom filters.\n\n"
+                println "index helper: --kmer-len=num\n\n"
+                println "\tThis is the length of the kmers used for building bloom filters.\n\n"
                 exit 0
             fi
             # Check whether --kmer-len is an integer
             if [[ ! ${KMER_LEN} =~ ^[0-9]+$ ]] || [[ "${KMER_LEN}" -eq "0" ]]; then
-                printf "Argument --kmer-len must be a positive integer greater than 0\n"
+                println "Argument --kmer-len must be a positive integer greater than 0\n"
                 exit 1
+            fi
+            ;;
+        --log=*)
+            # Path to the log file
+            LOG_FILEPATH="${ARG#*=}"
+            # Define helper
+            if [[ "${LOG_FILEPATH}" =~ "?" ]]; then
+                println "index helper: --log=file\n\n"
+                println "\tPath to the log file.\n\n"
+                exit 0
+            fi
+            # Remove the log file if it already exists
+            if [[ -f ${LOG_FILEPATH} ]]; then
+                rm ${LOG_FILEPATH}
             fi
             ;;
         --nproc=*)
@@ -177,14 +191,14 @@ for ARG in "$@"; do
             NPROC="${ARG#*=}"
             # Define helper
             if [[ "$NPROC" =~ "?" ]]; then
-                printf "index helper: --nproc=num\n\n"
-                printf "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
-                printf "\tDefault: --nproc=1\n\n"
+                println "index helper: --nproc=num\n\n"
+                println "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
+                println "\tDefault: --nproc=1\n\n"
                 exit 0
             fi
             # Check whether --proc is an integer
             if [[ ! $NPROC =~ ^[0-9]+$ ]] || [[ "$NPROC" -eq "0" ]]; then
-                printf "Argument --nproc must be a positive integer greater than 0\n"
+                println "Argument --nproc must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -193,8 +207,8 @@ for ARG in "$@"; do
             TMPDIR="${ARG#*=}"
             # Define helper
             if [[ "$TMPDIR" =~ "?" ]]; then
-                printf "update helper: --tmp-dir=directory\n\n"
-                printf "\tPath to the folder for storing temporary data.\n\n"
+                println "update helper: --tmp-dir=directory\n\n"
+                println "\tPath to the folder for storing temporary data.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -202,37 +216,42 @@ for ARG in "$@"; do
             # Trim the last slash out of the path
             TMPDIR="${TMPDIR%/}"
             ;;
+        -v|--version)
+            # Print pipeline version
+            println "index version %s (%s)\n" "$VERSION" "$DATE"
+            exit 0
+            ;;
         --xargs-nproc=*)
             # Max number of independent runs of kmtricks
             XARGS_NPROC="${ARG#*=}"
             # Define helper
             if [[ "${XARGS_NPROC}" =~ "?" ]]; then
-                printf "index helper: --xargs-nproc=num\n\n"
-                printf "\tThis refers to the number of xargs processes used for launching independent runs of kmtricks.\n"
-                printf "\tDefault: --xargs-nproc=1\n\n"
+                println "index helper: --xargs-nproc=num\n\n"
+                println "\tThis refers to the number of xargs processes used for launching independent runs of kmtricks.\n"
+                println "\tDefault: --xargs-nproc=1\n\n"
                 exit 0
             fi
             # Check whether --xargs-nproc is an integer
             if [[ ! $XARGS_NPROC =~ ^[0-9]+$ ]] || [[ "$XARGS_NPROC" -eq "0" ]]; then
-                printf "Argument --xargs-nproc must be a positive integer greater than 0\n"
+                println "Argument --xargs-nproc must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
         *)
-            printf "index: invalid option -- %s\n" "$ARG"
+            println "index: invalid option -- %s\n" "$ARG"
             exit 1
             ;;
     esac
 done
 
-printf "index version %s (%s)\n\n" "$VERSION" "$DATE"
+println "index version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
-    printf "Unsatisfied software dependencies!\n\n"
-    printf "Please run the following command for a list of required external software dependencies:\n\n"
-    printf "\t$ meta-index --resolve-dependencies\n\n"
+    println "Unsatisfied software dependencies!\n\n"
+    println "Please run the following command for a list of required external software dependencies:\n\n"
+    println "\t$ meta-index --resolve-dependencies\n\n"
     
     exit 1
 fi
@@ -244,14 +263,14 @@ mkdir -p $TMPDIR
 
 # Download taxonomy dump from NCBI
 TAXDUMP="ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
-printf "Downloading taxonomy dump from NCBI\n"
-printf "\t%s\n\n" "$TAXDUMP"
+println "Downloading taxonomy dump from NCBI\n"
+println "\t%s\n\n" "$TAXDUMP"
 
 wget -N $TAXDUMP -P $TMPDIR
 mkdir -p $TMPDIR/taxdump && tar zxf $TMPDIR/taxdump.tar.gz -C $TMPDIR/taxdump
 
 # Export lineages
-printf "Exporting lineages\n"
+println "Exporting lineages\n"
 ncbitax2lin --nodes-file $TMPDIR/taxdump/nodes.dmp \
             --names-file $TMPDIR/taxdump/names.dmp \
             --output $TMPDIR/ncbi_lineages.csv.gz
@@ -260,7 +279,7 @@ ncbitax2lin --nodes-file $TMPDIR/taxdump/nodes.dmp \
 # Consider a specific kingdom only
 # Remove special characters
 # Fill empty taxa level with "unclassified"
-printf "\nBuilding tax id to full taxonomy mapping\n\n"
+println "\nBuilding tax id to full taxonomy mapping\n\n"
 zcat $TMPDIR/ncbi_lineages.csv.gz | \
     awk -v kingdom="$KINGDOM" 'BEGIN { FS=","; OFS="" } 
                                      { gsub(" ", "_"); gsub(/\.|\047|\"|\(|\)|\:/, "") }
@@ -327,12 +346,12 @@ zcat $TMPDIR/ncbi_lineages.csv.gz | \
 # Download all GCAs associated to the taxa IDs in taxa.tsv
 # Use genomes that have not been excluded from RefSeq
 # https://www.ncbi.nlm.nih.gov/assembly/help/anomnotrefseq/
-printf "Downloading genomes from NCBI GenBank\n"
+println "Downloading genomes from NCBI GenBank\n"
 if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
-    printf "\tRunning CheckM to quality control input genomes\n"
-    printf "\t\tMinimum completeness: %s\n" "${CHECKM_COMPLETENESS}"
-    printf "\t\tMaximum contamination: %s\n\n" "${CHECKM_CONTAMINATION}"
-    printf "\tDereplicating input genomes\n\n"
+    println "\tRunning CheckM to quality control input genomes\n"
+    println "\t\tMinimum completeness: %s\n" "${CHECKM_COMPLETENESS}"
+    println "\t\tMaximum contamination: %s\n\n" "${CHECKM_CONTAMINATION}"
+    println "\tDereplicating input genomes\n\n"
 fi
 
 while read tax_id, taxonomy; do
@@ -340,7 +359,7 @@ while read tax_id, taxonomy; do
     # the same "unclassified" taxonomic label could potentially be completely different
     # Unclassified genomes can be used with the "update" module with "--type=MAGs"
     if [[ ! $taxonomy == *"_unclassified"* ]]; then
-        printf "\tProcessing %s: " "$taxonomy"
+        println "\tProcessing %s: " "$taxonomy"
         # Index reference genomes
         esearch_txid "$DBDIR" ${HOW_MANY_GENOMES_PER_SPECIES} "${tax_id}" "$taxonomy" "references"
 
@@ -394,7 +413,7 @@ while read tax_id, taxonomy; do
                 if [[ -f ${GENOMES_FOF} ]]; then
                     HOW_MANY=$(cat ${GENOMES_FOF} | wc -l)
                     if [[ "${HOW_MANY}" -gt "1" ]]; then
-                        printf "\t[TAXID=%s] Dereplicating %s genomes\n" "${tax_id}" "${HOW_MANY}"
+                        println "\t[TAXID=%s] Dereplicating %s genomes\n" "${tax_id}" "${HOW_MANY}"
                         # Run kmtricks to build the kmers matrix
                         kmtricks_matrix_wrapper ${GENOMES_FOF} \
                                                 $TAXDIR/matrix \
@@ -431,7 +450,7 @@ while read tax_id, taxonomy; do
 
             # Count how many genomes survived the quality control and dereplication steps
             HOW_MANY=$(cat ${GENOMES_FOF} | wc -l)
-            printf "%s genomes\n" "${HOW_MANY}"
+            println "%s genomes\n" "${HOW_MANY}"
             if [[ "${HOW_MANY}" -eq "0" ]]; then
                 # Remove the species folder if it does not contain any genome
                 rm -rf $TAXDIR
@@ -442,7 +461,7 @@ done < $TMPDIR/taxa.tsv
 
 # Automatically estimate the best bloom filter size with ntCard
 if ${ESTIMATE_FILTER_SIZE}; then
-    printf "\nRunning ntCard for estimating the bloom filter size\n"
+    println "\nRunning ntCard for estimating the bloom filter size\n"
     # Create a list with the file paths to all the downloaded genomes
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -I {} bash -c \
         'INPUT={}; \
@@ -460,7 +479,7 @@ if ${ESTIMATE_FILTER_SIZE}; then
         # Increment the estimated bloom filter size
         FILTER_SIZE=$(( ${FILTER_SIZE}+${INCREMENT} ))
     else
-        printf "\n[ERROR] An error has occurred while running ntCard\n\n"
+        println "\n[ERROR] An error has occurred while running ntCard\n\n"
         # Print the standard error message and exit
         standard_error_message
         exit 1
@@ -468,7 +487,7 @@ if ${ESTIMATE_FILTER_SIZE}; then
 fi
 
 # Run kmtricks and build a sequence bloom tree for each species
-printf "\nRunning kmtricks at the species level\n"
+println "\nRunning kmtricks at the species level\n"
 NFOFIN=`find $DBDIR -type f -iname "genomes.fof" | wc -l`   # Count how many genomes.fof files (one for each species)
 NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l` # Count how many kmtricks.fof files (copy of genomes.fof generated by kmtricks)
 while [ $NFOFOUT -lt $NFOFIN ]; do
@@ -483,7 +502,7 @@ while [ $NFOFOUT -lt $NFOFIN ]; do
 done
 
 # Run howdesbt to build a sequence bloom tree for each of the lower taxonomic levels
-printf "\nRunning howdesbt on lower taxonomic levels\n"
+println "\nRunning howdesbt on lower taxonomic levels\n"
 # Process lower taxonomic levels
 # Start with genera at depth 6
 DEPTH=6
@@ -496,15 +515,15 @@ done
 if $CLEANUP; then
     # Remove tmp folder
     if [[ -d $TMPDIR ]]; then
-        printf "\nCleaning up temporary folder:\n"
-        printf "\t%s\n" "$TMPDIR"
+        println "\nCleaning up temporary folder:\n"
+        println "\t%s\n" "$TMPDIR"
         rm -rf $TMPDIR
     fi
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
 
 # Print credits
 credits

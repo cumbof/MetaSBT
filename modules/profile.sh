@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="Jun 1, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -37,14 +37,14 @@ for ARG in "$@"; do
             INPUTFILE="${ARG#*=}"
             # Define helper
             if [[ "$INPUTFILE" =~ "?" ]]; then
-                printf "profile helper: --input-file=file\n\n"
-                printf "\tPath to the input genome.\n\n"
+                println "profile helper: --input-file=file\n\n"
+                println "\tPath to the input genome.\n\n"
                 exit 0
             fi
             # Check whether the input file exists
             if [[ ! -f $INPUTFILE ]]; then
-                printf "Input file does not exist!\n"
-                printf "--input-file=%s\n" "$INPUTFILE"
+                println "Input file does not exist!\n"
+                println "--input-file=%s\n" "$INPUTFILE"
                 exit 1
             fi
             ;;
@@ -53,9 +53,23 @@ for ARG in "$@"; do
             INPUTID="${ARG#*=}"
             # Define helper
             if [[ "$INPUTID" =~ "?" ]]; then
-                printf "profile helper: --input-id=value\n\n"
-                printf "\tUnique identifier of the input genome.\n\n"
+                println "profile helper: --input-id=value\n\n"
+                println "\tUnique identifier of the input genome.\n\n"
                 exit 0
+            fi
+            ;;
+        --log=*)
+            # Path to the log file
+            LOG_FILEPATH="${ARG#*=}"
+            # Define helper
+            if [[ "${LOG_FILEPATH}" =~ "?" ]]; then
+                println "profile helper: --log=file\n\n"
+                println "\tPath to the log file.\n\n"
+                exit 0
+            fi
+            # Remove the log file if it already exists
+            if [[ -f ${LOG_FILEPATH} ]]; then
+                rm ${LOG_FILEPATH}
             fi
             ;;
         --output-dir=*)
@@ -63,8 +77,8 @@ for ARG in "$@"; do
             OUTPUTDIR="${ARG#*=}"
             # Define helper
             if [[ "$OUTPUTDIR" =~ "?" ]]; then
-                printf "profile helper: --output-dir=directory\n\n"
-                printf "\tThis is the output folder with queries results.\n\n"
+                println "profile helper: --output-dir=directory\n\n"
+                println "\tThis is the output folder with queries results.\n\n"
                 exit 0
             fi
             ;;
@@ -73,8 +87,8 @@ for ARG in "$@"; do
             OUTPUTPREFIX="${ARG#*=}"
             # Define helper
             if [[ "$OUTPUTPREFIX" =~ "?" ]]; then
-                printf "profile helper: --output-prefix=value\n\n"
-                printf "\tPrefix of the output files with query matches.\n\n"
+                println "profile helper: --output-prefix=value\n\n"
+                println "\tPrefix of the output files with query matches.\n\n"
                 exit 0
             fi
             ;;
@@ -83,10 +97,10 @@ for ARG in "$@"; do
             THRESHOLD="${ARG#*=}"
             # Define helper
             if [[ "$THRESHOLD" =~ "?" ]]; then
-                printf "profile helper: --threshold=number\n\n"
-                printf "\tFraction of query kmers that must be present in a leaf to be considered a match.\n"
-                printf "\tThis must be between 0 and 1.\n"
-                printf "\tDefault: 0.7\n\n"
+                println "profile helper: --threshold=number\n\n"
+                println "\tFraction of query kmers that must be present in a leaf to be considered a match.\n"
+                println "\tThis must be between 0 and 1.\n"
+                println "\tDefault: 0.7\n\n"
                 exit 0
             fi
             ;;
@@ -95,39 +109,44 @@ for ARG in "$@"; do
             TREE="${ARG#*=}"
             # Define helper
             if [[ "$TREE" =~ "?" ]]; then
-                printf "profile helper: --tree=file\n\n"
-                printf "\tThis is the tree definition file.\n\n"
+                println "profile helper: --tree=file\n\n"
+                println "\tThis is the tree definition file.\n\n"
                 exit 0
             fi
             # Check whether the input file exists
             if [[ ! -f $TREE ]]; then
-                printf "Input file does not exist!\n"
-                printf "--tree=%s\n" "$TREE"
+                println "Input file does not exist!\n"
+                println "--tree=%s\n" "$TREE"
                 exit 1
             fi
             ;;
+        -v|--version)
+            # Print pipeline version
+            println "profile version %s (%s)\n" "$VERSION" "$DATE"
+            exit 0
+            ;;
         *)
-            printf "profile: invalid option -- %s\n" "$ARG"
+            println "profile: invalid option -- %s\n" "$ARG"
             exit 1
             ;;
     esac
 done
 
-printf "profile version %s (%s)\n\n" "$VERSION" "$DATE"
+println "profile version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
-    printf "Unsatisfied software dependencies!\n\n"
-    printf "Please run the following command for a list of required external software dependencies:\n\n"
-    printf "\t$ meta-index --resolve-dependencies\n\n"
+    println "Unsatisfied software dependencies!\n\n"
+    println "Please run the following command for a list of required external software dependencies:\n\n"
+    println "\t$ meta-index --resolve-dependencies\n\n"
 
     exit 1
 fi
 
-printf "Input:\n"
-printf "\tFile path: %s\n" "$INPUTFILE"
-printf "\tInput ID: %s\n\n" "$INPUTID"
+println "Input:\n"
+println "\tFile path: %s\n" "$INPUTFILE"
+println "\tInput ID: %s\n\n" "$INPUTID"
 
 # Create the output directory if it does not exist
 if [[ ! -d $OUTPUTDIR ]]; then
@@ -149,14 +168,14 @@ CLOSEST_GENOME_COMMON_KMERS=0
 # Score of the closest genome
 CLOSEST_GENOME_SCORE=0
 
-printf "Querying trees:\n"
+println "Querying trees:\n"
 # Start querying the tree
 while [[ -f $TREE ]]; do
     IDXDIR="$(dirname $TREE)"
     LEVELDIR="$(dirname $IDXDIR)"
     LEVEL="$(basename $LEVELDIR)"
     # Query the sequence bloom tree
-    printf "\t%s\n" "$TREE"
+    println "\t%s\n" "$TREE"
     howdesbt query --tree=$TREE \
                    --threshold=$THRESHOLD \
                    --adjust \
@@ -198,21 +217,21 @@ done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
 if [[ ! -f $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv ]]; then
-    printf "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+    println "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 # Reconstruct the lineage
 if [ ${#LINEAGE[@]} -gt 0 ]; then
     # Print closest lineage
-    printf "\nClosest lineage:\n"
+    println "\nClosest lineage:\n"
     CLOSEST_LINEAGE=$(printf "|%s" "${LINEAGE[@]}")
     CLOSEST_LINEAGE=${CLOSEST_LINEAGE:1}
-    printf "\t%s\n\n" "${CLOSEST_LINEAGE}"
+    println "\t%s\n\n" "${CLOSEST_LINEAGE}"
 
     # Print scores
-    printf "Score:\n"
+    println "Score:\n"
     for i in "${!LINEAGE[@]}"; do
-        printf "\t%s\t%s\n" "${LINEAGE[i]}" "${SCORES[i]}"
+        println "\t%s\t%s\n" "${LINEAGE[i]}" "${SCORES[i]}"
         # Retrieve taxonomic level
         LEVELID=${LINEAGE[i]:0:1}
         # Expand the level ID to the full level name
@@ -227,32 +246,32 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
             *) LEVELNAME="NA" ;;
         esac
         # Report characterisation to the output file
-        printf "%s\t%s\t%s\t%s\n" "$INPUTID" \
-                                  "$LEVELNAME" \
-                                  "${LINEAGE[i]}" \
-                                  "${COMMON_KMERS[i]}" \
-                                  "${SCORES[i]}" \
-                                  >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+        println "%s\t%s\t%s\t%s\n" "$INPUTID" \
+                                   "$LEVELNAME" \
+                                   "${LINEAGE[i]}" \
+                                   "${COMMON_KMERS[i]}" \
+                                   "${SCORES[i]}" \
+                                   >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
     done
 fi
 
 # Show the closest genome in case the input is a species tree or the query is expanded
 if [ ! -z "${CLOSEST_GENOME}" ]; then
     # Print the closest genome and its score
-    printf "\nClosest genome:\n"
-    printf "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
+    println "\nClosest genome:\n"
+    println "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
     # Report the closest genome to the output file
-    printf "%s\t%s\t%s\t%s\n" "$INPUTID" \
-                              "genome" \
-                              "${CLOSEST_GENOME}" \
-                              "${CLOSEST_GENOME_COMMON_KMERS}" \
-                              "${CLOSEST_GENOME_SCORE}" \
-                              >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+    println "%s\t%s\t%s\t%s\n" "$INPUTID" \
+                               "genome" \
+                               "${CLOSEST_GENOME}" \
+                               "${CLOSEST_GENOME_COMMON_KMERS}" \
+                               "${CLOSEST_GENOME_SCORE}" \
+                               >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
 
 # Print credits
 credits

@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 1, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -102,15 +102,15 @@ for ARG in "$@"; do
             BOUNDARIES="${ARG#*=}"
             # Define helper
             if [[ "$BOUNDARIES" =~ "?" ]]; then
-                printf "update helper: --boundaries=file\n\n"
-                printf "\tPath to the output table produced by the boundaries module.\n"
-                printf "\tIt is required in case of MAGs as input genomes only\n\n"
+                println "update helper: --boundaries=file\n\n"
+                println "\tPath to the output table produced by the boundaries module.\n"
+                println "\tIt is required in case of MAGs as input genomes only\n\n"
                 exit 0
             fi
             # Check whether the input file exists
             if [[ ! -f $BOUNDARIES ]]; then
-                printf "Input file does not exist!\n"
-                printf "--boundaries=%s\n" "$BOUNDARIES"
+                println "Input file does not exist!\n"
+                println "--boundaries=%s\n" "$BOUNDARIES"
                 exit 1
             fi
             ;;
@@ -119,13 +119,13 @@ for ARG in "$@"; do
             BOUNDARY_UNCERTAINTY_PERC="${ARG#*=}"
             # Define helper
             if [[ "${BOUNDARY_UNCERTAINTY_PERC}" =~ "?" ]]; then
-                printf "update helper: --boundary-uncertainty=num\n\n"
-                printf "\tDefine the percentage of kmers to enlarge and reduce boundaries\n\n"
+                println "update helper: --boundary-uncertainty=num\n\n"
+                println "\tDefine the percentage of kmers to enlarge and reduce boundaries\n\n"
                 exit 0
             fi
             # Check whether --boundary-uncertainty is an integer between 0 and 100
             if [[ ! ${BOUNDARY_UNCERTAINTY_PERC} =~ ^[0-9]+$ ]] || [[ "${BOUNDARY_UNCERTAINTY_PERC}" -lt "0" ]] || [[ "${BOUNDARY_UNCERTAINTY_PERC}" -gt "100" ]]; then
-                printf "Argument --boundary-uncertainty must be a positive integer between 0 and 100\n"
+                println "Argument --boundary-uncertainty must be a positive integer between 0 and 100\n"
                 exit 1
             fi
             ;;
@@ -134,13 +134,13 @@ for ARG in "$@"; do
             CHECKM_COMPLETENESS="${ARG#*=}"
             # Define helper
             if [[ "${CHECKM_COMPLETENESS}" =~ "?" ]]; then
-                printf "update helper: --checkm-completeness=num\n\n"
-                printf "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
+                println "update helper: --checkm-completeness=num\n\n"
+                println "\tInput genomes must have a minimum completeness percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-completeness is an integer
             if [[ ! ${CHECKM_COMPLETENESS} =~ ^[0-9]+$ ]] || [[ "${CHECKM_COMPLETENESS}" -gt "100" ]]; then
-                printf "Argument --checkm-completeness must be a positive integer greater than 0 (up to 100)\n"
+                println "Argument --checkm-completeness must be a positive integer greater than 0 (up to 100)\n"
                 exit 1
             fi
             ;;
@@ -149,13 +149,13 @@ for ARG in "$@"; do
             CHECKM_CONTAMINATION="${ARG#*=}"
             # Define helper
             if [[ "${CHECKM_CONTAMINATION}" =~ "?" ]]; then
-                printf "update helper: --checkm-contamination=num\n\n"
-                printf "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
+                println "update helper: --checkm-contamination=num\n\n"
+                println "\tInput genomes must have a maximum contamination percentage before being processed and added to the database\n\n"
                 exit 0
             fi
             # Check whether --checkm-contamination is an integer
             if [[ ! ${CHECKM_CONTAMINATION} =~ ^[0-9]+$ ]] || [[ "${CHECKM_CONTAMINATION}" -gt "100" ]]; then
-                printf "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
+                println "Argument --checkm-completeness must be a positive integer lower than 100 (up to 0)\n"
                 exit 1
             fi
             ;;
@@ -168,8 +168,8 @@ for ARG in "$@"; do
             DBDIR="${ARG#*=}"
             # Define helper
             if [[ "$DBDIR" =~ "?" ]]; then
-                printf "update helper: --db-dir=directory\n\n"
-                printf "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
+                println "update helper: --db-dir=directory\n\n"
+                println "\tThis is the database directory with the taxonomically organised sequence bloom trees.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -178,8 +178,8 @@ for ARG in "$@"; do
             DBDIR="${DBDIR%/}"
             # Check whether the input directory exist
             if [[ ! -d $DBDIR ]]; then
-                printf "Input folder does not exist!\n"
-                printf "--db-dir=%s\n" "$DBDIR"
+                println "Input folder does not exist!\n"
+                println "--db-dir=%s\n" "$DBDIR"
                 exit 1
             fi
             ;;
@@ -194,16 +194,16 @@ for ARG in "$@"; do
             EXTENSION="${ARG#*=}"
             # Define helper
             if [[ "$EXTENSION" =~ "?" ]]; then
-                printf "update helper: --extension=value\n\n"
-                printf "\tSpecify the input genome files extension.\n"
-                printf "\tAll the input genomes must have the same file extension before running this module.\n\n"
+                println "update helper: --extension=value\n\n"
+                println "\tSpecify the input genome files extension.\n"
+                println "\tAll the input genomes must have the same file extension before running this module.\n\n"
                 exit 0
             fi
             # Allowed extensions: "fa", "fasta", "fna" and gzip compressed formats
             EXTENSION_LIST=("fa" "fa.gz" "fasta" "fasta.gz" "fna" "fna.gz")
             if ! echo ${EXTENSION_LIST[@]} | grep -w -q $EXTENSION; then
-                printf "File extension \"%s\" is not allowed!\n" "$EXTENSION"
-                printf "Please have a look at the helper of the --extension argument for a list of valid input file extensions.\n"
+                println "File extension \"%s\" is not allowed!\n" "$EXTENSION"
+                println "Please have a look at the helper of the --extension argument for a list of valid input file extensions.\n"
                 exit 1
             fi
             ;;
@@ -212,14 +212,14 @@ for ARG in "$@"; do
             FILTER_SIZE="${ARG#*=}"
             # Define helper
             if [[ "${FILTER_SIZE}" =~ "?" ]]; then
-                printf "update helper: --filter-size=num\n\n"
-                printf "\tThis is the size of the bloom filters.\n"
-                printf "\tIt must be the same size used while running the index module.\n\n"
+                println "update helper: --filter-size=num\n\n"
+                println "\tThis is the size of the bloom filters.\n"
+                println "\tIt must be the same size used while running the index module.\n\n"
                 exit 0
             fi
             # Check whether --filter-size is an integer
             if [[ ! ${FILTER_SIZE} =~ ^[0-9]+$ ]] || [[ "${FILTER_SIZE}" -eq "0" ]]; then
-                printf "Argument --filter-size must be a positive integer greater than 0\n"
+                println "Argument --filter-size must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -234,14 +234,14 @@ for ARG in "$@"; do
             INLIST="${ARG#*=}"
             # Define helper
             if [[ "$INLIST" =~ "?" ]]; then
-                printf "update helper: --input-list=file\n\n"
-                printf "\tThis file contains the list of paths to the new genomes that will be added to the database.\n\n"
+                println "update helper: --input-list=file\n\n"
+                println "\tThis file contains the list of paths to the new genomes that will be added to the database.\n\n"
                 exit 0
             fi
             # Check whether the input file exists
             if [[ ! -f $INLIST ]]; then
-                printf "Input file does not exist!\n"
-                printf "--input-list=%s\n" "$INLIST"
+                println "Input file does not exist!\n"
+                println "--input-list=%s\n" "$INLIST"
                 exit 1
             fi
             ;;
@@ -250,8 +250,8 @@ for ARG in "$@"; do
             KINGDOM="${ARG#*=}"
             # Define helper
             if [[ "$KINGDOM" =~ "?" ]]; then
-                printf "update helper: --kingdom=value\n\n"
-                printf "\tSelect the kingdom that will be updated.\n\n"
+                println "update helper: --kingdom=value\n\n"
+                println "\tSelect the kingdom that will be updated.\n\n"
                 exit 0
             fi
             ;;
@@ -260,14 +260,28 @@ for ARG in "$@"; do
             KMER_LEN="${ARG#*=}"
             # Define helper
             if [[ "${KMER_LEN}" =~ "?" ]]; then
-                printf "update helper: --kmer-len=num\n\n"
-                printf "\tThis is the length of the kmers used for building bloom filters.\n\n"
+                println "update helper: --kmer-len=num\n\n"
+                println "\tThis is the length of the kmers used for building bloom filters.\n\n"
                 exit 0
             fi
             # Check whether --kmer-len is an integer
             if [[ ! ${KMER_LEN} =~ ^[0-9]+$ ]] || [[ "${KMER_LEN}" -eq "0" ]]; then
-                printf "Argument --kmer-len must be a positive integer greater than 0\n"
+                println "Argument --kmer-len must be a positive integer greater than 0\n"
                 exit 1
+            fi
+            ;;
+        --log=*)
+            # Path to the log file
+            LOG_FILEPATH="${ARG#*=}"
+            # Define helper
+            if [[ "${LOG_FILEPATH}" =~ "?" ]]; then
+                println "boundaries helper: --log=file\n\n"
+                println "\tPath to the log file.\n\n"
+                exit 0
+            fi
+            # Remove the log file if it already exists
+            if [[ -f ${LOG_FILEPATH} ]]; then
+                rm ${LOG_FILEPATH}
             fi
             ;;
         --nproc=*)
@@ -275,14 +289,14 @@ for ARG in "$@"; do
             NPROC="${ARG#*=}"
             # Define helper
             if [[ "$NPROC" =~ "?" ]]; then
-                printf "update helper: --nproc=num\n\n"
-                printf "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
-                printf "\tDefault: --nproc=1\n\n"
+                println "update helper: --nproc=num\n\n"
+                println "\tThis argument refers to the number of processors used for parallelizing the pipeline when possible.\n"
+                println "\tDefault: --nproc=1\n\n"
                 exit 0
             fi
             # Check whether --proc is an integer
             if [[ ! $NPROC =~ ^[0-9]+$ ]] || [[ "$NPROC" -eq "0" ]]; then
-                printf "Argument --nproc must be a positive integer greater than 0\n"
+                println "Argument --nproc must be a positive integer greater than 0\n"
                 exit 1
             fi
             ;;
@@ -291,15 +305,15 @@ for ARG in "$@"; do
             TAXA="${ARG#*=}"
             # Define helper
             if [[ "$TAXA" =~ "?" ]]; then
-                printf "update helper: --taxa=file\n\n"
-                printf "\tInput file with the mapping between input genome IDs and their taxonomic label.\n"
-                printf "\tThis is used in case of reference genomes only \"--type=references\".\n\n"
+                println "update helper: --taxa=file\n\n"
+                println "\tInput file with the mapping between input genome IDs and their taxonomic label.\n"
+                println "\tThis is used in case of reference genomes only \"--type=references\".\n\n"
                 exit 0
             fi
             # Check whether the input file exists
             if [[ ! -f $TAXA ]]; then
-                printf "Input file does not exist!\n"
-                printf "--taxa=%s\n" "$TAXA"
+                println "Input file does not exist!\n"
+                println "--taxa=%s\n" "$TAXA"
                 exit 1
             fi
             ;;
@@ -308,8 +322,8 @@ for ARG in "$@"; do
             TMPDIR="${ARG#*=}"
             # Define helper
             if [[ "$TMPDIR" =~ "?" ]]; then
-                printf "update helper: --tmp-dir=directory\n\n"
-                printf "\tPath to the folder for storing temporary data.\n\n"
+                println "update helper: --tmp-dir=directory\n\n"
+                println "\tPath to the folder for storing temporary data.\n\n"
                 exit 0
             fi
             # Reconstruct the full path
@@ -322,32 +336,37 @@ for ARG in "$@"; do
             TYPE="${ARG#*=}"
             # Define helper
             if [[ "${TYPE}" =~ "?" ]]; then
-                printf "update helper: --type=value\n\n"
-                printf "\tDefine the nature of the input genomes. Only \"references\" and \"MAGs\" are allowed.\n\n"
+                println "update helper: --type=value\n\n"
+                println "\tDefine the nature of the input genomes. Only \"references\" and \"MAGs\" are allowed.\n\n"
                 exit 0
             fi
             # Allowed genome types: "references" and "MAGs"
             if [[ ! "$TYPE" = "MAGs" ]] && [[ ! "$TYPE" = "references" ]]; then
-                printf "Input type \"%s\" is not allowed!\n" "$TYPE"
-                printf "Please have a look at the helper of the --type argument for a list of valid genome types.\n"
+                println "Input type \"%s\" is not allowed!\n" "$TYPE"
+                println "Please have a look at the helper of the --type argument for a list of valid genome types.\n"
                 exit 1
             fi
             ;;
+        -v|--version)
+            # Print pipeline version
+            println "update version %s (%s)\n" "$VERSION" "$DATE"
+            exit 0
+            ;;
         *)
-            printf "update: invalid option -- %s\n" "$ARG"
+            println "update: invalid option -- %s\n" "$ARG"
             exit 1
             ;;
     esac
 done
 
-printf "update version %s (%s)\n\n" "$VERSION" "$DATE"
+println "update version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
 check_dependencies false
 if [[ "$?" -gt "0" ]]; then
-    printf "Unsatisfied software dependencies!\n\n"
-    printf "Please run the following command for a list of required external software dependencies:\n\n"
-    printf "\t$ meta-index --resolve-dependencies\n\n"
+    println "Unsatisfied software dependencies!\n\n"
+    println "Please run the following command for a list of required external software dependencies:\n\n"
+    println "\t$ meta-index --resolve-dependencies\n\n"
     
     exit 1
 fi
@@ -357,8 +376,8 @@ mkdir -p $TMPDIR
 
 # Count how many genomes in input
 HOW_MANY=$(cat $INLIST | wc -l)
-printf "Processing %s genomes\n" "${HOW_MANY}"
-printf "\t%s\n\n" "$INLIST"
+println "Processing %s genomes\n" "${HOW_MANY}"
+println "\t%s\n\n" "$INLIST"
 
 # Input genomes must be quality-controlled before being added to the database
 if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
@@ -389,9 +408,9 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
     # Count how many genomes passed the quality control
     HOW_MANY=$(cat $INLIST | wc -l)
 
-    printf "\t%s genomes passed the quality control\n" "${HOW_MANY}"
-    printf "\t\tMinimum completeness: %s\n" "${CHECKM_COMPLETENESS}"
-    printf "\t\tMaximum contamination: %s\n" "${CHECKM_CONTAMINATION}"
+    println "\t%s genomes passed the quality control\n" "${HOW_MANY}"
+    println "\t\tMinimum completeness: %s\n" "${CHECKM_COMPLETENESS}"
+    println "\t\tMaximum contamination: %s\n" "${CHECKM_CONTAMINATION}"
 fi
 
 # Use kmtricks to build a kmer matrix and compare input genomes
@@ -408,7 +427,7 @@ if $DEREPLICATE; then
         done <$INLIST
 
         if [[ -f ${GENOMES_FOF} ]]; then
-            printf "\nDereplicating %s input genomes\n" "${HOW_MANY}"
+            println "\nDereplicating %s input genomes\n" "${HOW_MANY}"
             # Run kmtricks to build the kmers matrix
             kmtricks_matrix_wrapper ${GENOMES_FOF} \
                                     $TMPDIR/matrix \
@@ -438,14 +457,14 @@ if $DEREPLICATE; then
 
             # Count how many genomes passed the dereplication
             HOW_MANY=$(cat $INLIST | wc -l)
-            printf "\t%s genomes passed the dereplication\n" "${HOW_MANY}"
+            println "\t%s genomes passed the dereplication\n" "${HOW_MANY}"
         fi
     else
         # No input genomes survived from the quality control step
-        printf "No input genomes available!\n"
+        println "No input genomes available!\n"
         PIPELINE_END_TIME="$(date +%s.%3N)"
         PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-        printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+        println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
         
         # Print credits before stopping the pipeline execution
         credits
@@ -482,7 +501,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             FILEPATH=$TMPDIR/genomes/${GENOMENAME}.fna
         fi
 
-        printf "\nProfiling %s\n" "$GENOMENAME"
+        println "\nProfiling %s\n" "$GENOMENAME"
         # Run the profiler to establish the closest genome and the closest group for each taxonomic level in the tree
         . ${SCRIPT_DIR}/profile.sh --input-file=$FILEPATH \
                                    --input-id=$FILEPATH \
@@ -493,7 +512,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                                    > /dev/null 2>&1 # Silence the profiler
         # Define output file path with profiles
         PROFILE=$TMPDIR/profiling/${GENOMENAME}__profiles.tsv
-        printf "\t%s\n" "$PROFILE"
+        println "\t%s\n" "$PROFILE"
         
         if [[ -f $PROFILE ]]; then
             # Discard the genome if the score is 1.0 compared to the closest match at the species level
@@ -504,12 +523,12 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             CLOSEST_GENOME_COMMON_KMERS="$(echo "${CLOSEST_GENOME_DATA}" | cut -d$'\t' -f4)"
             CLOSEST_GENOME_SCORE="$(echo "${CLOSEST_GENOME_DATA}" | cut -d$'\t' -f5)"
             # Print closest genome
-            printf "\tClosest genome: %s (common kmers: %s; score: %s)\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_COMMON_KMERS}" "${CLOSEST_GENOME_SCORE}"
+            println "\tClosest genome: %s (common kmers: %s; score: %s)\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_COMMON_KMERS}" "${CLOSEST_GENOME_SCORE}"
             # Reconstruct the closest taxa
             LEVELS=("kingdom" "phylum" "class" "order" "family" "genus" "species")
             CLOSEST_TAXA=""
             CLOSEST_COMMON_KMERS=""
-            printf "\tClosest lineage:\n"
+            println "\tClosest lineage:\n"
             for level in ${LEVELS[@]}; do
                 CLOSEST_LEVEL_DATA="$(grep "${GENOMENAME}.${GENOMEEXT}" $PROFILE | grep -w "$level")"
                 CLOSEST_LEVEL="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f3)"
@@ -517,7 +536,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 CLOSEST_LEVEL_SCORE="$(echo "${CLOSEST_LEVEL_DATA}" | cut -d$'\t' -f5)"
                 CLOSEST_TAXA=${CLOSEST_TAXA}"|"${CLOSEST_LEVEL}
                 # Print profiler result
-                printf "\t\t%s: %s (common kmers: %s; score: %s)\n" "$level" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_COMMON_KMERS}" "${CLOSEST_LEVEL_SCORE}"
+                println "\t\t%s: %s (common kmers: %s; score: %s)\n" "$level" "${CLOSEST_LEVEL}" "${CLOSEST_LEVEL_COMMON_KMERS}" "${CLOSEST_LEVEL_SCORE}"
                 # Keep track of the species score
                 if [[ "${CLOSEST_LEVEL}" = s__* ]]; then
                     CLOSEST_COMMON_KMERS=${CLOSEST_LEVEL_COMMON_KMERS}
@@ -537,15 +556,15 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # Discard the input genome
                         SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
-                        printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome is a MAG and the closest genome is a reference genome\n"
+                        println "\tDiscarding genome:\n"
+                        println "\t\tInput genome is a MAG and the closest genome is a reference genome\n"
                     elif [[ -f "${CLOSEST_TAXADIR}/mags.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/mags.txt; then
                         # If the input genome is a MAG and the closest genome is a MAG
                         # Discard the input genome
                         SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
-                        printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome and the closest genome are both MAGs\n"
+                        println "\tDiscarding genome:\n"
+                        println "\t\tInput genome and the closest genome are both MAGs\n"
                     fi
                 elif [[ "$TYPE" = "references" ]]; then
                     if [[ -f "${CLOSEST_TAXADIR}/genomes.txt" ]] && grep -q "" ${CLOSEST_TAXADIR}/genomes.txt; then
@@ -553,8 +572,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # Discard the input genome
                         SKIP_GENOME=true
                         # Print the reason why the input genome has been discarded
-                        printf "\tDiscarding genome:\n"
-                        printf "\t\tInput genome and closest genome are both reference genomes\n"
+                        println "\tDiscarding genome:\n"
+                        println "\t\tInput genome and closest genome are both reference genomes\n"
                     fi
                 fi
             fi
@@ -581,13 +600,13 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                         # Do not remove the index here because there could be other input genomes with the same taxonomic label
                         REBUILD+=(${CLOSEST_TAXA})
                         # Print assignment message
-                        printf "\tAssignment:\n"
-                        printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
+                        println "\tAssignment:\n"
+                        println "\t\t%s\n\n" "${CLOSEST_TAXA}"
                     else
                         # Mark the genome as unassigned
                         UNASSIGNED+=($GENOMEPATH)
                         # Print unassignment message
-                        printf "\tUnassigned\n\n"
+                        println "\tUnassigned\n\n"
                     fi
                 elif [[ "$TYPE" = "references" ]]; then
                     # Retrieve the taxonomic label from --taxa input file
@@ -596,8 +615,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     TAXDIR=$DBDIR/$(echo "${TAXALABEL}" | sed 's/|/\//g')
                     TARGETGENOME=$TAXDIR/genomes/${GENOMENAME}.${GENOMEEXT}
                     # Print input genome taxonomic label
-                    printf "\tTaxonomic label:\n"
-                    printf "\t\t%s\n" "$TAXALABEL"
+                    println "\tTaxonomic label:\n"
+                    println "\t\t%s\n" "$TAXALABEL"
 
                     if [[ "${CLOSEST_COMMON_KMERS}" -le "${MAX_BOUND}" ]] && [[ "${CLOSEST_COMMON_KMERS}" -ge "${MIN_BOUND}" ]]; then
                         # Check whether the closest taxonomy contains any reference genomes
@@ -616,16 +635,16 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                             fi
                             # Print the assignment
                             # Taxonomy will change according to the majority voting result
-                            printf "\tAssignment:\n"
-                            printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
+                            println "\tAssignment:\n"
+                            println "\t\t%s\n\n" "${CLOSEST_TAXA}"
                         elif [[ "${HOW_MANY_REFERENCES}" -ge "1" ]]; then
                             # If the closest genome belong to a cluster with at least a reference genome
                             if [[ "$TAXALABEL" != "${CLOSEST_TAXA}" ]]; then
                                 # If the taxonomic labels of the current reference genome and that one of the closest genome do not match
                                 # Report the inconsistency
-                                printf "\tInconsistency found:\n"
-                                printf "\t\tInput genome: %s\n" "$TAXALABEL"
-                                printf "\t\tClosest lineage: %s\n" "${CLOSEST_TAXA}"
+                                println "\tInconsistency found:\n"
+                                println "\t\tInput genome: %s\n" "$TAXALABEL"
+                                println "\t\tClosest lineage: %s\n" "${CLOSEST_TAXA}"
                             fi
                             # Assign the current genome to the closest lineage
                             TARGETGENOME=${CLOSEST_TAXADIR}/genomes/${GENOMENAME}.${GENOMEEXT}
@@ -641,8 +660,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                             # Do not remove the index here because there could be other input genomes with the same taxonomic label
                             REBUILD+=(${CLOSEST_TAXA})
                             # Assign the current reference genome to the closest cluster
-                            printf "\tAssignment:\n"
-                            printf "\t\t%s\n\n" "${CLOSEST_TAXA}"
+                            println "\tAssignment:\n"
+                            println "\t\t%s\n\n" "${CLOSEST_TAXA}"
                         fi
                     else
                         # If nothing is close enough to the current genome and its taxonomic label does not exist in the database
@@ -788,7 +807,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
     if [[ "${#REBUILD[@]}" -gt "0" ]]; then
         # Extract taxonomic levels from the list of taxa that must be rebuilt
         # Process all the species first, then all the genera, and so on up to the kingdom
-        printf "Updating the database\n"
+        println "Updating the database\n"
         for POS in $(seq 7 1); do 
             TAXALIST=()
             for LABEL in ${REBUILD[@]}; do
@@ -807,7 +826,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             TAXALIST=$(printf "%s\0" "${TAXALIST[@]}" | sort -uz | xargs -0 printf "%s ")
             # Rebuild the sequence bloom trees
             for TAXONOMY in ${TAXALIST[@]}; do
-                printf "\t%s\n" "$TAXONOMY"
+                println "\t%s\n" "$TAXONOMY"
                 # Remove the index
                 if [[ -d $TAXONOMY/index ]]; then 
                     rm -rf rm -rf $TAXONOMY/index
@@ -835,14 +854,14 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
         done
     else
         # In case nothing must be rebuilt
-        printf "No lineages have been updated!\n"
+        println "No lineages have been updated!\n"
     fi
 else
     # No input genomes survived from the quality control step and dereplication
-    printf "No input genomes available!\n"
+    println "No input genomes available!\n"
     PIPELINE_END_TIME="$(date +%s.%3N)"
     PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-    printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+    println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
     
     # Print credits before stopping the pipeline execution
     credits
@@ -854,15 +873,15 @@ fi
 if $CLEANUP; then
     # Remove tmp folder
     if [[ -d $TMPDIR ]]; then
-        printf "Cleaning up temporary folder:\n"
-        printf "\t%s\n" "$TMPDIR"
+        println "Cleaning up temporary folder:\n"
+        println "\t%s\n" "$TMPDIR"
         rm -rf $TMPDIR
     fi
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
 PIPELINE_ELAPSED="$(bc <<< "${PIPELINE_END_TIME}-${PIPELINE_START_TIME}")"
-printf "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
+println "\nTotal elapsed time: %s\n\n" "$(displaytime ${PIPELINE_ELAPSED})"
 
 # Print credits
 credits
