@@ -267,7 +267,9 @@ println "Downloading taxonomy dump from NCBI\n"
 println "\t%s\n\n" "$TAXDUMP"
 
 wget -N $TAXDUMP -P $TMPDIR
-mkdir -p $TMPDIR/taxdump && tar zxf $TMPDIR/taxdump.tar.gz -C $TMPDIR/taxdump
+mkdir -p $TMPDIR/taxdump
+# Extract NCBI taxdump for 
+tar zxf $TMPDIR/taxdump.tar.gz -C $TMPDIR/taxdump
 
 # Export lineages
 println "Exporting lineages\n"
