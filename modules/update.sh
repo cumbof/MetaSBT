@@ -85,8 +85,8 @@ CHECKM_COMPLETENESS=0
 CHECKM_CONTAMINATION=100
 # CheckM cannot handle a set of genomes with mixed file extensions
 # Extensions of the input genomes must be standardized before running this script
-# Input genome extension is forced to be fna
-EXTENSION="fna"
+# Set a default input genome extension in case it is not explicitly specified with the --extension argument
+EXTENSION="fna.gz"
 # Dereplicate input genomes
 # Use kmtricks to build the kmer matrix on the input set of genomes
 # Remove genomes with identical set of kmers
@@ -196,14 +196,21 @@ for ARG in "$@"; do
             if [[ "$EXTENSION" =~ "?" ]]; then
                 println "update helper: --extension=value\n\n"
                 println "\tSpecify the input genome files extension.\n"
-                println "\tAll the input genomes must have the same file extension before running this module.\n\n"
+                println "\tAll the input genomes must have the same file extension before running this module.\n"
+                println "\tPlease note that this module supports a limited set of file extensions for the input genomes.\n"
+                println "\tIn order to list all the supported extensions, please run this module with the --supported-extensions argument.\n\n"
                 exit 0
             fi
-            # Allowed extensions: "fa", "fasta", "fna" and gzip compressed formats
-            EXTENSION_LIST=("fa" "fa.gz" "fasta" "fasta.gz" "fna" "fna.gz")
-            if ! echo ${EXTENSION_LIST[@]} | grep -w -q $EXTENSION; then
-                println "File extension \"%s\" is not allowed!\n" "$EXTENSION"
-                println "Please have a look at the helper of the --extension argument for a list of valid input file extensions.\n"
+            # Check whether the specified extension is supported by querying the supported_inputs.txt file
+            QUERYEXT="$EXTENSION"
+            if [[ "$QUERYEXT" = *.gz ]]; then
+                QUERYEXT="${QUERYEXT%.*}"
+            fi
+            # Search for the extension
+            if ! grep -q "^$QUERYEXT"$ $SCRIPTSDIR/supported_inputs.txt ; then
+                println 'Error!\n'
+                println '"%s" is not a valid extension.\n' "$QUERYEXT"
+                println 'Please use the --supported-extensions option for a list of supported file extensions for input genomes.\n'
                 exit 1
             fi
             ;;
@@ -300,6 +307,17 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
+        --supported-extensions)
+            # Print the supported list of file extensions for the input sequences
+            println 'List of supported file extensions for input genomes:\n'
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                # Exclude comment lines
+                if [[ ! "$line" =~ ^#.* ]]; then
+                    println '\t%s\n' "$line"
+                fi
+            done < ${SCRIPT_DIR}/supported_inputs.txt
+            exit 0
+            ;;
         --taxa=*)
             # Input file with the mapping between input reference genome IDs and their taxonomic label
             TAXA="${ARG#*=}"
@@ -383,28 +401,43 @@ println "\t%s\n\n" "$INLIST"
 if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "100" ]]; then
     CHECKMTABLES="" # This is the result of the "run_checkm" function as a list of file paths separated by comma
     run_checkm $INLIST "update" $EXTENSION $TMPDIR $NPROC
-    
+
     # Read all the CheckM output tables and filter genomes on their completeness and contamination scores 
     # according to the those provided in input
     touch $TMPDIR/genomes_qc.txt
     CHECKMTABLES_ARR=($(echo $CHECKMTABLES | tr "," " "))
-    for table in ${CHECKMTABLES_ARR[@]}; do
-        # Skip header line with sed
-        # Discard genomes according to their completeness and contamination
-        sed 1d $table | while read line; do
-            # Retrieve completeness and contamination of current genome
-            GENOMEID="$(echo $line | cut -d$'\t' -f1)"          # Genome ID column 1
-            COMPLETENESS="$(echo $line | cut -d$'\t' -f12)"     # Completeness column 12
-            CONTAMINATION="$(echo $line | cut -d$'\t' -f13)"    # Contamination column 13
-            # Use bc command for comparing floating point numbers
-            COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
-            CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
-            if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
-                # Current genome passed the quality control
-                grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
+    # In case there is at least one CheckM output table
+    if [[ "${#CHECKMTABLES_ARR[@]}" -gt "0" ]]; then
+        # Merge all tables
+        # Retrieve header from the first file in list
+        echo "$(head -n1 ${CHECKMTABLES_ARR[0]})" > $TMPDIR/checkm.tsv
+        for table in ${CHECKMTABLES_ARR[@]}; do
+            # Get all the lines except the first one
+            echo "$(tail -n +2 $table)" >> $TMPDIR/checkm.tsv
+        done
+
+        # Iterate over input genomes
+        for GENOMEPATH in $(cut -f1 $INLIST); do
+            # Retrive the genome ID from the genome file path
+            GENOMENAME="$(basename $GENOMEPATH)"
+            GENOMEID="${GENOMENAME%".$EXTENSION"}"
+            # Search for current genome ID into the CheckM output table
+            GENOME_DATA="$(grep "$GENOMEID"$'\t' $TMPDIR/checkm.tsv)"
+            if [[ ! -z "${GENOME_DATA}" ]]; then
+                # In case the current genome has been processed
+                # Retrieve completeness and contamination of current genome
+                COMPLETENESS="$(echo ${GENOME_DATA} | cut -d$'\t' -f12)"     # Get value under column 12
+                CONTAMINATION="$(echo ${GENOME_DATA} | cut -d$'\t' -f13)"    # Get value under column 13
+                # Use bc command for comparing floating point numbers
+                COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
+                CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
+                if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
+                    # Current genome passed the quality control
+                    grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
+                fi
             fi
         done
-    done
+    fi
 
     # Create a new INLIST file with the new list of genomes
     INLIST=$TMPDIR/genomes_qc.txt
@@ -713,7 +746,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             while read GENOMEPATH; do
                 FULLPATH=$(realpath -s $GENOMEPATH)
                 GENOMENAME="$(basename $FULLPATH)"
-                GENOMENAME=${GENOMENAME%"$EXTENSION"}
+                GENOMENAME=${GENOMENAME%".$EXTENSION"}
                 # If the current genome is in the list of genomes assigned to the unknown cluster
                 if [[ " ${GENOMES[@]} " =~ " $GENOMENAME " ]]; then
                     cp $GENOMEPATH ${UNKNOWN_TAXONOMY_PATH}/genomes
