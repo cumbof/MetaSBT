@@ -4,14 +4,14 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 1, 2022"
+DATE="Jun 2, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
 check_dependencies () {
     VERBOSE=$1
     if $VERBOSE; then
-        printf "Checking for software dependencies\n"
+        println "Checking for software dependencies\n"
     fi
     # Define the set of dependencies
     # esearch, esummary, and xtract come from the Entrez Direct (EDirect) utility
@@ -23,12 +23,12 @@ check_dependencies () {
         # Check for dependency
         if ! command -v $dep &> /dev/null ; then
             if $VERBOSE; then
-                printf "\t[--] %s\n" "$dep"
+                println "\t[--] %s\n" "$dep"
             fi
             MISSING=$(($MISSING + 1))
         else
             if $VERBOSE; then
-                printf "\t[OK] %s\n" "$dep"
+                println "\t[OK] %s\n" "$dep"
             fi
         fi
     done
@@ -36,14 +36,14 @@ check_dependencies () {
     # Return 1 in case of missing dependencies
     if [ "$MISSING" -gt "0" ]; then
         if $VERBOSE; then
-            printf "\nPlease, install all the missing dependencies and try again.\n\n"
+            println "\nPlease, install all the missing dependencies and try again.\n\n"
         fi
         return 1
     fi
     
     # Return 0 if all external software dependencies are satisfied
     if $VERBOSE; then
-        printf "\nAll required dependencies satisfied!\n\n"
+        println "\nAll required dependencies satisfied!\n\n"
     fi
     return 0
 }
@@ -54,25 +54,25 @@ check_for_software_updates () {
     VERSION=$1
     if [ ! -z ${LAST_SOFTWARE_VERSION} ]; then
         if [[ "${LAST_SOFTWARE_VERSION}" != $VERSION ]]; then
-            printf "A new version of meta-index is available!\n" "${LAST_SOFTWARE_VERSION}"
-            printf "https://github.com/BlankenbergLab/meta-index/releases\n\n"
+            println "A new version of meta-index is available!\n" "${LAST_SOFTWARE_VERSION}"
+            println "https://github.com/BlankenbergLab/meta-index/releases\n\n"
         fi
     fi
 }
 
 # Print citations
 citations () {
-    printf "TBA\n\n"
+    println "TBA\n\n"
 }
 
 # Print credits
 credits () {
-    printf "Thanks for using meta-index!\n\n"
-    printf "Please credit this tool in your manuscript by citing:\n\n"
+    println "Thanks for using meta-index!\n\n"
+    println "Please credit this tool in your manuscript by citing:\n\n"
     citations
 
-    printf "Remember to star the meta-index repository on GitHub to stay updated on its development and new features:\n"
-    printf "https://github.com/BlankenbergLab/meta-index\n\n"
+    println "Remember to star the meta-index repository on GitHub to stay updated on its development and new features:\n"
+    println "https://github.com/BlankenbergLab/meta-index\n\n"
 }
 
 # Format seconds in human-readable format
@@ -82,11 +82,11 @@ displaytime () {
     HOURS=$(bc <<< "${1}/60/60%24")
     MINUTES=$(bc <<< "${1}/60%60")
     SECONDS=$(bc <<< "${1}%60")
-    if [[ "$DAYS" -gt "0" ]]; then printf "%s days " "$DAYS"; fi
-    if [[ "$HOURS" -gt "0" ]]; then printf "%s hours " "$HOURS"; fi
-    if [[ "$MINUTES" -gt "0" ]]; then printf "%s minutes " "$MINUTES"; fi
-    if [[ "$DAYS" -gt "0" ]] || [[ "$HOURS" -gt "0" ]] || [[ "$MINUTES" -gt "0" ]]; then printf "and "; fi
-    printf "%s seconds\n" "$SECONDS"
+    if [[ "$DAYS" -gt "0" ]]; then println "%s days " "$DAYS"; fi
+    if [[ "$HOURS" -gt "0" ]]; then println "%s hours " "$HOURS"; fi
+    if [[ "$MINUTES" -gt "0" ]]; then println "%s minutes " "$MINUTES"; fi
+    if [[ "$DAYS" -gt "0" ]] || [[ "$HOURS" -gt "0" ]] || [[ "$MINUTES" -gt "0" ]]; then println "and "; fi
+    println "%s seconds\n" "$SECONDS"
 }
 
 # Download genomes from NCBI GenBank
@@ -129,20 +129,20 @@ esearch_txid () {
                     if gzip -t $OUTDIR/${GCA}.fna.gz; then
                         # Define a file of file (fof) with the list of genomes for current species
                         GCAPATH=$(readlink -m $OUTDIR/${GCA}.fna.gz)
-                        printf "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
-                        printf "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
-                        printf "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
+                        println "%s : %s\n" "$GCA" "$GCAPATH" >> $TAXDIR/genomes.fof
+                        println "%s\n" "$GCAPATH" >> $TAXDIR/genomes.txt
+                        println "%s\n" "$GCA" >> $TAXDIR/${GENOME_CATEGORY}.txt
 
                         # Increment the genome counter
                         COUNT_GENOMES=$((COUNT_GENOMES + 1))
                     else
                         # Delete corrupted genome
                         rm $OUTDIR/${GCA}.fna.gz
-                        printf "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
+                        println "\t[ERROR][ID=%s][TAXID=%s] Corrupted genome\n" "$GCA" "${TAX_ID}"
                     fi
                 else
                     # Report missing genomes
-                    printf "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
+                    println "\t[ERROR][ID=%s][TAXID=%s] Unable to download genome\n" "$GCA" "${TAX_ID}"
                 fi
             fi
           done
@@ -285,6 +285,17 @@ kmtricks_matrix_wrapper () {
                        --threads $NPROC > ${OUT_TABLE}
 }
 
+# Print line on standard output and write in log file
+LOG_FILEPATH=""
+println () {
+    LINE=$1
+    VALUES=("${@:2}")
+    if [[ ! -z ${LOG_FILEPATH} ]]; then
+        printf "$LINE" "${VALUES[@]}" >> ${LOG_FILEPATH}
+    fi
+    printf "$LINE" "${VALUES[@]}"
+}
+
 # Run CheckM for quality control base on completeness and contamination
 # Remember to create a global variable "CHECKMTABLES" before calling this function 
 # for accessing the result as a list of file paths separated by comma
@@ -296,13 +307,13 @@ run_checkm () {
     NPROC=$5        # Number of parallel processes for CheckM
 
     # Run CheckM
-    printf 'Running CheckM\n'
+    println 'Running CheckM\n'
     CHECKM_START_TIME="$(date +%s.%3N)"
     # Define temporary run directory
     RUNDIR=$TMPDIR/checkm/$RUNID
     mkdir -p $RUNDIR/tmp
     # Split the set of bins in chunks with 1000 genomes at most
-    printf '\tOrganising genomes in chunks\n'
+    println '\tOrganising genomes in chunks\n'
     split --numeric-suffixes=1 --lines=1000 --suffix-length=3 --additional-suffix=.txt $INLIST $RUNDIR/tmp/bins_
     CHUNKS=`ls "$TMPDIR"/checkm/"$RUNID"/tmp/bins_*.txt 2>/dev/null | wc -l`
     CHECKMTABLES=""
@@ -311,7 +322,7 @@ run_checkm () {
         filename="$(basename $filepath)"
         suffix="${filename#*_}"
         suffix="${suffix%.txt}"
-        printf '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
+        println '\tProcessing chunk %s/%s\n' "$((10#$suffix))" "$CHUNKS"
         # Create chunk folder
         mkdir -p $RUNDIR/tmp/bins_${suffix}
         for bin in `sed '/^$/d' $filepath`; do
@@ -338,10 +349,10 @@ run_checkm () {
 
 # Print a standard error message and redirect the user to the Issues and Discussions pages on GitHub
 standard_error_message () {
-    printf "If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
-    printf "We would be happy to answer your questions and help you troubleshoot any kind of issues with the meta-index framework.\n\n"
-    printf "https://github.com/BlankenbergLab/meta-index/issues\n"
-    printf "https://github.com/BlankenbergLab/meta-index/discussions\n\n"
+    println "If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
+    println "We would be happy to answer your questions and help you troubleshoot any kind of issues with the meta-index framework.\n\n"
+    println "https://github.com/BlankenbergLab/meta-index/issues\n"
+    println "https://github.com/BlankenbergLab/meta-index/discussions\n\n"
 }
 
 # Transpose matrix file
