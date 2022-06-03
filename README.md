@@ -29,7 +29,7 @@ The `meta-index` pipeline is also available by simply cloning this repository an
 ```bash
 # Clone the meta-index repository
 mkdir -p ~/git && cd ~/git
-git clone https://github.com/BlankenbergLab/meta-index
+git clone https://github.com/BlankenbergLab/meta-index.git
 
 # Make the scripts executable
 chmod +x meta-index
@@ -39,17 +39,20 @@ cd modules && chmod +x *
 PATH=$PATH:~/git/meta-index
 ```
 
+Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
+
 In this last case, remember to check that the following dependencies are installed and available on your system:
-- bc
+- [bc](https://www.gnu.org/software/bc/)
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.1.3)
-- gzip
+- [entrez-direct](https://www.ncbi.nlm.nih.gov/books/NBK179288/)
+- [gzip](https://www.gzip.org/)
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin)
 - [ntcard](https://github.com/bcgsc/ntCard)
-- python (version >=3.7)
-- pip
-- wget
+- [python](http://www.python.org/) (version >=3.7)
+- [pip](https://pip.pypa.io/)
+- [wget](https://www.gnu.org/software/wget/)
 
 You can check whether all these dependencies are available by running the following command in your terminal:
 ```bash
@@ -185,7 +188,7 @@ INPUTS_DIR=~/mygenomes
 CURRENT_EXTENSION="fa"
 NEW_EXTENSION="fna"
 find ${INPUTS_DIR} \
-    -type f -iname "*.${CURRENT_EXTENSION}" -follow | xargs -n 1 -i sh -c \
+    -type f -iname "*.${CURRENT_EXTENSION}" -follow | xargs -n 1 -I {} bash -c \
         'INPUT={}; \
          mv "$INPUT" "${INPUT%.'"${CURRENT_EXTENSION}"'}.'"${NEW_EXTENSION}"'";'
 ```
