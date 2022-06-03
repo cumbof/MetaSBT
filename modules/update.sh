@@ -52,7 +52,7 @@ get_boundaries () {
             # Remove the last level
             TAXONOMY_SPLIT=("${TAXONOMY_SPLIT[@]:0:$TLEN-1}")
             # Rebuild the taxonomic label
-            TAXLABEL=$(printf "|%s" "${TAXONOMY_SPLIT[@]}")
+            TAXLABEL="$(printf "|%s" "${TAXONOMY_SPLIT[@]}")"
             # Retry with a redefined taxonomic label
             RETRY=true
         fi
@@ -417,7 +417,7 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
         done
 
         # Iterate over input genomes
-        for GENOMEPATH in $(cut -f1 $INLIST); do
+        for GENOMEPATH in $(cut -f1 "$INLIST"); do
             # Retrive the genome ID from the genome file path
             GENOMENAME="$(basename $GENOMEPATH)"
             GENOMEID="${GENOMENAME%".$EXTENSION"}"
@@ -663,7 +663,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     # Retrieve the taxonomic label from --taxa input file
                     TAXALABEL="$(grep -w "$GENOMENAME" $TAXA | cut -d$'\t' -f2)"
                     # Define taxonomy folder
-                    TAXDIR=$DBDIR/$(echo "${TAXALABEL}" | sed 's/|/\//g')
+                    TAXDIR=$DBDIR/$(echo "$TAXALABEL" | sed 's/|/\//g')
                     TARGETGENOME=$TAXDIR/genomes/${GENOMENAME}.${GENOMEEXT}
                     # Print input genome taxonomic label
                     println "\tTaxonomic label:\n"
@@ -817,7 +817,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     # Get the partial levels for the new taxonomy
                     NEW_LEVELS=("${ASSIGNED_LEVELS[@]:$POS}")
                     # Build the partial levels path for the new taxonomy
-                    NEW_LEVELS_SUBPATH=$(printf "/%s" "${NEW_LEVELS[@]}")
+                    NEW_LEVELS_SUBPATH="$(printf "/%s" "${NEW_LEVELS[@]}")"
                     # Trim the first slash out of the partial path
                     NEW_LEVELS_SUBPATH=${NEW_LEVELS_SUBPATH:1}
                     mkdir -p $DBDIR/${NEW_LEVELS_SUBPATH}
@@ -825,7 +825,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                     # Get the partial levels for the old unknown taxonomy
                     OLD_LEVELS=("${UNKNOWN_LEVELS[@]:$POS}")
                     # Build the partial levels path for the old unknown taxonomy
-                    OLD_LEVELS_SUBPATH=$(printf "/%s" "${OLD_LEVELS[@]}")
+                    OLD_LEVELS_SUBPATH="$(printf "/%s" "${OLD_LEVELS[@]}")"
                     # Trim the first slash out of the partial path
                     OLD_LEVELS_SUBPATH=${OLD_LEVELS_SUBPATH:1}
 
@@ -901,7 +901,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 fi
                 # Build the partial taxonomic label
                 SUBLEVELS=("${LEVELS[@]:0:$POS}")
-                TAXONOMY=$(printf "|%s" "${SUBLEVELS[@]}")
+                TAXONOMY="$(printf "|%s" "${SUBLEVELS[@]}")"
                 TAXALIST+=(${TAXONOMY:1})
             done
             # Remove duplicate entries
