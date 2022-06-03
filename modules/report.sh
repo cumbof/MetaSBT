@@ -59,8 +59,8 @@ process_species () {
         # Iterate over the genome IDs
         for GENOMENAME in $(cut -f1 "${SPECIES_FOLDER}/genomes.fof"); do
             FOUND=false
-            # Search for the current genome in both genomes.txt and mags.txt
-            if grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/genomes.txt"; then
+            # Search for the current genome in both references.txt and mags.txt
+            if grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/references.txt"; then
                 # Increment the reference genomes counter
                 REFERENCES=$(($REFERENCES + 1))
                 FOUND=true
@@ -69,7 +69,7 @@ process_species () {
                 MAGS=$(($MAGS + 1))
                 FOUND=true
             fi
-            # In case the current genome exists in genomes.txt or in mags.txt
+            # In case the current genome exists in references.txt or in mags.txt
             if $FOUND && [[ -f "${SPECIES_FOLDER}/checkm.tsv" ]]; then
                 # Search for current genome ID into the CheckM output table
                 GENOME_DATA="$(grep "$GENOMENAME"$'\t' ${SPECIES_FOLDER}/checkm.tsv)"
