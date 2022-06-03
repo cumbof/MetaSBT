@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -75,18 +75,27 @@ credits () {
     println "https://github.com/BlankenbergLab/meta-index\n\n"
 }
 
-# Format seconds in human-readable format
+# Format time in human-readable format
 # Credits: https://unix.stackexchange.com/a/27014
 displaytime () {
-    DAYS=$(bc <<< "${1}/60/60/24")
-    HOURS=$(bc <<< "${1}/60/60%24")
-    MINUTES=$(bc <<< "${1}/60%60")
-    SECONDS=$(bc <<< "${1}%60")
-    if [[ "$DAYS" -gt "0" ]]; then println "%s days " "$DAYS"; fi
-    if [[ "$HOURS" -gt "0" ]]; then println "%s hours " "$HOURS"; fi
-    if [[ "$MINUTES" -gt "0" ]]; then println "%s minutes " "$MINUTES"; fi
-    if [[ "$DAYS" -gt "0" ]] || [[ "$HOURS" -gt "0" ]] || [[ "$MINUTES" -gt "0" ]]; then println "and "; fi
-    println "%s seconds\n" "$SECONDS"
+    ESTIMATED_DAYS=$(bc <<< "${1}/60/60/24")  # Days
+    ESTIMATED_HOURS=$(bc <<< "${1}/60/60%24") # Hours
+    ESTIMATED_MINUTES=$(bc <<< "${1}/60%60")  # Minutes
+    ESTIMATED_SECONDS=$(bc <<< "${1}%60")     # Seconds
+    # Print elapsed days
+    if [[ "$(echo "${ESTIMATED_DAYS} > 0" | bc)" -eq "1" ]]; then println "%s days " "${ESTIMATED_DAYS}"; fi
+    # Print elapsed hours
+    if [[ "$(echo "${ESTIMATED_HOURS} > 0" | bc)" -eq "1" ]]; then println "%s hours " "${ESTIMATED_HOURS}"; fi
+    # Print elapsed minutes
+    if [[ "$(echo "${ESTIMATED_MINUTES} > 0" | bc)" -eq "1" ]]; then println "%s minutes " "${ESTIMATED_MINUTES}"; fi
+    # Print "and" in case of multiple days, hours, or minutes have been printed before seconds
+    if [[ "$(echo "${ESTIMATED_DAYS} > 0" | bc)" -eq "1" ]] || \
+       [[ "$(echo "${ESTIMATED_HOURS} > 0" | bc)" -eq "1" ]] || \
+       [[ "$(echo "${ESTIMATED_MINUTES} > 0" | bc)" -eq "1" ]]; then 
+       println "and "
+    fi
+    # Finally print elapsed seconds
+    println "%.0f seconds\n" "${ESTIMATED_SECONDS}"
 }
 
 # Download genomes from NCBI GenBank
