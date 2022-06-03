@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Define script directory
