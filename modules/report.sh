@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -48,10 +48,11 @@ process_species () {
         # Retrieve the total number of genomes assigned to the current species
         GENOMES="$(cat "${SPECIES_FOLDER}/genomes.fof" | wc -l)"
         
-        # Keep track of all the completeness and contamination percentages 
+        # Keep track of all the completeness, contamination, and strain heterogeneity percentages 
         # for all the genomes in the current species
         COMPLETENESS_ARR=()
         CONTAMINATION_ARR=()
+        STRAINH_ARR=()
         
         # Count the number of MAGs and reference genomes
         MAGS=0
@@ -60,43 +61,57 @@ process_species () {
         for GENOMENAME in $(cut -f1 "${SPECIES_FOLDER}/genomes.fof"); do
             FOUND=false
             # Search for the current genome in both references.txt and mags.txt
-            if grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/references.txt"; then
-                # Increment the reference genomes counter
-                REFERENCES=$(($REFERENCES + 1))
-                FOUND=true
-            elif grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/mags.txt"; then
-                # Increment the MAGs counter
-                MAGS=$(($MAGS + 1))
-                FOUND=true
+            if [[ -f ${SPECIES_FOLDER}/references.txt ]]; then
+                if grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/references.txt"; then
+                    # Increment the reference genomes counter
+                    REFERENCES=$(($REFERENCES + 1))
+                    FOUND=true
+                fi
+            elif [[ -f ${SPECIES_FOLDER}/mags.txt ]] && ! $FOUND; then
+                if grep -q "^$GENOMENAME$" "${SPECIES_FOLDER}/mags.txt"; then
+                    # Increment the MAGs counter
+                    MAGS=$(($MAGS + 1))
+                    FOUND=true
+                fi
             fi
             # In case the current genome exists in references.txt or in mags.txt
             if $FOUND && [[ -f "${SPECIES_FOLDER}/checkm.tsv" ]]; then
                 # Search for current genome ID into the CheckM output table
                 GENOME_DATA="$(grep "$GENOMENAME"$'\t' ${SPECIES_FOLDER}/checkm.tsv)"
                 if [[ ! -z "${GENOME_DATA}" ]]; then
-                    # Retrieve its completeness and contamination percentage
-                    COMPLETENESS_ARR+=("$(echo ${GENOME_DATA} | cut -d$'\t' -f12)")   # Get value under column 12
-                    CONTAMINATION_ARR+=("$(echo ${GENOME_DATA} | cut -d$'\t' -f13)")  # Get value under column 13
+                    # Retrieve its completeness, contamination, and strain heterogeneity percentages
+                    COMPLETENESS_ARR+=("$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)")   # Get completeness
+                    CONTAMINATION_ARR+=("$(echo ${GENOME_DATA} | rev | cut -d' ' -f2 | rev)")  # Get contamination
+                    STRAINH_ARR+=("$(echo ${GENOME_DATA} | rev | cut -d' ' -f1 | rev)")        # Get strain heterogeneity
                 fi
             fi
         done
         
-        # Compute the mean completeness and contamination for the current species
+        # Compute the mean completeness, contamination, and strain heterogeneity for the current species
         if [[ "${#COMPLETENESS_ARR[@]}" -gt "0" ]]; then
             # Use bc command to do math with floating points numbers
-            MEAN_COMPLETENESS="$(IFS="+"; bc -l <<< (${COMPLETENESS_ARR[*]})/${#COMPLETENESS_ARR[@]})"
-            MEAN_CONTAMINATION="$(IFS="+"; bc -l <<< (${CONTAMINATION_ARR[*]})/${#CONTAMINATION_ARR[@]})"
+            MEAN_COMPLETENESS="$(IFS="+"; echo "(${COMPLETENESS_ARR[*]})/${#COMPLETENESS_ARR[@]}" | bc -l)"
+            MEAN_CONTAMINATION="$(IFS="+"; echo "(${CONTAMINATION_ARR[*]})/${#CONTAMINATION_ARR[@]}" | bc -l)"
+            MEAN_STRAINH="$(IFS="+"; echo "(${STRAINH_ARR[*]})/${#STRAINH_ARR[@]}" | bc -l)"
         else
-            # In case no completeness and contamination statistics are available 
+            # In case no completeness, contamination, and strain heterogeneity statistics are available 
             # for all the genomes in the current species
             MEAN_COMPLETENESS=0
             MEAN_CONTAMINATION=0
+            MEAN_STRAINH=0
         fi
 
         # Write the species report to the output file
-        printf "%s\t%s\t%s\t%.2f\t%.2f\n" "$LINEAGE" "$MAGS" "$REFERENCES" "${MEAN_COMPLETENESS}" "${MEAN_CONTAMINATION}"
+        printf "%s\t%s\t%s\t%.2f\t%.2f\t%.2f\n" "$LINEAGE" \
+                                                "$MAGS" \
+                                                "$REFERENCES" \
+                                                "${MEAN_COMPLETENESS}" \
+                                                "${MEAN_CONTAMINATION}" \
+                                                "${MEAN_STRAINH}" >> ${OUTPUT_FILE}
     fi    
 }
+# Export process_species to sub-shells
+export -f process_species
 
 # Parse input arguments
 for ARG in "$@"; do
@@ -164,7 +179,7 @@ PIPELINE_START_TIME="$(date +%s.%3N)"
 # For each taxonomy, report the number of MAGs and reference genomes, and the mean completeness and contamination
 
 # Initialise the report table
-printf "# Lineage\tMAGs\tReferences\tMean Completeness\tMean Contamination\n" > $OUTPUTFILE
+printf "# Lineage\tMAGs\tReferences\tMean Completeness\tMean Contamination\tMean Strain Heterogeneity\n" > $OUTPUTFILE
 # Search for all the species folders
 find $DBDIR -type d -name "s__*" | xargs -n 1 -I {} bash -c \
     'SPECIES={}; \
