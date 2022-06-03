@@ -335,6 +335,11 @@ DESCRIPTION
     --output-prefix=value
         Prefix of the output files with query matches
 
+    --stop-at=value
+        Stop expanding queries at a specific taxonomic level.
+        Please note that this argument works in conjunction with --expand only.
+        Available values: phylum, class, order, family, genus
+
     --threshold=num
         Fraction of query kmers that must be present in a leaf to be considered a match
         This must be between 0 and 1
@@ -356,7 +361,7 @@ EXAMPLES
     Try running this script by typing:
 
         $ meta-index profile --input-file=~/mymag.fna --input-id=mymag --tree=~/myindex/k__Bacteria/index.detbrief.sbt 
-                             --threshold=0.7 --expand --output-dir=~/profiles --output-prefix=mymag
+                             --threshold=0.7 --expand --stop-at=family --output-dir=~/profiles --output-prefix=mymag
 "
 fi
 
