@@ -80,6 +80,8 @@ You may finally need to reload your profile to make these changes effective:
 source ~/.bash_profile
 ```
 
+Please note that `meta-index` is available for Linux and macOS only.
+
 ### Warning (for macOS users)
 
 Unfortunately, the CheckM conda package is still not fully compatible with macOS because of its software dependency `pplacer`. For this reason, macOS users are strongly encouraged to build a Docker container by running the following command from the `meta-index` root directory in which the Dockerfile is located:
