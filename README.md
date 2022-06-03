@@ -198,16 +198,19 @@ The output file is a table that will contain the number of MAGs and reference ge
 
 ## Profiling genomes
 
-The `profile` module allows to characterize an input genome according to the taxonomic label of the closest genome in the database. It allows to process only one genome in input at a time:
+The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
 ```bash
 $ meta-index profile --input-file=~/mymag.fna \
                      --input-id=mymag \
                      --tree=~/myindex/k__Bacteria/index.detbrief.sbt \
                      --threshold=0.7 \
                      --expand \
+                     --stop-at=family \
                      --output-dir=~/profiles \
                      --output-prefix=mymag
 ```
+
+Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
 
 ## Unlocking unknown species profiling with `kraken2`
 
