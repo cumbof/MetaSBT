@@ -39,59 +39,61 @@ if [[ -f ${MODULE_PATH} ]]; then
     # Run module with the same shell
     . ${MODULE_PATH} $ARGS
 else
-    # Parse input arguments
-    for ARG in "$@"; do
-        case "$ARG" in
-            --credits)
-                # Print credits
-                credits
-                exit 0
-                ;;
-            -h|--help)
-                # Print extended help
-                MAIN_HELP=true
-                source ${SCRIPT_DIR}/../HELP
-                exit 0
-                ;;
-            --license)
-                # Print license
-                println "%s\n" "$(cat ${SCRIPT_DIR}/LICENSE)"
-                exit 0
-                ;;
-            --modules)
-                # Print the list of all available modules
-                println "List of available modules:\n"
-                for module in ${MODULES_DIR}/*.sh; do
-                    MODULE_NAME=$(basename $module)
-                    MODULE_NAME="${MODULE_NAME%.*}"
-                    if [[ "${MODULE_NAME}" != "utils" ]]; then
-                        # Exclude utils
-                        println "\t%s\n" "${MODULE_NAME}"
-                    fi
-                done
-                exit 0
-                ;;
-            --resolve-dependencies)
-                # Check for external software dependencies and python modules
-                check_dependencies true
-                exit $?
-                ;;
-            -v|--version)
-                # Print pipeline version
-                println "meta-index version %s (%s)\n" "$VERSION" "$DATE"
-                exit 0
-                ;;
-            *)
-                println "meta-index: invalid option -- %s\n" "$ARG"
-                exit 1
-                ;;
-        esac
-    done
-
-    # Unknown module
-    println "meta-index version %s (%s)\n\n" "$VERSION" "$DATE"
-    println "[ERROR] Unknown module!\n\n"
-    println "Type 'meta-index --modules' for a list of available modules.\n"
-    println "Run a module with the --help option in order to access all its available arguments.\n"
-    exit 1
+    if [[ "$MODULE" != --* ]]; then
+        # Unknown module
+        println "meta-index version %s (%s)\n\n" "$VERSION" "$DATE"
+        println "[ERROR] Unknown module!\n\n"
+        println "Type 'meta-index --modules' for a list of available modules.\n"
+        println "Run a module with the --help option in order to access all its available arguments.\n"
+        exit 1
+    else
+        # Parse input arguments
+        for ARG in "$@"; do
+            case "$ARG" in
+                --credits)
+                    # Print credits
+                    credits
+                    exit 0
+                    ;;
+                -h|--help)
+                    # Print extended help
+                    MAIN_HELP=true
+                    source ${SCRIPT_DIR}/../HELP
+                    exit 0
+                    ;;
+                --license)
+                    # Print license
+                    println "%s\n" "$(cat ${SCRIPT_DIR}/LICENSE)"
+                    exit 0
+                    ;;
+                --modules)
+                    # Print the list of all available modules
+                    println "List of available modules:\n"
+                    for module in ${MODULES_DIR}/*.sh; do
+                        MODULE_NAME=$(basename $module)
+                        MODULE_NAME="${MODULE_NAME%.*}"
+                        if [[ "${MODULE_NAME}" != "utils" ]]; then
+                            # Exclude utils
+                            println "\t%s\n" "${MODULE_NAME}"
+                        fi
+                    done
+                    exit 0
+                    ;;
+                --resolve-dependencies)
+                    # Check for external software dependencies and python modules
+                    check_dependencies true
+                    exit $?
+                    ;;
+                -v|--version)
+                    # Print pipeline version
+                    println "meta-index version %s (%s)\n" "$VERSION" "$DATE"
+                    exit 0
+                    ;;
+                *)
+                    println "meta-index: invalid option -- %s\n" "$ARG"
+                    exit 1
+                    ;;
+            esac
+        done
+    fi
 fi
