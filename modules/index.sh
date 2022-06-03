@@ -405,14 +405,14 @@ while read tax_id, taxonomy; do
                             COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
                             CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
                             # Use bc command for comparing floating point numbers
-                            COMPLETENESS_CHECK="$(echo "$COMPLETENESS < ${CHECKM_COMPLETENESS}" | bc)"
-                            CONTAMINATION_CHECK="$(echo "$CONTAMINATION > ${CHECKM_CONTAMINATION}" | bc)"
+                            COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
+                            CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
                             if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
-                                # Remove genome from directory
-                                rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
-                            else
                                 # Current genome passed the quality control
                                 grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> $TAXDIR/genomes_qc.fof
+                            else
+                                # Remove genome from directory
+                                rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
                             fi
                         else
                             # CheckM failed in processing the current genome
