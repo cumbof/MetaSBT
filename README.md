@@ -54,11 +54,6 @@ In this last case, remember to check that the following dependencies are install
 - [pip](https://pip.pypa.io/)
 - [wget](https://www.gnu.org/software/wget/)
 
-You can check whether all these dependencies are available by running the following command in your terminal:
-```bash
-meta-index --resolve-dependencies
-```
-
 Please note that `meta-index` makes use of some advanced `howdesbt` commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
 
 For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
@@ -71,6 +66,21 @@ checkm data setRoot <checkm_data_dir>
 Once everything is installed, `meta-index` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
 ```bash
 meta-index --version
+```
+
+You can check whether all the dependencies listed above are available on your system by running the following command:
+```bash
+meta-index --resolve-dependencies
+```
+
+You can also access the complete list of available arguments by specifying the `--help` option:
+```bash
+meta-index --help
+```
+
+Please note that the same option is also available for all the `meta-index` modules (e.g.: `meta-index profile --help` will print the list of arguments available for the `profile` module). The list of available modules is available by typing:
+```bash
+meta-index --modules
 ```
 
 We strongly suggest to permanently add the `meta-index` folder to the PATH environment variable by adding the following line to your `~/.profile` or `~/.bash_profile` (if `bash` is your default shell):
@@ -123,18 +133,18 @@ The `index` subroutine allows to automatically retrieve genomes from isolate seq
 
 The following command will trigger the generation of the database with all the available bacterial genomes from isolate sequencing in NCBI GenBank:
 ```bash
-$ meta-index index --db-dir=~/myindex \
-                   --kmer-len=31 \
-                   --estimate-filter-size \
-                   --increase-filter-size=5 \
-                   --kingdom=Bacteria \
-                   --dereplicate \
-                   --checkm-completeness=50.0 \
-                   --checkm-contamination=5.0 \
-                   --nproc=4 \
-                   --xargs-nproc=2 \
-                   --tmp-dir=~/tmp \
-                   --cleanup
+meta-index index --db-dir=~/myindex \
+                 --kmer-len=31 \
+                 --estimate-filter-size \
+                 --increase-filter-size=5 \
+                 --kingdom=Bacteria \
+                 --dereplicate \
+                 --checkm-completeness=50.0 \
+                 --checkm-contamination=5.0 \
+                 --nproc=4 \
+                 --xargs-nproc=2 \
+                 --tmp-dir=~/tmp \
+                 --cleanup
 ```
 
 ## Defining boundaries
@@ -143,13 +153,13 @@ The `boundaries` module is crucial for the definition of taxonomy-specific bound
 
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 ```bash
-$ meta-index boundaries --db-dir=~/myindex \
-                        --kingdom=Bacteria \
-                        --min-genomes=100 \
-                        --output=~/boundaries.txt \
-                        --tmp-dir=~/tmp \
-                        --nproc=4 \
-                        --cleanup
+meta-index boundaries --db-dir=~/myindex \
+                      --kingdom=Bacteria \
+                      --min-genomes=100 \
+                      --output=~/boundaries.txt \
+                      --tmp-dir=~/tmp \
+                      --nproc=4 \
+                      --cleanup
 ```
 
 Please note that the `boundaries` module considers clusters with reference genomes only. These clusters can be considered for establishing boundaries depending on a minimum number of reference genomes that can be set with the `--min-genomes` argument.
@@ -164,20 +174,20 @@ In case of new reference genomes from isolate sequencing, the `update` module si
 
 The `update` module can be launched with the following command:
 ```bash
-$ meta-index update --input-list=~/mygenomes.txt \
-                    --taxa=~/taxonomies.tsv \
-                    --db-dir=~/myindex \
-                    --kingdom=Bacteria \
-                    --tmp-dir=~/tmp \
-                    --kmer-len=31 \
-                    --filter-size=10000 \
-                    --dereplicate \
-                    --checkm-completeness=50.0 \
-                    --checkm-contamination=5.0 \
-                    --type=references \
-                    --extension=fna.gz \
-                    --nproc=8 \
-                    --cleanup
+meta-index update --input-list=~/mygenomes.txt \
+                  --taxa=~/taxonomies.tsv \
+                  --db-dir=~/myindex \
+                  --kingdom=Bacteria \
+                  --tmp-dir=~/tmp \
+                  --kmer-len=31 \
+                  --filter-size=10000 \
+                  --dereplicate \
+                  --checkm-completeness=50.0 \
+                  --checkm-contamination=5.0 \
+                  --type=references \
+                  --extension=fna.gz \
+                  --nproc=8 \
+                  --cleanup
 ```
 
 Please note that the `--filter-size` value must be the same used while running the `index` module.
@@ -197,8 +207,8 @@ find ${INPUTS_DIR} \
 
 Once the database is built and updated with new MAGs and reference genomes, you can easily extract relevant information about all the species in your database by running the following command:
 ```bash
-$ meta-index report --db-dir=~/myindex \
-                    --output-file=~/report.tsv
+meta-index report --db-dir=~/myindex \
+                  --output-file=~/report.tsv
 ```
 
 The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness and contamination percentage for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
@@ -207,14 +217,14 @@ The output file is a table that will contain the number of MAGs and reference ge
 
 The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
 ```bash
-$ meta-index profile --input-file=~/mymag.fna \
-                     --input-id=mymag \
-                     --tree=~/myindex/k__Bacteria/index.detbrief.sbt \
-                     --threshold=0.7 \
-                     --expand \
-                     --stop-at=family \
-                     --output-dir=~/profiles \
-                     --output-prefix=mymag
+meta-index profile --input-file=~/mymag.fna \
+                   --input-id=mymag \
+                   --tree=~/myindex/k__Bacteria/index.detbrief.sbt \
+                   --threshold=0.7 \
+                   --expand \
+                   --stop-at=family \
+                   --output-dir=~/profiles \
+                   --output-prefix=mymag
 ```
 
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
