@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -396,7 +396,7 @@ while read tax_id, taxonomy; do
                     done
 
                     # Iterate over input genome IDs
-                    for GENOMEID in $(cut -f1 ${GENOMES_FOF}); do
+                    for GENOMEID in $(cut -d" " -f1 ${GENOMES_FOF}); do
                         # Search for current genome ID into the CheckM output table
                         GENOME_DATA="$(grep "$GENOMEID"$'\t' $TAXDIR/checkm.tsv)"
                         if [[ ! -z "${GENOME_DATA}" ]]; then

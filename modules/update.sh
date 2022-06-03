@@ -417,7 +417,7 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
         done
 
         # Iterate over input genomes
-        for GENOMEPATH in $(cut -f1 "$INLIST"); do
+        for GENOMEPATH in $(cut -d" " -f1 "$INLIST"); do
             # Retrive the genome ID from the genome file path
             GENOMENAME="$(basename $GENOMEPATH)"
             GENOMEID="${GENOMENAME%".$EXTENSION"}"
