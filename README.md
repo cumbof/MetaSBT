@@ -9,7 +9,7 @@ A pipeline for automatically indexing genomes and accurately characterizing meta
 - [Updating the database](https://github.com/BlankenbergLab/meta-index#updating-the-database)
 - [Building the database report](https://github.com/BlankenbergLab/meta-index#building-the-database-report)
 - [Profiling genomes](https://github.com/BlankenbergLab/meta-index#profiling-genomes)
-- [Unlocking unknown species profiling with `kraken`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken)
+- [Unlocking unknown species profiling with `kraken2`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken2)
 - [Credits](https://github.com/BlankenbergLab/meta-index#credits)
 - [Contributing](https://github.com/BlankenbergLab/meta-index#support)
 
@@ -209,7 +209,7 @@ $ meta-index profile --input-file=~/mymag.fna \
                      --output-prefix=mymag
 ```
 
-## Unlocking unknown species profiling with `kraken`
+## Unlocking unknown species profiling with `kraken2`
 
 TBA
 
