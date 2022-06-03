@@ -15,7 +15,7 @@ source ${SCRIPT_DIR}/utils.sh
 
 # Wrapper for kmtricks
 # Build a kmer matrix for establishing boundaries
-# Consider clusters with a minimum number of genomes (100 by default)
+# Consider clusters with a minimum number of reference genomes (100 by default)
 define_boundaries () {
     LEVEL_DIR=$1    # Cluster main folder
     MIN_GENOMES=$2  # Minimum number of genomes required for running kmtricks
@@ -29,13 +29,22 @@ define_boundaries () {
     LEVEL_NAME="$(basename ${LEVEL_DIR})"
     TMP_LEVEL_DIR=$TMPDIR/${LEVEL_NAME}
     mkdir -p ${TMP_LEVEL_DIR}
-    # Search and merge all genomes.fof files under current taxonomic level
-    find ${LEVEL_DIR} -type f -iname "genomes.fof" -exec cat {} >> ${TMP_LEVEL_DIR}/genomes.fof
+    # Search and merge reference genomes paths unders all genomes.fof files in current taxonomic level
+    find ${LEVEL_DIR} -type f -iname "references.txt" -follow | xargs -n 1 -I {} bash -c \
+        'REFERENCES={}; \
+         SPECIES_DIR=$(dirname ${REFERENCES}); \
+         while read REFNAME; do \
+            REFDATA="$(grep "^$REFNAME " $(dirname $REFERENCES)/genomes.fof)"
+            if [[ ! -z $REFDATA ]]; then \
+                REFPATH="$(echo "$REFDATA" | rev | cut -d" " -f1 | rev)"
+                echo $REFPATH >> '"${TMP_LEVEL_DIR}"'/genomes.fof;
+            fi \
+         done < $REFERENCES'
 
     if [[ -f ${TMP_LEVEL_DIR}/genomes.fof ]]; then
         # Process current level if if contains a genomes.fof file
         HOW_MANY=$(cat ${TMP_LEVEL_DIR}/genomes.fof | wc -l)
-        println "\tGenomes: %s\n" "${HOW_MANY}"
+        println "\tReference genomes: %s\n" "${HOW_MANY}"
         
         # Keep processing current taxonomic level if it contains enough genomes
         if [[ "${HOW_MANY}" -ge "${MIN_GENOMES}" ]]; then
@@ -123,11 +132,11 @@ define_boundaries () {
             fi
         else
             # Stop processing current taxonomic level
-            println "\t[ERROR] Not enough genomes\n\n"
+            println "\t[ERROR] Not enough reference genomes found\n\n"
         fi
     else
         # Current taxonomic level cannot be processed
-        println "\t[ERROR] Genomes definition file not found\n\n"
+        println "\t[ERROR] No reference genomes found\n\n"
     fi
 }
 
