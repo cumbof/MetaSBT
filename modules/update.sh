@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -208,9 +208,9 @@ for ARG in "$@"; do
             fi
             # Search for the extension
             if ! grep -q "^$QUERYEXT"$ $SCRIPTSDIR/supported_inputs.txt ; then
-                println 'Error!\n'
-                println '"%s" is not a valid extension.\n' "$QUERYEXT"
-                println 'Please use the --supported-extensions option for a list of supported file extensions for input genomes.\n'
+                println "Error!\n"
+                println "\"%s\" is not a valid extension.\n" "$QUERYEXT"
+                println "Please use the --supported-extensions option for a list of supported file extensions for input genomes.\n"
                 exit 1
             fi
             ;;
