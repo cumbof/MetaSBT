@@ -7,6 +7,7 @@ A pipeline for automatically indexing genomes and accurately characterizing meta
 - [Building a database](https://github.com/BlankenbergLab/meta-index#building-a-database)
 - [Defining boundaries](https://github.com/BlankenbergLab/meta-index#defining-boundaries)
 - [Updating the database](https://github.com/BlankenbergLab/meta-index#updating-the-database)
+- [Building the database report](https://github.com/BlankenbergLab/meta-index#building-the-database-report)
 - [Profiling genomes](https://github.com/BlankenbergLab/meta-index#profiling-genomes)
 - [Unlocking unknown species profiling with `kraken`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken)
 - [Credits](https://github.com/BlankenbergLab/meta-index#credits)
@@ -184,6 +185,16 @@ find ${INPUTS_DIR} \
         'INPUT={}; \
          mv "$INPUT" "${INPUT%.'"${CURRENT_EXTENSION}"'}.'"${NEW_EXTENSION}"'";'
 ```
+
+## Building the database report
+
+Once the database is built and updated with new MAGs and reference genomes, you can easily extract relevant information about all the species in your database by running the following command:
+```bash
+$ meta-index report --db-dir=~/myindex \
+                    --output-file=~/report.tsv
+```
+
+The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness and contamination percentage for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
 
 ## Profiling genomes
 
