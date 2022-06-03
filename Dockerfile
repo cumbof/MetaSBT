@@ -92,8 +92,8 @@ RUN conda config --add channels defaults
 RUN conda config --add channels bioconda
 RUN conda config --add channels conda-forge
 
-# Install howdesbt and kmtricks with conda
-RUN conda install -y howdesbt kmtricks
+# Install entrez-direct, howdesbt, and kmtricks with conda
+RUN conda install -y entrez-direct howdesbt kmtricks
 
 # Download meta-index
 RUN mkdir -p /home/git && cd /home/git && \
