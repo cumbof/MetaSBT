@@ -426,8 +426,8 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
             if [[ ! -z "${GENOME_DATA}" ]]; then
                 # In case the current genome has been processed
                 # Retrieve completeness and contamination of current genome
-                COMPLETENESS="$(echo ${GENOME_DATA} | cut -d$'\t' -f12)"     # Get value under column 12
-                CONTAMINATION="$(echo ${GENOME_DATA} | cut -d$'\t' -f13)"    # Get value under column 13
+                COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
+                CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
                 # Use bc command for comparing floating point numbers
                 COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
                 CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
