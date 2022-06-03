@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 3, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -90,6 +90,28 @@ for ARG in "$@"; do
                 println "profile helper: --output-prefix=value\n\n"
                 println "\tPrefix of the output files with query matches.\n\n"
                 exit 0
+            fi
+            ;;
+        --stop-at=*)
+            # Stop expanding queries at a specific taxonomic level
+            STOPAT="${ARG#*=}"
+            # Define helper
+            TAXALEVELS_LIST=("phylum" "class" "order" "family" "genus")   # List of available taxa levels
+            TAXALEVELS_STRING="$(printf ", %s" "${TAXALEVELS_LIST[@]}")"  # Concatenate values in list
+            TAXALEVELS_STRING="${TAXALEVELS_STRING:2}"                    # Trim the first 2 characters out of the string
+            if [[ "$STOPAT" =~ "?" ]]; then
+                println "profile helper: --stop-at=value\n\n"
+                println "\tStop expanding queries at a specific taxonomic level.\n"
+                println "\tPlease note that this argument works in conjunction with --expand only.\n"
+                println "\tAvailable values: %s\n\n" "${TAXALEVELS_STRING}"
+                exit 0
+            fi
+            # Check whether the provided taxa level is in the list of available values
+            if [[ ! " ${TAXALEVELS_LIST[*]} " =~ " $STOPAT " ]]; then
+                println "Error!\n"
+                println "\"%s\" is not a valid taxonomic level.\n" "$STOPAT"
+                println "Please use one of these values: %s\n" "${TAXALEVELS_STRING}"
+                exit 1
             fi
             ;;
         --threshold=*)
@@ -209,7 +231,13 @@ while [[ -f $TREE ]]; do
         fi
 
         # Stop querying trees
-        if [[ "${EXPAND_QUERY}" = false ]]; then
+        if ! ${EXPAND_QUERY}; then
+            # In case --expand is not set
+            break
+        elif ${EXPAND_QUERY} && [[ "${LEVEL:0:1}" = "${STOPAT:0:1}" ]]; then
+            # In case --expand is set and 
+            # the taxonomic level specified with --stop-at is reached
+            # Compare the first character of the current taxonomic level and the one specified with --stop-at 
             break
         fi
     fi
