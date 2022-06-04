@@ -254,4 +254,4 @@ Please, (i) be sure that there are no existing issues/PR concerning the same bug
 
 If you need support, please open an [Issue](https://github.com/BlankenbergLab/meta-index/issues) or a new [Discussion](https://github.com/BlankenbergLab/meta-index/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
 
-Copyright © 2022 Fabio Cumbo, Daniel Blankenberg. See [LICENSE](https://github.com/BlankenbergLab/meta-index/blob/main/LICENSE) for additional details.
+Copyright © 2022 [Fabio Cumbo](https://github.com/fabio-cumbo), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/BlankenbergLab/meta-index/blob/main/LICENSE) for additional details.
