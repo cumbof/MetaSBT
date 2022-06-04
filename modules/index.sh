@@ -391,40 +391,46 @@ while read tax_id, taxonomy; do
                     # Retrieve header from the first file in list
                     echo "$(head -n1 ${CHECKMTABLES_ARR[0]})" > $TAXDIR/checkm.tsv
                     for table in ${CHECKMTABLES_ARR[@]}; do
-                        # Get all the lines except the first one
-                        echo "$(tail -n +2 $table)" >> $TAXDIR/checkm.tsv
+                        # Current table may not exist in case CheckM stopped working
+                        if [[ -f $table ]]; then
+                            # Get all the lines except the first one
+                            echo "$(tail -n +2 $table)" >> $TAXDIR/checkm.tsv
+                        fi
                     done
 
-                    # Iterate over input genome IDs
-                    for GENOMEID in $(cut -d" " -f1 ${GENOMES_FOF}); do
-                        # Search for current genome ID into the CheckM output table
-                        GENOME_DATA="$(grep "$GENOMEID"$'\t' $TAXDIR/checkm.tsv)"
-                        if [[ ! -z "${GENOME_DATA}" ]]; then
-                            # In case the current genome has been processed
-                            # Retrieve completeness and contamination of current genome
-                            COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
-                            CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
-                            # Use bc command for comparing floating point numbers
-                            COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
-                            CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
-                            if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
-                                # Current genome passed the quality control
-                                grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> $TAXDIR/genomes_qc.fof
+                    # Check whether the checkm.tsv table has been created
+                    if [[ -f $TAXDIR/checkm.tsv ]]; then
+                        # Iterate over input genome IDs
+                        for GENOMEID in $(cut -d" " -f1 ${GENOMES_FOF}); do
+                            # Search for current genome ID into the CheckM output table
+                            GENOME_DATA="$(grep "$GENOMEID"$'\t' $TAXDIR/checkm.tsv)"
+                            if [[ ! -z "${GENOME_DATA}" ]]; then
+                                # In case the current genome has been processed
+                                # Retrieve completeness and contamination of current genome
+                                COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
+                                CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
+                                # Use bc command for comparing floating point numbers
+                                COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
+                                CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
+                                if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
+                                    # Current genome passed the quality control
+                                    grep -w "${GENOMEID}.fna.gz" ${GENOMES_FOF} >> $TAXDIR/genomes_qc.fof
+                                else
+                                    # Remove genome from directory
+                                    rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
+                                fi
                             else
+                                # CheckM failed in processing the current genome
                                 # Remove genome from directory
                                 rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
                             fi
-                        else
-                            # CheckM failed in processing the current genome
-                            # Remove genome from directory
-                            rm -rf ${GENOMES_DIR}/${GENOMEID}.fna.gz
-                        fi
-                    done
+                        done
+                    fi
                 fi
 
                 # Proceed if at least one input genome passed the quality control
                 if [[ -f $TAXDIR/genomes_qc.fof ]]; then
-                    GENOMES_FOF=$TAXDIR/genomes_qc.fof
+                    mv $TAXDIR/genomes_qc.fof ${GENOMES_FOF}
                 else
                     # No input genomes survived the quality control step
                     # Remove the species folder to avoid running kmtricks on current taxonomy
@@ -449,6 +455,10 @@ while read tax_id, taxonomy; do
 
                         # Add header to the kmers matrix
                         HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+                        if [[ "${HEADER: -1}" = " " ]]; then
+                            # Trim the last character out of the header in xase of space
+                            HEADER="${HEADER:0:-1}"
+                        fi
                         echo "#kmer $HEADER" > $TAXDIR/kmers_matrix_wh.txt
                         cat $TAXDIR/kmers_matrix.txt >> $TAXDIR/kmers_matrix_wh.txt
                         mv $TAXDIR/kmers_matrix_wh.txt $TAXDIR/kmers_matrix.txt
@@ -495,16 +505,17 @@ if ${ESTIMATE_FILTER_SIZE}; then
          cat $INPUT | cut -d" " -f3 >> '"$TMPDIR"'/genomes.txt'
     # Call ntCard
     # With --kmer=31 it will produce genomes_k21.hist
-    ntcard --kmer=${KMER_LEN} --threads=$NPROC --pref==$TMPDIR/genomes @$TMPDIR/genomes.txt
+    ntcard --kmer=${KMER_LEN} --threads=$NPROC --pref=$TMPDIR/genomes @$TMPDIR/genomes.txt
     if [[ -f $TMPDIR/genomes_k${KMER_LEN}.hist ]]; then
-        F0=$(grep "^F0" $TMPDIR/genomes_k${KMER_LEN}.hist | cut -f2)
-        f1=$(grep "^1" $TMPDIR/genomes_k${KMER_LEN}.hist | head -n 1 | cut -f2)
+        F0=$(grep "^F0"$'\t' $TMPDIR/genomes_k${KMER_LEN}.hist | cut -f2)
+        f1=$(grep "^1"$'\t' $TMPDIR/genomes_k${KMER_LEN}.hist | cut -f2)
         FILTER_SIZE=$(( ${F0}-${f1} ))
         # Compute the increment
         # The result is an integer
         INCREMENT=$(( ${FILTER_SIZE}*${INCREASE_FILTER_SIZE}/100 ))
         # Increment the estimated bloom filter size
         FILTER_SIZE=$(( ${FILTER_SIZE}+${INCREMENT} ))
+        println "\tEstimated bloom filter size: %s\n" "${FILTER_SIZE}"
     else
         println "\n[ERROR] An error has occurred while running ntCard\n\n"
         # Print the standard error message and exit
@@ -534,7 +545,9 @@ println "\nRunning howdesbt on lower taxonomic levels\n"
 # Start with genera at depth 6
 DEPTH=6
 for LEVEL in "g__" "f__" "o__" "c__" "p__" "k__"; do
-    find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow -exec howdesbt_wrapper {} ${FILTER_SIZE} \;
+    find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -I {} bash -c \
+        'LEVELDIR={}; \
+         howdesbt_wrapper $LEVELDIR '"${FILTER_SIZE}"';'
     DEPTH=$(expr $DEPTH - 1)
 done
 
