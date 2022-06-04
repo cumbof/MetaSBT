@@ -203,7 +203,7 @@ howdesbt_wrapper () {
             if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then
                 cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
             else
-                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out ${LEVEL_DIR}/merged.bf
+                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out=${LEVEL_DIR}/merged.bf
                 mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf
             fi
         done < ${LEVEL_DIR}/${LEVEL_NAME}.txt
@@ -255,7 +255,7 @@ kmtricks_index_wrapper () {
                 if [[ ! -f $FOLDERPATH/${FOLDERNAME}.bf ]]; then
                     cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
                 else
-                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out $FOLDERPATH/merged.bf
+                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out=$FOLDERPATH/merged.bf
                     mv $FOLDERPATH/merged.bf $FOLDERPATH/${FOLDERNAME}.bf
                 fi
             done < $INPUT
