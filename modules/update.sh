@@ -412,31 +412,37 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
         # Retrieve header from the first file in list
         echo "$(head -n1 ${CHECKMTABLES_ARR[0]})" > $TMPDIR/checkm.tsv
         for table in ${CHECKMTABLES_ARR[@]}; do
-            # Get all the lines except the first one
-            echo "$(tail -n +2 $table)" >> $TMPDIR/checkm.tsv
-        done
-
-        # Iterate over input genomes
-        for GENOMEPATH in $(cut -d" " -f1 "$INLIST"); do
-            # Retrive the genome ID from the genome file path
-            GENOMENAME="$(basename $GENOMEPATH)"
-            GENOMEID="${GENOMENAME%".$EXTENSION"}"
-            # Search for current genome ID into the CheckM output table
-            GENOME_DATA="$(grep "$GENOMEID"$'\t' $TMPDIR/checkm.tsv)"
-            if [[ ! -z "${GENOME_DATA}" ]]; then
-                # In case the current genome has been processed
-                # Retrieve completeness and contamination of current genome
-                COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
-                CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
-                # Use bc command for comparing floating point numbers
-                COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
-                CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
-                if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
-                    # Current genome passed the quality control
-                    grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
-                fi
+            # Current table may not exist in case CheckM stopped working
+            if [[ -f $table ]]; then
+                # Get all the lines except the first one
+                echo "$(tail -n +2 $table)" >> $TMPDIR/checkm.tsv
             fi
         done
+
+        # Check whether the checkm.tsv table has been created
+        if [[ -f $TAXDIR/checkm.tsv ]]; then
+            # Iterate over input genomes
+            for GENOMEPATH in $(cut -d" " -f1 "$INLIST"); do
+                # Retrive the genome ID from the genome file path
+                GENOMENAME="$(basename $GENOMEPATH)"
+                GENOMEID="${GENOMENAME%".$EXTENSION"}"
+                # Search for current genome ID into the CheckM output table
+                GENOME_DATA="$(grep "$GENOMEID"$'\t' $TMPDIR/checkm.tsv)"
+                if [[ ! -z "${GENOME_DATA}" ]]; then
+                    # In case the current genome has been processed
+                    # Retrieve completeness and contamination of current genome
+                    COMPLETENESS="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)"  # Get completeness
+                    CONTAMINATION="$(echo ${GENOME_DATA} | rev | cut -d' ' -f3 | rev)" # Get contamination
+                    # Use bc command for comparing floating point numbers
+                    COMPLETENESS_CHECK="$(echo "$COMPLETENESS >= ${CHECKM_COMPLETENESS}" | bc)"
+                    CONTAMINATION_CHECK="$(echo "$CONTAMINATION <= ${CHECKM_CONTAMINATION}" | bc)"
+                    if [[ "${COMPLETENESS_CHECK}" -eq "1" ]] && [[ "${CONTAMINATION_CHECK}" -eq "1" ]]; then
+                        # Current genome passed the quality control
+                        grep -w "${GENOMEID}.${EXTENSION}" $INLIST >> $TMPDIR/genomes_qc.txt
+                    fi
+                fi
+            done
+        fi
     fi
 
     # Create a new INLIST file with the new list of genomes
@@ -472,6 +478,10 @@ if $DEREPLICATE; then
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+            if [[ "${HEADER: -1}" = " " ]]; then
+                # Trim the last character out of the header in xase of space
+                HEADER="${HEADER:0:-1}"
+            fi
             echo "#kmer $HEADER" > $TMPDIR/kmers_matrix_wh.txt
             cat $TMPDIR/kmers_matrix.txt >> $TMPDIR/kmers_matrix_wh.txt
             mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
@@ -871,6 +881,10 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
+            if [[ "${HEADER: -1}" = " " ]]; then
+                # Trim the last character out of the header in xase of space
+                HEADER="${HEADER:0:-1}"
+            fi
             echo "#kmer $HEADER" > $TMPDIR/kmers_matrix_wh.txt
             cat $TMPDIR/kmers_matrix.txt >> $TMPDIR/kmers_matrix_wh.txt
             mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
