@@ -211,7 +211,7 @@ meta-index report --db-dir=~/myindex \
                   --output-file=~/report.tsv
 ```
 
-The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness and contamination percentage for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
+The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness, contamination, and strain heterogeneity percentages for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
 
 ## Profiling genomes
 
