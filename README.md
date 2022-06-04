@@ -10,6 +10,7 @@ A pipeline for automatically indexing genomes and accurately characterizing meta
 - [Building the database report](https://github.com/BlankenbergLab/meta-index#building-the-database-report)
 - [Profiling genomes](https://github.com/BlankenbergLab/meta-index#profiling-genomes)
 - [Unlocking unknown species profiling with `kraken2`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken2)
+- [Integrating `meta-index` in Galaxy](https://github.com/BlankenbergLab/meta-index#integrating-meta-index-in-galaxy)
 - [Credits](https://github.com/BlankenbergLab/meta-index#credits)
 - [Contributing](https://github.com/BlankenbergLab/meta-index#support)
 
@@ -230,6 +231,10 @@ meta-index profile --input-file=~/mymag.fna \
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
 
 ## Unlocking unknown species profiling with `kraken2`
+
+TBA
+
+## Integrating `meta-index` in Galaxy
 
 TBA
 
