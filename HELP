@@ -342,8 +342,8 @@ DESCRIPTION
 
     --threshold=num
         Fraction of query kmers that must be present in a leaf to be considered a match
-        This must be between 0 and 1
-        Default: 0.7
+        This must be between 0.0 and 1.0
+        Default: 0.0
 
     --tree=file
         This is the tree definition file
@@ -374,10 +374,10 @@ VERSION
     "$VERSION" ("$DATE")
 
 SYNOPSIS
-    profile [--db-dir=directory] [--output-file=file] ...
+    report [--db-dir=directory] [--output-file=file] ...
 
 DESCRIPTION
-    The \"profile\" module is used to query a sequence bloom tree at different taxonomic levels.
+    The \"report\" module is used to build the database report table.
 
     The following options are available:
 
