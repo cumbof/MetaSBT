@@ -45,14 +45,15 @@ Please note that cloning this repository requires [Git](https://git-scm.com/) to
 In this last case, remember to check that the following dependencies are installed and available on your system:
 - [bc](https://www.gnu.org/software/bc/)
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.1.3)
+- [csvkit](https://github.com/wireservice/csvkit)
 - [entrez-direct](https://www.ncbi.nlm.nih.gov/books/NBK179288/)
 - [gzip](https://www.gzip.org/)
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin)
 - [ntcard](https://github.com/bcgsc/ntCard)
-- [python](http://www.python.org/) (version >=3.7)
 - [pip](https://pip.pypa.io/)
+- [python](http://www.python.org/) (version >=3.7)
 - [wget](https://www.gnu.org/software/wget/)
 
 Please note that `meta-index` makes use of some advanced `howdesbt` commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
