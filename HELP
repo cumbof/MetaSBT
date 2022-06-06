@@ -110,6 +110,9 @@ DESCRIPTION
         This argument refers to the number of processors used for parallelizing the pipeline when possible
         Default: --nproc=1
 
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
+
     --tmp-dir=directory
         Path to the folder for storing temporary data
 
@@ -177,6 +180,9 @@ DESCRIPTION
 
     --output=file
         Output file with kmer boundaries for each of the taxonomic labels in the database
+
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
 
     --tmp-dir=directory
         Path to the folder for storing temporary data
@@ -268,6 +274,9 @@ DESCRIPTION
         This argument refers to the number of processors used for parallelizing the pipeline when possible.
         Default: --nproc=1
 
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
+
     --tmp-dir=directory
         Path to the folder for storing temporary data
 
@@ -335,6 +344,9 @@ DESCRIPTION
     --output-prefix=value
         Prefix of the output files with query matches
 
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
+
     --stop-at=value
         Stop expanding queries at a specific taxonomic level.
         Please note that this argument works in conjunction with --expand only.
@@ -392,6 +404,9 @@ DESCRIPTION
 
     --output-file=file
         This is the path to the output table
+
+    --resolve-dependencies
+        Check whether all the external software dependencies are available on your system
 
     -v|--version
         Print the module version
