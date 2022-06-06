@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 3, 2022"
+DATE="Jun 5, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -109,8 +109,7 @@ for ARG in "$@"; do
             fi
             # Check whether the input file exists
             if [[ ! -f $BOUNDARIES ]]; then
-                println "Input file does not exist!\n"
-                println "--boundaries=%s\n" "$BOUNDARIES"
+                println "Input file does not exist: --boundaries=%s\n" "$BOUNDARIES"
                 exit 1
             fi
             ;;
@@ -178,8 +177,7 @@ for ARG in "$@"; do
             DBDIR="${DBDIR%/}"
             # Check whether the input directory exist
             if [[ ! -d $DBDIR ]]; then
-                println "Input folder does not exist!\n"
-                println "--db-dir=%s\n" "$DBDIR"
+                println "Input folder does not exist: --db-dir=%s\n" "$DBDIR"
                 exit 1
             fi
             ;;
@@ -247,8 +245,7 @@ for ARG in "$@"; do
             fi
             # Check whether the input file exists
             if [[ ! -f $INLIST ]]; then
-                println "Input file does not exist!\n"
-                println "--input-list=%s\n" "$INLIST"
+                println "Input file does not exist: --input-list=%s\n" "$INLIST"
                 exit 1
             fi
             ;;
@@ -330,8 +327,7 @@ for ARG in "$@"; do
             fi
             # Check whether the input file exists
             if [[ ! -f $TAXA ]]; then
-                println "Input file does not exist!\n"
-                println "--taxa=%s\n" "$TAXA"
+                println "Input file does not exist: --taxa=%s\n" "$TAXA"
                 exit 1
             fi
             ;;
@@ -687,12 +683,12 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                             # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
                             # Do not change lineage here because there could be more than one reference genome assigned to the same unknown cluster
                             # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
-                            if [[ ! -z "${TO_KNOWN_TAXA[${CLOSEST_TAXA}]}" ]]; then
-                                TO_KNOWN_TAXA[${CLOSEST_TAXA}]="$GENOMENAME"
+                            if [[ ! -z "${TO_KNOWN_TAXA["${CLOSEST_TAXA}"]}" ]]; then
+                                TO_KNOWN_TAXA["${CLOSEST_TAXA}"]="$GENOMENAME"
                             else
                                 # If already exists in the associative array
                                 # Concatenate values with a comma
-                                TO_KNOWN_TAXA[${CLOSEST_TAXA}]=${TO_KNOWN_TAXA[${CLOSEST_TAXA}]}",$GENOMENAME"
+                                TO_KNOWN_TAXA["${CLOSEST_TAXA}"]=${TO_KNOWN_TAXA["${CLOSEST_TAXA}"]}",$GENOMENAME"
                             fi
                             # Print the assignment
                             # Taxonomy will change according to the majority voting result
@@ -790,7 +786,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             # Take track of the reference genomes taxonomic labels
             KNOWN_TAXA=()
             # Split the list of genomes assigned to the unknown cluster
-            GENOMES=($(echo ${TO_KNOWN_TAXA[$UNKNOWN_TAXONOMY]} | tr "," " "))
+            GENOMES=($(echo ${TO_KNOWN_TAXA["${UNKNOWN_TAXONOMY}"]} | tr "," " "))
             for GENOME in ${GENOMES[@]}; do
                 # Retrieve the genome taxonomy from the --taxa input file
                 KNOWN_TAXA+=("$(grep -w "$GENOME" $TAXA | cut -d$'\t' -f2)")
