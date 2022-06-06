@@ -4,8 +4,12 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="Jun 3, 2022"
+DATE="Jun 5, 2022"
 VERSION="0.1.0"
+
+# Take track of the directory from which this module is launched
+# This is required in order to come back on this folder after running HowDeSBT
+EXEC_DIR="$PWD"
 
 # Define script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -550,6 +554,10 @@ for LEVEL in "g__" "f__" "o__" "c__" "p__" "k__"; do
          howdesbt_wrapper $LEVELDIR '"${FILTER_SIZE}"';'
     DEPTH=$(expr $DEPTH - 1)
 done
+
+# HowDeSBT calls automatically change the current folder to the taxonomy directory
+# Come back to the folder from which this module has been launched
+cd ${EXEC_DIR}
 
 # Cleanup temporary data
 if $CLEANUP; then
