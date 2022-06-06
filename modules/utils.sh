@@ -203,11 +203,13 @@ howdesbt_wrapper () {
                          --bits=${FILTER_SIZE} \
                          --tree=${INDEX_DIR}/union.sbt \
                          --nodename=${INDEX_DIR}/node{number} \
-                         --keepallnodes
+                         --keepallnodes \
+                         > ${LEVEL_DIR}/howdesbt.log 2>&1
         # Build the bloom filter files for the tree
         howdesbt build --howde \
                        --tree=${INDEX_DIR}/union.sbt \
-                       --outtree=${INDEX_DIR}/index.detbrief.sbt
+                       --outtree=${INDEX_DIR}/index.detbrief.sbt \
+                       >> ${LEVEL_DIR}/howdesbt.log 2>&1
         # Remove the union.sbt file
         rm -f ${INDEX_DIR}/union.sbt
         
@@ -234,7 +236,10 @@ howdesbt_wrapper () {
             if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then
                 cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
             else
-                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out=${LEVEL_DIR}/merged.bf
+                # Merge bloom filter files applying the OR logical operator
+                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out=${LEVEL_DIR}/merged.bf \
+                    >> ${LEVEL_DIR}/howdesbt.log 2>&1
+                # Rename the resulting file
                 mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf
             fi
         done < ${LEVEL_DIR}/${LEVEL_NAME}.txt
@@ -247,7 +252,8 @@ howdesbt_wrapper () {
         # Build the RRR compressed bloom filter file for the node
         howdesbt build --howde \
                        --tree=${INDEX_DIR}/union.sbt \
-                       --outtree=${INDEX_DIR}/index.detbrief.sbt
+                       --outtree=${INDEX_DIR}/index.detbrief.sbt \
+                       > ${LEVEL_DIR}/howdesbt.log 2>&1
         # Remove the union.sbt file
         rm -f ${INDEX_DIR}/union.sbt
     fi
@@ -265,9 +271,6 @@ kmtricks_index_wrapper () {
     NPROC=$5        # Max nproc for multiprocessing
     FOLDERPATH=$(dirname "$INPUT")
     if [[ ! -f "$FOLDERPATH/index/kmtricks.fof" ]]; then
-        # Take track of the processed species in log
-        echo $INPUT >> $DBDIR/kmtricks.log
-
         # Run the kmtricks pipeline
         kmtricks pipeline --file $INPUT \
                           --run-dir $FOLDERPATH/index \
@@ -278,7 +281,8 @@ kmtricks_index_wrapper () {
                           --bf-format howdesbt \
                           --cpr \
                           --skip-merge \
-                          --threads $NPROC
+                          --threads $NPROC \
+                          > $FOLDERPATH/index/kmtricks.log 2>&1
         
         FOLDERNAME="${FOLDERPATH##*/}"
         HOWMANY=$(wc -l $INPUT | cut -d" " -f1)
@@ -294,7 +298,10 @@ kmtricks_index_wrapper () {
                 if [[ ! -f $FOLDERPATH/${FOLDERNAME}.bf ]]; then
                     cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
                 else
-                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out=$FOLDERPATH/merged.bf
+                    # Merge bloom filter files applying the OR logical operator
+                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out=$FOLDERPATH/merged.bf \
+                        >> $FOLDERPATH/index/kmtricks.log 2>&1
+                    # Rename the resulting file
                     mv $FOLDERPATH/merged.bf $FOLDERPATH/${FOLDERNAME}.bf
                 fi
             done < $INPUT
@@ -323,14 +330,17 @@ kmtricks_matrix_wrapper () {
                       --mode kmer:count:bin \
                       --hard-min 1 \
                       --cpr \
-                      --threads $NPROC
+                      --threads $NPROC \
+                      >> ${RUN_DIR}/kmtricks.log 2>&1
     # Aggregate
     kmtricks aggregate --run-dir ${RUN_DIR} \
                        --matrix kmer \
                        --format text \
                        --cpr-in \
                        --sorted \
-                       --threads $NPROC > ${OUT_TABLE}
+                       --threads $NPROC \
+                       --output ${OUT_TABLE} \
+                       >> ${RUN_DIR}/kmtricks.log 2>&1
 }
 
 # Print line on standard output and write in log file
@@ -384,7 +394,8 @@ run_checkm () {
                           -x $EXTENSION \
                           --pplacer_threads $NPROC \
                           --tab_table -f $RUNDIR/run_${suffix}.tsv \
-                          $RUNDIR/tmp/bins_${suffix} $RUNDIR/run_$suffix
+                          $RUNDIR/tmp/bins_${suffix} $RUNDIR/run_$suffix \
+                          > $RUNDIR/checkm.log 2>&1
         # Take trace of the CheckM output tables
         CHECKMTABLES=$RUNDIR/run_${suffix}.tsv,$CHECKMTABLES
     done
