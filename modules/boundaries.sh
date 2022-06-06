@@ -61,24 +61,25 @@ define_boundaries () {
                 # Create an associative array to keep track of common kmers
                 declare -A COMMON_KMERS
                 # Read the kmers matrix line by line
-                # Iterate over non-empty lines
-                cat ${TMP_LEVEL_DIR}/kmers_matrix.txt | grep -v "^$" | while read line; do
-                    KMER_LINE=($(echo $line))
-                    for COLUMN1 in $(seq 2 ${HOW_MANY_COLUMNS}); do
-                        for COLUMN2 in $(seq $COLUMN1 ${HOW_MANY_COLUMNS}); do
-                            if [[ "$COLUMN1" -eq "$COLUMN2" ]]; then
-                                # Do not compare a genome with itself
-                                continue
-                            fi
-                            # Compare kmer absence/presence
-                            # Take track of current genome couple if both the genomes have the same kmer
-                            if [[ "${KMER_LINE[$COLUMN1]}" -gt "0" ]] && [[ "${KMER_LINE[$COLUMN2]}" -gt "0" ]]; then
-                                # Increment counter in common kmers table
-                                COMMON_KMERS[${COLUMN1}${COLUMN2}]=$((COMMON_KMERS[${COLUMN1}${COLUMN2}] + 1))
-                            fi
+                while read line; do
+                    if [[ ! -z "$line" ]]; then
+                        KMER_LINE=($(echo $line))
+                        for COLUMN1 in $(seq 2 ${HOW_MANY_COLUMNS}); do
+                            for COLUMN2 in $(seq $COLUMN1 ${HOW_MANY_COLUMNS}); do
+                                if [[ "$COLUMN1" -eq "$COLUMN2" ]]; then
+                                    # Do not compare a genome with itself
+                                    continue
+                                fi
+                                # Compare kmer absence/presence
+                                # Take track of current genome couple if both the genomes have the same kmer
+                                if [[ "${KMER_LINE[$COLUMN1]}" -gt "0" ]] && [[ "${KMER_LINE[$COLUMN2]}" -gt "0" ]]; then
+                                    # Increment counter in common kmers table
+                                    COMMON_KMERS[${COLUMN1}${COLUMN2}]=$((COMMON_KMERS[${COLUMN1}${COLUMN2}] + 1))
+                                fi
+                            done
                         done
-                    done
-                done
+                    fi
+                done < ${TMP_LEVEL_DIR}/kmers_matrix.txt
 
                 # Check for minimum and maximum common kmers
                 MIN_KMERS=-1
