@@ -1,0 +1,13 @@
+bc
+checkm
+csvcut
+esearch
+esummary
+gzip
+howdesbt
+kmtricks
+ncbitax2lin
+ntcard
+python3
+wget
+xtract
