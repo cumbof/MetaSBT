@@ -4,48 +4,97 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
 check_dependencies () {
-    VERBOSE=$1
+    VERBOSE=$1                   # Print messages if true
+    DEPENDENCY_FILEPATHS=("$@")  # Path to the dependency file
+    
+    # Remove the first argument from the dependency list
+    DEPENDENCY_FILEPATHS=(${DEPENDENCY_FILEPATHS[@]:1})
+
+    # Print messages if verbose
     if $VERBOSE; then
         println "Checking for software dependencies\n"
     fi
-    # Define the set of dependencies
-    # esearch, esummary, and xtract come from the Entrez Direct (EDirect) utility
-    DEPENDENCIES=("bc" "checkm" "esearch" "esummary" "gzip" "howdesbt" "kmtricks" "ncbitax2lin" "ntcard" "wget" "xtract")
+    
+    # Check whether the list of dependency files contains at least one path
+    if [[ "${#DEPENDENCY_FILEPATHS[@]}" -gt "0" ]]; then
+        SOFTWARE_DEPENDENCIES=()
+        PYTHON_FOUND=false
+        # For each of the dependency files
+        for DEPENDENCY_FILEPATH in "${DEPENDENCY_FILEPATHS[@]}"; do
+            # Load the set of software dependencies
+            while read line; do
+                SOFTWARE_DEPENDENCIES+=("$line")
+                # Also check for python modules in case Python is a requirement
+                if [[ "$line" = "python3" ]]; then
+                    PYTHON_FOUND=true
+                    # In case of python requirement
+                    # Also add pip to the list of dependencies
+                    SOFTWARE_DEPENDENCIES+=("pip")
+                fi
+            done < ${DEPENDENCY_FILEPATH}
+        done
+        # Remove duplicates
+        SOFTWARE_DEPENDENCIES=($(printf "%s\n" "${SOFTWARE_DEPENDENCIES[@]}" | sort -u))
 
-    # Count how many missing dependencies
-    MISSING=0
-    for dep in "${DEPENDENCIES[@]}"; do
-        # Check for dependency
-        if ! command -v $dep &> /dev/null ; then
-            if $VERBOSE; then
-                println "\t[--] %s\n" "$dep"
+        # Count how many missing dependencies
+        MISSING=0
+        for dep in "${SOFTWARE_DEPENDENCIES[@]}"; do
+            # Check for dependency
+            if ! command -v $dep &> /dev/null ; then
+                if $VERBOSE; then
+                    println "\t[--] %s\n" "$dep"
+                fi
+                MISSING=$(($MISSING + 1))
+            else
+                if $VERBOSE; then
+                    println "\t[OK] %s\n" "$dep"
+                fi
             fi
-            MISSING=$(($MISSING + 1))
-        else
-            if $VERBOSE; then
-                println "\t[OK] %s\n" "$dep"
+        done
+
+        # In case Python is a requirement
+        if ${PYTHON_FOUND}; then
+            # In case the requirements.txt file exists
+            PYTHON_REQUIREMENTS="$(dirname ${DEPENDENCY_FILEPATHS[0]})/requirements.txt"
+            if [[ -f ${PYTHON_REQUIREMENTS} ]]; then
+                # Check for python modules
+                if $VERBOSE; then
+                    println "\nChecking for Python requirements\n"
+                    println "\tThis will automatically install missing dependencies with pip\n"
+                    read -p $'\tDo you want to continue? [Y/n] ' -n 1 -r REPLY
+                    println "\n"
+                    if [[ $REPLY =~ ^Y$ ]]; then
+                        python3 -m pip install -r ${PYTHON_REQUIREMENTS} --ignore-installed
+                    fi
+                fi
             fi
         fi
-    done
-    
-    # Return 1 in case of missing dependencies
-    if [ "$MISSING" -gt "0" ]; then
+        
+        # Return 1 in case of missing dependencies
+        if [ "$MISSING" -gt "0" ]; then
+            if $VERBOSE; then
+                println "\nPlease, install all the missing dependencies and try again.\n\n"
+            fi
+            return 1
+        fi
+        
+        # Return 0 if all external software dependencies are satisfied
         if $VERBOSE; then
-            println "\nPlease, install all the missing dependencies and try again.\n\n"
+            println "\nAll required dependencies satisfied!\n\n"
         fi
-        return 1
+        return 0
     fi
-    
-    # Return 0 if all external software dependencies are satisfied
+
+    # In case of no dependencies
     if $VERBOSE; then
-        println "\nAll required dependencies satisfied!\n\n"
+        println "\nNo dependencies found!\n\n"
     fi
-    return 0
+    return 1
 }
 
 # Check for new software release
@@ -323,6 +372,7 @@ kmtricks_matrix_wrapper () {
     RUN_DIR=$2
     NPROC=$3
     OUT_TABLE=$4
+    WORKDIR=$5
 
     # Build matrix
     kmtricks pipeline --file ${GENOMES_FOF} \
@@ -331,7 +381,7 @@ kmtricks_matrix_wrapper () {
                       --hard-min 1 \
                       --cpr \
                       --threads $NPROC \
-                      >> ${RUN_DIR}/kmtricks.log 2>&1
+                      >> $WORKDIR/kmtricks.log 2>&1
     # Aggregate
     kmtricks aggregate --run-dir ${RUN_DIR} \
                        --matrix kmer \
@@ -340,8 +390,10 @@ kmtricks_matrix_wrapper () {
                        --sorted \
                        --threads $NPROC \
                        --output ${OUT_TABLE} \
-                       >> ${RUN_DIR}/kmtricks.log 2>&1
+                       >> $WORKDIR/kmtricks.log 2>&1
 }
+# Export kmtricks_matrix_wrapper to sub-shells
+export -f kmtricks_matrix_wrapper
 
 # Print line on standard output and write in log file
 LOG_FILEPATH=""
@@ -353,6 +405,8 @@ println () {
     fi
     printf "$LINE" "${VALUES[@]}"
 }
+# Export println to sub-shells
+export -f println
 
 # Run CheckM for quality control base on completeness and contamination
 # Remember to create a global variable "CHECKMTABLES" before calling this function 
@@ -421,15 +475,4 @@ supported_extensions () {
             println '%s\n' "$line"
         fi
     done < $1
-}
-
-# Transpose matrix file
-# Credits: https://stackoverflow.com/a/28167793
-transpose () {
-  awk '{for (i=1; i<=NF; i++) a[i,NR]=$i; max=(max<NF?NF:max)}
-        END {for (i=1; i<=max; i++)
-              {for (j=1; j<=NR; j++) 
-                  printf "%s%s", a[i,j], (j<NR?OFS:ORS)
-              }
-        }'
 }
