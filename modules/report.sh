@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -165,6 +165,11 @@ for ARG in "$@"; do
                 exit 0
             fi
             ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true "${SCRIPT_DIR}/report.txt"
+            exit $?
+            ;;
         -v|--version)
             # Print pipeline version
             println "report version %s (%s)\n" "$VERSION" "$DATE"
@@ -180,14 +185,24 @@ done
 println "report version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
+check_dependencies false "${SCRIPT_DIR}/report.txt"
+if [[ "$?" -gt "0" ]]; then
+    println "Unsatisfied software dependencies!\n\n"
+    println "Please run the following command for a list of required external software dependencies:\n\n"
+    println "\t$ meta-index --resolve-dependencies\n\n"
+
+    exit 1
+fi
+
 # Build a report table
-# For each taxonomy, report the number of MAGs and reference genomes, and the mean completeness and contamination
+# For each taxonomy, report the number of MAGs and reference genomes, 
+# and the mean completeness, contamination, and strain heterogeneity
 
 # Initialise the report table
 printf "# Lineage\tMAGs\tReferences\tMean Completeness\tMean Contamination\tMean Strain Heterogeneity\n" > $OUTPUTFILE
 # Search for all the species folders
 find $DBDIR -type d -name "s__*" | xargs -n 1 -I {} bash -c \
-    'SPECIES={}; \
+    'SPECIES={}
      process_species "$SPECIES" '"$OUTPUTFILE"';'
 
 PIPELINE_END_TIME="$(date +%s.%3N)"

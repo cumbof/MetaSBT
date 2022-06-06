@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -27,18 +27,34 @@ define_boundaries () {
     println "Processing %s\n" "${LEVEL_DIR}"
     # Create a temporary folder for current taxonomy
     LEVEL_NAME="$(basename ${LEVEL_DIR})"
-    TMP_LEVEL_DIR=$TMPDIR/${LEVEL_NAME}
+    # Retrieve the leveld ID
+    case "${LEVEL_NAME[i]:0:1}" in
+        "k") LEVEL_ID="kingdoms" ;;
+        "p") LEVEL_ID="phyla" ;;
+        "c") LEVEL_ID="classes" ;;
+        "o") LEVEL_ID="orders" ;;
+        "f") LEVEL_ID="families" ;;
+        "g") LEVEL_ID="genera" ;;
+        "s") LEVEL_ID="species" ;;
+        *) LEVEL_ID="NA" ;;
+    esac
+    # Define the temporary folder for running kmtricks
+    TMP_LEVEL_DIR=$TMPDIR/boundaries/${LEVEL_ID}/${LEVEL_NAME}
     mkdir -p ${TMP_LEVEL_DIR}
     # Search and merge reference genomes paths unders all genomes.fof files in current taxonomic level
     find ${LEVEL_DIR} -type f -iname "references.txt" -follow | xargs -n 1 -I {} bash -c \
-        'REFERENCES={}; \
-         SPECIES_DIR=$(dirname ${REFERENCES}); \
-         while read REFNAME; do \
+        'REFERENCES={}
+         SPECIES_DIR=$(dirname ${REFERENCES})
+         while read REFNAME; do
             REFDATA="$(grep "^$REFNAME " $(dirname $REFERENCES)/genomes.fof)"
-            if [[ ! -z $REFDATA ]]; then \
+            if [[ ! -z $REFDATA ]]; then
                 REFPATH="$(echo "$REFDATA" | rev | cut -d" " -f1 | rev)"
-                echo $REFPATH >> '"${TMP_LEVEL_DIR}"'/genomes.fof;
-            fi \
+                REFNAME="$(basename ${REFPATH%.*})"
+                if [[ "$REFPATH" = *.gz ]]; then
+                    REFNAME="$(basename ${REFNAME%.*})"
+                fi
+                echo "$REFNAME : $REFPATH" >> '"${TMP_LEVEL_DIR}"'/genomes.fof
+            fi
          done < $REFERENCES'
 
     if [[ -f ${TMP_LEVEL_DIR}/genomes.fof ]]; then
@@ -52,51 +68,20 @@ define_boundaries () {
             kmtricks_matrix_wrapper ${TMP_LEVEL_DIR}/genomes.fof \
                                     ${TMP_LEVEL_DIR}/matrix \
                                     $NPROC \
-                                    ${TMP_LEVEL_DIR}/kmers_matrix.txt
+                                    ${TMP_LEVEL_DIR}/kmers_matrix.txt \
+                                    ${TMP_LEVEL_DIR}
             
             # Check whether the kmers matrix has been generated
             if [[ -f ${TMP_LEVEL_DIR}/kmers_matrix.txt ]]; then
-                # Count how many columns in matrix
-                HOW_MANY_COLUMNS=$(awk '{print NF; exit}' ${TMP_LEVEL_DIR}/kmers_matrix.txt)
-                # Create an associative array to keep track of common kmers
-                declare -A COMMON_KMERS
-                # Read the kmers matrix line by line
-                while read line; do
-                    if [[ ! -z "$line" ]]; then
-                        KMER_LINE=($(echo $line))
-                        for COLUMN1 in $(seq 2 ${HOW_MANY_COLUMNS}); do
-                            for COLUMN2 in $(seq $COLUMN1 ${HOW_MANY_COLUMNS}); do
-                                if [[ "$COLUMN1" -eq "$COLUMN2" ]]; then
-                                    # Do not compare a genome with itself
-                                    continue
-                                fi
-                                # Compare kmer absence/presence
-                                # Take track of current genome couple if both the genomes have the same kmer
-                                if [[ "${KMER_LINE[$COLUMN1]}" -gt "0" ]] && [[ "${KMER_LINE[$COLUMN2]}" -gt "0" ]]; then
-                                    # Increment counter in common kmers table
-                                    COMMON_KMERS[${COLUMN1}${COLUMN2}]=$((COMMON_KMERS[${COLUMN1}${COLUMN2}] + 1))
-                                fi
-                            done
-                        done
-                    fi
-                done < ${TMP_LEVEL_DIR}/kmers_matrix.txt
-
-                # Check for minimum and maximum common kmers
-                MIN_KMERS=-1
-                MAX_KMERS=-1
-                # Iterate over values in COMMON_KMERS associative array
-                for count in ${COMMON_KMERS[@]}; do
-                    if [[ "${MIN_KMERS}" -eq "-1" ]] && [[ "${MAX_KMERS}" -eq "-1" ]]; then
-                        MIN_KMERS=$count
-                        MAX_KMERS=$count
-                    else
-                        if [[ "$count" -lt "${MIN_KMERS}" ]]; then
-                            MIN_KMERS=$count
-                        elif [[ "$count" -gt "${MAX_KMERS}" ]]; then
-                            MAX_KMERS=$count
-                        fi
-                    fi
-                done
+                # Compute boundaries
+                BOUNDARIES="$(python3 ${SCRIPT_DIR}/utils.py get_boundaries ${TMP_LEVEL_DIR}/kmers_matrix.txt)"
+                # Get the minimum common kmers
+                MIN_KMERS="$(echo "$BOUNDARIES" | cut -d',' -f1)"
+                MIN_KMERS="${MIN_KMERS:1}"    # Remove the first character "("
+                # Get the maximum common kmers
+                MAX_KMERS="$(echo "$BOUNDARIES" | cut -d',' -f2)"
+                MAX_KMERS="${MAX_KMERS:1}"    # Remove the first character " "
+                MAX_KMERS="${MAX_KMERS:0:-1}" # Remove the last character ")"
 
                 # Report minimum and maximum common kmers to the output table
                 LEVELS=($(echo ${LEVEL_DIR} | tr "\/" " "))
@@ -140,6 +125,8 @@ define_boundaries () {
         println "\t[ERROR] No reference genomes found\n\n"
     fi
 }
+# Export define_boundaries to sub-shells
+export -f define_boundaries
 
 # Define default value for --nproc
 NPROC=1
@@ -245,6 +232,11 @@ for ARG in "$@"; do
                 exit 0
             fi
             ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true "${SCRIPT_DIR}/boundaries.txt"
+            exit $?
+            ;;
         --tmp-dir=*)
             # Temporary folder
             TMPDIR="${ARG#*=}"
@@ -274,7 +266,7 @@ done
 println "boundaries version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies false
+check_dependencies false "${SCRIPT_DIR}/boundaries.txt"
 if [[ "$?" -gt "0" ]]; then
     println "Unsatisfied software dependencies!\n\n"
     println "Please run the following command for a list of required external software dependencies:\n\n"
@@ -301,9 +293,12 @@ if [[ ! -f $OUTPUT ]]; then
     println "# --min-genomes=%s\n" "${MIN_GENOMES}" >> $OUTPUT
     println "# Lineage\tMin kmers\tMax kmers\n" >> $OUTPUT
     # Process all taxonomic levels
+    DEPTH=6
     for LEVEL in "s__" "g__" "f__" "o__" "c__" "p__" "k__"; do
-        find $DBDIR/k__$KINGDOM -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow -exec \
-            define_boundaries {} "${MIN_GENOMES}" "$TMPDIR" "$OUTPUT" "$NPROC" "$CLEANUP" \;
+        find $DBDIR/k__$KINGDOM -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -I {} bash -c \
+            'LEVELDIR={}
+             define_boundaries $LEVELDIR '"${MIN_GENOMES}"' '"$TMPDIR"' '"$OUTPUT"' '"$NPROC"' '"$CLEANUP"';'
+        DEPTH=$(expr $DEPTH - 1)
     done
 
     # Print output table path with boundaries

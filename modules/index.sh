@@ -206,6 +206,11 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true "${SCRIPT_DIR}/index.txt"
+            exit $?
+            ;;
         --tmp-dir=*)
             # Temporary folder
             TMPDIR="${ARG#*=}"
@@ -251,7 +256,7 @@ done
 println "index version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies false
+check_dependencies false "${SCRIPT_DIR}/index.txt"
 if [[ "$?" -gt "0" ]]; then
     println "Unsatisfied software dependencies!\n\n"
     println "Please run the following command for a list of required external software dependencies:\n\n"
@@ -455,7 +460,8 @@ while read tax_id, taxonomy; do
                         kmtricks_matrix_wrapper ${GENOMES_FOF} \
                                                 $TAXDIR/matrix \
                                                 $NPROC \
-                                                $TAXDIR/kmers_matrix.txt
+                                                $TAXDIR/kmers_matrix.txt \
+                                                $TAXDIR
 
                         # Add header to the kmers matrix
                         HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
@@ -466,25 +472,36 @@ while read tax_id, taxonomy; do
                         echo "#kmer $HEADER" > $TAXDIR/kmers_matrix_wh.txt
                         cat $TAXDIR/kmers_matrix.txt >> $TAXDIR/kmers_matrix_wh.txt
                         mv $TAXDIR/kmers_matrix_wh.txt $TAXDIR/kmers_matrix.txt
-                        # Remove duplicate columns
-                        cat $TAXDIR/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > $TAXDIR/kmers_matrix_dereplicated.txt
 
                         # Dereplicate genomes
-                        while read -r genome; do
-                            if ! head -n1 $TAXDIR/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
-                                # Remove genome from directory
-                                rm -rf ${GENOMES_DIR}/${genome}.fna.gz
-                            else
-                                grep "^$genome " ${GENOMES_FOF} >> $TAXDIR/genomes_dereplicated.fof
+                        python3 ${SCRIPT_DIR}/utils.py dereplicate $TAXDIR/kmers_matrix.txt $TAXDIR/filtered.txt > /dev/null
+
+                        if [[ -f $TAXDIR/filtered.txt ]]; then
+                            # Dereplicate genomes
+                            FILTERED_ARRAY=()
+                            while read -r genome; do
+                                if grep -q "^$genome$" $TAXDIR/filtered.txt; then
+                                    # Remove genome from directory
+                                    rm -rf ${GENOMES_DIR}/${genome}.fna.gz
+                                    FILTERED_ARRAY+=("$genome")
+                                else
+                                    # Build the new fof file with the dereplicate genomes
+                                    grep "^$genome " ${GENOMES_FOF} >> $TAXDIR/genomes_dereplicated.fof
+                                fi
+                            done <<<"$(head -n1 $TAXDIR/kmers_matrix.txt | tr " " "\n")"
+
+                            if [[ -f $TAXDIR/genomes_dereplicated.fof ]]; then
+                                # Build the new kmers matrix with the dereplicated genomes
+                                FILTERED="$(printf ",%s" "${FILTERED_ARRAY[@]}")"
+                                FILTERED="${FILTERED:1}"
+                                csvcut --delimiter " " --not-columns $FILTERED $TAXDIR/kmers_matrix.txt > $TAXDIR/kmers_matrix_dereplicated.txt
+                                # Point GENOMES_FOF to the new fof with the dereplicated genomes
+                                mv $TAXDIR/genomes_dereplicated.fof ${GENOMES_FOF}
                             fi
-                        done <<<"$(head -n1 $TAXDIR/kmers_matrix.txt | tr " " "\n")"
+                        fi
 
                         # Cleanup space
                         rm -rf $TAXDIR/matrix
-                        mv $TAXDIR/kmers_matrix_dereplicated.txt $TAXDIR/kmers_matrix.txt
-                        if [[ -f $TAXDIR/genomes_dereplicated.fof ]]; then
-                            mv $TAXDIR/genomes_dereplicated.fof ${GENOMES_FOF}
-                        fi
                     fi
                 fi
             fi
@@ -505,7 +522,7 @@ if ${ESTIMATE_FILTER_SIZE}; then
     println "\nRunning ntCard for estimating the bloom filter size\n"
     # Create a list with the file paths to all the downloaded genomes
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -I {} bash -c \
-        'INPUT={}; \
+        'INPUT={}
          cat $INPUT | cut -d" " -f3 >> '"$TMPDIR"'/genomes.txt'
     # Call ntCard
     # With --kmer=31 it will produce genomes_k21.hist
@@ -534,9 +551,9 @@ NFOFIN=`find $DBDIR -type f -iname "genomes.fof" | wc -l`   # Count how many gen
 NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l` # Count how many kmtricks.fof files (copy of genomes.fof generated by kmtricks)
 while [ $NFOFOUT -lt $NFOFIN ]; do
     find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
-        'INPUT={}; \
-         if [[ ! -f "$(dirname $INPUT)/index/kmtricks.fof" ]]; then \
-            kmtricks_index_wrapper "$INPUT" '"$DBDIR"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"$NPROC"'; \
+        'INPUT={}
+         if [[ ! -f "$(dirname $INPUT)/index/kmtricks.fof" ]]; then
+            kmtricks_index_wrapper "$INPUT" '"$DBDIR"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"$NPROC"'
          fi'
     # Search for missing species and process them one by one
     NFOFOUT=`find $DBDIR -type f -iname "kmtricks.fof" | wc -l`
@@ -550,7 +567,7 @@ println "\nRunning howdesbt on lower taxonomic levels\n"
 DEPTH=6
 for LEVEL in "g__" "f__" "o__" "c__" "p__" "k__"; do
     find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -I {} bash -c \
-        'LEVELDIR={}; \
+        'LEVELDIR={}
          howdesbt_wrapper $LEVELDIR '"${FILTER_SIZE}"';'
     DEPTH=$(expr $DEPTH - 1)
 done

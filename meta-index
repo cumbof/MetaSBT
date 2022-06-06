@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================
 
-DATE="Jun 2, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -80,8 +80,18 @@ else
                     exit 0
                     ;;
                 --resolve-dependencies)
+                    # Get module names in list
+                    MODULES=(${MODULES_DIR}/*.sh)
+                    # Define the list of module dependency files
+                    MODULES_DEPENDENCIES=()
+                    # Remove utils from the list of modules
+                    for i in "${!MODULES[@]}"; do
+                        if [[ "$(basename ${MODULES[i]})" != "utils.sh" ]]; then
+                            MODULES_DEPENDENCIES+=("${MODULES_DIR}/$(basename ${MODULES[i]%.*}).txt")
+                        fi
+                    done
                     # Check for external software dependencies and python modules
-                    check_dependencies true
+                    check_dependencies true "${MODULES_DEPENDENCIES[@]}"
                     exit $?
                     ;;
                 -v|--version)

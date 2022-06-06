@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -304,6 +304,11 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true "${SCRIPT_DIR}/update.txt"
+            exit $?
+            ;;
         --supported-extensions)
             # Print the supported list of file extensions for the input sequences
             println 'List of supported file extensions for input genomes:\n'
@@ -376,7 +381,7 @@ done
 println "update version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies false
+check_dependencies false "${SCRIPT_DIR}/update.txt"
 if [[ "$?" -gt "0" ]]; then
     println "Unsatisfied software dependencies!\n\n"
     println "Please run the following command for a list of required external software dependencies:\n\n"
@@ -470,7 +475,8 @@ if $DEREPLICATE; then
             kmtricks_matrix_wrapper ${GENOMES_FOF} \
                                     $TMPDIR/matrix \
                                     $NPROC \
-                                    $TMPDIR/kmers_matrix.txt
+                                    $TMPDIR/kmers_matrix.txt \
+                                    $TMPDIR
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})
@@ -481,20 +487,28 @@ if $DEREPLICATE; then
             echo "#kmer $HEADER" > $TMPDIR/kmers_matrix_wh.txt
             cat $TMPDIR/kmers_matrix.txt >> $TMPDIR/kmers_matrix_wh.txt
             mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
-            # Remove duplicate columns
-            cat $TMPDIR/kmers_matrix.txt | transpose | awk '!seen[substr($0, index($0, " "))]++' | transpose > $TMPDIR/kmers_matrix_dereplicated.txt
-            
+
             # Dereplicate genomes
-            while read -r genome; do
-                if head -n1 $TMPDIR/kmers_matrix_dereplicated.txt | grep -q -w "$genome"; then
-                    # Rebuild the absolute path to the genome file
-                    realpath -s $(grep "^$genome " $TMPDIR/genomes.fof | cut -d' ' -f3) >> $TMPDIR/genomes_dereplicated.txt
+            python3 ${SCRIPT_DIR}/utils.py dereplicate $TMPDIR/kmers_matrix.txt $TMPDIR/filtered.txt > /dev/null
+
+            if [[ -f $TMPDIR/filtered.txt ]]; then
+                # Dereplicate genomes
+                FILTERED_ARRAY=()
+                while read -r genome; do
+                    if ! grep -q "^$genome$" $TMPDIR/filtered.txt; then
+                        # Rebuild the absolute path to the genome file
+                        realpath -s $(grep "^$genome " $TMPDIR/genomes.fof | cut -d' ' -f3) >> $TMPDIR/genomes_dereplicated.txt
+                    fi
+                done <<<"$(head -n1 $TMPDIR/kmers_matrix.txt | tr " " "\n")"
+
+                if [[ -f $TMPDIR/genomes_dereplicated.txt ]]; then
+                    # Build the new kmers matrix with the dereplicated genomes
+                    FILTERED="$(printf ",%s" "${FILTERED_ARRAY[@]}")"
+                    FILTERED="${FILTERED:1}"
+                    csvcut --delimiter " " --not-columns $FILTERED $TMPDIR/kmers_matrix.txt > $TMPDIR/kmers_matrix_dereplicated.txt
+                    # Use the new list of dereplicated genomes
+                    INLIST=$TMPDIR/genomes_dereplicated.txt
                 fi
-            done <<<"$(head -n1 $TMPDIR/kmers_matrix.txt | tr " " "\n")"
-            
-            # Use the new list of dereplicated genomes
-            if [[ -f $TMPDIR/genomes_dereplicated.txt ]]; then
-                INLIST=$TMPDIR/genomes_dereplicated.txt
             fi
 
             # Count how many genomes passed the dereplication
@@ -873,7 +887,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             kmtricks_matrix_wrapper ${GENOMES_FOF} \
                                     $TMPDIR/matrix \
                                     $NPROC \
-                                    $TMPDIR/kmers_matrix.txt
+                                    $TMPDIR/kmers_matrix.txt \
+                                    $TMPDIR
             
             # Add header to the kmers matrix
             HEADER=$(awk 'BEGIN {ORS = " "} {print $1}' ${GENOMES_FOF})

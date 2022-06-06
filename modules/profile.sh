@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 6, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -91,6 +91,11 @@ for ARG in "$@"; do
                 exit 0
             fi
             ;;
+        --resolve-dependencies)
+            # Check for external software dependencies and python modules
+            check_dependencies true "${SCRIPT_DIR}/profile.txt"
+            exit $?
+            ;;
         --stop-at=*)
             # Stop expanding queries at a specific taxonomic level
             STOPAT="${ARG#*=}"
@@ -155,7 +160,7 @@ done
 println "profile version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies false
+check_dependencies false "${SCRIPT_DIR}/profile.txt"
 if [[ "$?" -gt "0" ]]; then
     println "Unsatisfied software dependencies!\n\n"
     println "Please run the following command for a list of required external software dependencies:\n\n"
@@ -228,13 +233,8 @@ while [[ -f $TREE ]]; do
             MATCH_COMMON_KMERS="$(echo $line | cut -d' ' -f2 | cut -d'/' -f1)"
             MATCH_TOTAL_KMERS="$(echo $line | cut -d' ' -f2 | cut -d'/' -f2)"
             # Update the associative array
-            if [[ -z "${MATCHES_COMMON_KMERS["$MATCH"]}" ]]; then
-                MATCHES_COMMON_KMERS["$MATCH"]=${MATCH_COMMON_KMERS}
-                MATCHES_TOTAL_KMERS["$MATCH"]=${MATCH_TOTAL_KMERS}
-            else
-                MATCHES_COMMON_KMERS["$MATCH"]=$((${MATCHES_COMMON_KMERS["$MATCH"]} + ${MATCH_COMMON_KMERS}))
-                MATCHES_TOTAL_KMERS["$MATCH"]=$((${MATCHES_TOTAL_KMERS["$MATCH"]} + ${MATCH_TOTAL_KMERS}))
-            fi
+            MATCHES_COMMON_KMERS["$MATCH"]=$((${MATCHES_COMMON_KMERS["$MATCH"]} + ${MATCH_COMMON_KMERS}))
+            MATCHES_TOTAL_KMERS["$MATCH"]=$((${MATCHES_TOTAL_KMERS["$MATCH"]} + ${MATCH_TOTAL_KMERS}))
             # Update the best match
             if [[ "${MATCHES_COMMON_KMERS["$MATCH"]}" -gt "${BEST_KMERS}" ]]; then
                 BEST_MATCH="$MATCH"
