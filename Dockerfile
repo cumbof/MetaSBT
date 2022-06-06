@@ -68,8 +68,8 @@ RUN cd /home && mkdir checkm-data && cd checkm-data && \
 # Set CheckM database folder
 CMD checkm data setRoot /home/checkm-data
 
-# Install ncbitax2lin
-RUN pip install ncbitax2lin
+# Install ncbitax2lin and csvkit
+RUN pip install ncbitax2lin csvkit
 
 # Install ntCard
 RUN mkdir -p /home/git && cd /home/git && \
