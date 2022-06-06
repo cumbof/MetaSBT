@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="Jun 3, 2022"
+DATE="Jun 5, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -169,8 +169,7 @@ for ARG in "$@"; do
             DBDIR="${DBDIR%/}"
             # Check whether the input directory exist
             if [[ ! -d $DBDIR ]]; then
-                println "Input folder does not exist!\n"
-                println "--db-dir=%s\n" "$DBDIR"
+                println "Input folder does not exist: --db-dir=%s\n" "$DBDIR"
                 exit 1
             fi
             ;;
