@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 3, 2022"
+DATE="Jun 5, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -168,15 +168,21 @@ get_last_software_release () {
 # Wrapper for the howdesbt pipeline
 # This is applied on all the taxonomic level except the species
 howdesbt_wrapper () {
-    LEVEL_DIR=$1    # Taxonomic level folder
-    FILTER_SIZE=$2  # Bloom filter size
+    LEVEL_DIR=$(readlink -m $1)     # Taxonomic level folder
+    FILTER_SIZE=$2                  # Bloom filter size
     
+    # Retrieve the name of the current taxonomic level
     LEVEL_NAME=$(basename ${LEVEL_DIR})
-    # Remove old list of bf files
-    if [[ -f ${LEVEL_DIR}/${LEVEL_NAME}.txt ]]; then
-        rm ${LEVEL_DIR}/${LEVEL_NAME}.txt
-    fi
-    
+    # Define index folder path
+    INDEX_DIR=${LEVEL_DIR}/index
+
+    # Remove old list of bloom filter files and
+    # the bloom filter representation of the current level
+    rm -f ${LEVEL_DIR}/${LEVEL_NAME}.txt
+    rm -f ${LEVEL_DIR}/${LEVEL_NAME}.bf
+    # Also remove the old index
+    rm -rf ${INDEX_DIR}
+
     # Define the new list of bloom filters
     for DIRECTORY in ${LEVEL_DIR}/*/; do
         UPPER_LEVEL=$(basename $DIRECTORY)
@@ -184,19 +190,44 @@ howdesbt_wrapper () {
         echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
     done
 
-    mkdir -p ${LEVEL_DIR}/index
+    # Create the index folder
+    mkdir -p ${INDEX_DIR}
+    # Move to the index folder
+    # This will force howdesbt to build the compressed nodes into the index folder
+    cd ${INDEX_DIR}
+    # Count how many elements must be clustered
     HOWMANY=$(wc -l ${LEVEL_DIR}/${LEVEL_NAME}.txt | cut -d" " -f1)
     if [[ "$HOWMANY" -gt "1" ]]; then
         # Create a tree topology file with howdesbt
         howdesbt cluster --list=${LEVEL_DIR}/${LEVEL_NAME}.txt \
                          --bits=${FILTER_SIZE} \
-                         --tree=${LEVEL_DIR}/index/union.sbt \
-                         --nodename=node{number} \
+                         --tree=${INDEX_DIR}/union.sbt \
+                         --nodename=${INDEX_DIR}/node{number} \
                          --keepallnodes
         # Build the bloom filter files for the tree
-        howdesbt build --HowDe \
-                       --tree=${LEVEL_DIR}/index/union.sbt \
-                       --outtree=${LEVEL_DIR}/index/index.detbrief.sbt
+        howdesbt build --howde \
+                       --tree=${INDEX_DIR}/union.sbt \
+                       --outtree=${INDEX_DIR}/index.detbrief.sbt
+        # Remove the union.sbt file
+        rm -f ${INDEX_DIR}/union.sbt
+        
+        # Fix node paths in the final index.detbrief.sbt file
+        while read node; do
+            # The number of stars defines the depth of the current node in the tree
+            # Count how many stars occur before the node name
+            STARS="$(grep -o '\*' <<<"$node" | grep -c .)"
+            # Remove all the start from the current node
+            NODE_NAME="${node:$STARS}"
+            # Add the full path
+            NODE_PATH="${INDEX_DIR}/${NODE_NAME}"
+            # Add the depth again
+            NODE_DEPTH="${node:0:$STARS}${NODE_PATH}"
+            # Define the new index.detbrief.sbt
+            echo "${NODE_DEPTH}" >> ${INDEX_DIR}/index.full.detbrief.sbt
+        done < ${INDEX_DIR}/index.detbrief.sbt
+        # Use the fixed index.detbrief.sbt
+        mv ${INDEX_DIR}/index.full.detbrief.sbt ${INDEX_DIR}/index.detbrief.sbt
+
         # Merge all the leaves together by applying the OR logical operator on the bloom filter files
         # The resulting bloom filter is the representative one, which is the same as the root node of the tree
         while read BFPATH; do
