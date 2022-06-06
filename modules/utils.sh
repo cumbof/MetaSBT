@@ -242,6 +242,14 @@ howdesbt_wrapper () {
         # With only one bloom filter, it does not make sense to build an index with howdesbt
         BFPATH=$(head -n1 "${LEVEL_DIR}/${LEVEL_NAME}.txt")
         cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
+        # Manually define the union.sbt file with the single node
+        echo "$BFPATH" > ${INDEX_DIR}/union.sbt
+        # Build the RRR compressed bloom filter file for the node
+        howdesbt build --howde \
+                       --tree=${INDEX_DIR}/union.sbt \
+                       --outtree=${INDEX_DIR}/index.detbrief.sbt
+        # Remove the union.sbt file
+        rm -f ${INDEX_DIR}/union.sbt
     fi
 }
 # Export howdesbt_wrapper to sub-shells
