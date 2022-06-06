@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="Jun 3, 2022"
+DATE="Jun 5, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -17,7 +17,7 @@ source ${SCRIPT_DIR}/utils.sh
 # If true, keep querying trees at higher taxonomic levels
 EXPAND_QUERY=false
 # Theta threshold
-THRESHOLD=0.7
+THRESHOLD=0.0
 
 # Parse input arguments
 for ARG in "$@"; do
@@ -43,8 +43,7 @@ for ARG in "$@"; do
             fi
             # Check whether the input file exists
             if [[ ! -f $INPUTFILE ]]; then
-                println "Input file does not exist!\n"
-                println "--input-file=%s\n" "$INPUTFILE"
+                println "Input file does not exist: --input-file=%s\n" "$INPUTFILE"
                 exit 1
             fi
             ;;
@@ -121,8 +120,8 @@ for ARG in "$@"; do
             if [[ "$THRESHOLD" =~ "?" ]]; then
                 println "profile helper: --threshold=number\n\n"
                 println "\tFraction of query kmers that must be present in a leaf to be considered a match.\n"
-                println "\tThis must be between 0 and 1.\n"
-                println "\tDefault: 0.7\n\n"
+                println "\tThis must be between 0.0 and 1.0.\n"
+                println "\tDefault: 0.0\n\n"
                 exit 0
             fi
             ;;
@@ -137,8 +136,7 @@ for ARG in "$@"; do
             fi
             # Check whether the input file exists
             if [[ ! -f $TREE ]]; then
-                println "Input file does not exist!\n"
-                println "--tree=%s\n" "$TREE"
+                println "Input file does not exist: --tree=%s\n" "$TREE"
                 exit 1
             fi
             ;;
@@ -180,6 +178,8 @@ fi
 LINEAGE=()
 # Common kmers with the closest taxa
 COMMON_KMERS=()
+# Total kmers in query sequence
+TOTAL_KMERS=()
 # Scores of the closest taxa
 SCORES=()
 
@@ -187,6 +187,8 @@ SCORES=()
 CLOSEST_GENOME=""
 # Common kmers with the closest genome
 CLOSEST_GENOME_COMMON_KMERS=0
+# Total kmers in query sequence
+CLOSEST_GENOME_TOTAL_KMERS=0
 # Score of the closest genome
 CLOSEST_GENOME_SCORE=0
 
@@ -196,40 +198,76 @@ while [[ -f $TREE ]]; do
     IDXDIR="$(dirname $TREE)"
     LEVELDIR="$(dirname $IDXDIR)"
     LEVEL="$(basename $LEVELDIR)"
+    # In case of species level
+    if [[ "$(basename $IDXDIR)" = "howde_index" ]]; then
+        LEVELDIR="$(dirname $LEVELDIR)"
+        LEVEL="$(basename $LEVELDIR)"
+    fi
+
     # Query the sequence bloom tree
     println "\t%s\n" "$TREE"
     howdesbt query --tree=$TREE \
                    --threshold=$THRESHOLD \
-                   --adjust \
+                   --distinctkmers \
                    --sort \
+                   --nodesexamined \
                    $INPUTFILE > $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt
-    # Get best match line
-    BEST=$(grep -E "^[[:alnum:]]" $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt | head -n 1)
-    # Best match ID
-    MATCH=$(echo "$BEST" | cut -d' ' -f1)
-    # Common kmers with the best match
-    KMERS=$(echo "$BEST" | cut -d' ' -f4 | cut -d'/' -f1)
-    # Score
-    SCORE=$(echo "$BEST" | cut -d' ' -f5)
+
+    # Take track of matches in associative array
+    declare -A MATCHES_COMMON_KMERS
+    declare -A MATCHES_TOTAL_KMERS
+    # Take track of the best match and its number of common kmers
+    BEST_MATCH=""
+    BEST_KMERS=0
+    BEST_TOTAL_KMERS=0
+    # Read the output file with matches
+    while read line; do
+        if [[ ! "$line" =~ ^\*.* ]] && [[ ! "$line" =~ ^#.* ]]; then
+            # Get the current match and its number of common kmers
+            MATCH="$(echo $line | cut -d' ' -f1)"
+            MATCH_COMMON_KMERS="$(echo $line | cut -d' ' -f2 | cut -d'/' -f1)"
+            MATCH_TOTAL_KMERS="$(echo $line | cut -d' ' -f2 | cut -d'/' -f2)"
+            # Update the associative array
+            if [[ -z "${MATCHES_COMMON_KMERS["$MATCH"]}" ]]; then
+                MATCHES_COMMON_KMERS["$MATCH"]=${MATCH_COMMON_KMERS}
+                MATCHES_TOTAL_KMERS["$MATCH"]=${MATCH_TOTAL_KMERS}
+            else
+                MATCHES_COMMON_KMERS["$MATCH"]=$((${MATCHES_COMMON_KMERS["$MATCH"]} + ${MATCH_COMMON_KMERS}))
+                MATCHES_TOTAL_KMERS["$MATCH"]=$((${MATCHES_TOTAL_KMERS["$MATCH"]} + ${MATCH_TOTAL_KMERS}))
+            fi
+            # Update the best match
+            if [[ "${MATCHES_COMMON_KMERS["$MATCH"]}" -gt "${BEST_KMERS}" ]]; then
+                BEST_MATCH="$MATCH"
+                BEST_KMERS=${MATCHES_COMMON_KMERS["$MATCH"]}
+                BEST_TOTAL_KMERS=${MATCHES_TOTAL_KMERS["$MATCH"]}
+            fi
+        fi
+    done < $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt
+
+    # Define the best score as the number of common kmers on the total number of kmers in the query for the best match
+    BEST_SCORE="$(bc -l <<< "${BEST_KMERS} / ${BEST_TOTAL_KMERS}")"
+    BEST_SCORE="$(printf "%.2f" "${BEST_SCORE}")"
 
     if [[ "$LEVEL" = s__* ]]; then
         # There is nothing after the species tree
-        CLOSEST_GENOME=$MATCH
-        CLOSEST_GENOME_COMMON_KMERS=$KMERS
-        CLOSEST_GENOME_SCORE=$SCORE
+        CLOSEST_GENOME="${BEST_MATCH}"
+        CLOSEST_GENOME_COMMON_KMERS="${BEST_KMERS}"
+        CLOSEST_GENOME_TOTAL_KMERS="${BEST_TOTAL_KMERS}"
+        CLOSEST_GENOME_SCORE="${BEST_SCORE}"
         break
     else
         # Update the lineage
-        LINEAGE+=("$MATCH")
-        COMMON_KMERS+=("$KMERS")
-        SCORES+=("$SCORE")
+        LINEAGE+=("${BEST_MATCH}")
+        COMMON_KMERS+=("${BEST_KMERS}")
+        TOTAL_KMERS+=("${BEST_TOTAL_KMERS}")
+        SCORES+=("${BEST_SCORE}")
 
         # Keep querying if --expand
-        TREE=$LEVELDIR/$MATCH/index/index.detbrief.sbt
-        if [[ "$MATCH" = s__* ]]; then
-            TREE=$LEVELDIR/$MATCH/index/howde_index/index.detbrief.sbt
+        TREE=$LEVELDIR/${BEST_MATCH}/index/index.detbrief.sbt
+        if [[ "${BEST_MATCH}" = s__* ]]; then
+            TREE=$LEVELDIR/${BEST_MATCH}/index/howde_index/index.detbrief.sbt
         fi
-
+    
         # Stop querying trees
         if ! ${EXPAND_QUERY}; then
             # In case --expand is not set
@@ -274,12 +312,12 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
             *) LEVELNAME="NA" ;;
         esac
         # Report characterisation to the output file
-        println "%s\t%s\t%s\t%s\n" "$INPUTID" \
-                                   "$LEVELNAME" \
-                                   "${LINEAGE[i]}" \
-                                   "${COMMON_KMERS[i]}" \
-                                   "${SCORES[i]}" \
-                                   >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+        println "%s\t%s\t%s\t%s\t%s\n" "$INPUTID" \
+                                       "$LEVELNAME" \
+                                       "${LINEAGE[i]}" \
+                                       "${COMMON_KMERS[i]}/${TOTAL_KMERS[i]}" \
+                                       "${SCORES[i]}" \
+                                       >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
     done
 fi
 
@@ -289,12 +327,12 @@ if [ ! -z "${CLOSEST_GENOME}" ]; then
     println "\nClosest genome:\n"
     println "\t%s\t%s\n" "${CLOSEST_GENOME}" "${CLOSEST_GENOME_SCORE}"
     # Report the closest genome to the output file
-    println "%s\t%s\t%s\t%s\n" "$INPUTID" \
-                               "genome" \
-                               "${CLOSEST_GENOME}" \
-                               "${CLOSEST_GENOME_COMMON_KMERS}" \
-                               "${CLOSEST_GENOME_SCORE}" \
-                               >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+    println "%s\t%s\t%s\t%s\t%s\n" "$INPUTID" \
+                                   "genome" \
+                                   "${CLOSEST_GENOME}" \
+                                   "${CLOSEST_GENOME_COMMON_KMERS}/${CLOSEST_GENOME_TOTAL_KMERS}" \
+                                   "${CLOSEST_GENOME_SCORE}" \
+                                   >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 PIPELINE_END_TIME="$(date +%s.%3N)"
