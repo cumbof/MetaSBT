@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 6, 2022"
+DATE="Jun 7, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -235,8 +235,10 @@ howdesbt_wrapper () {
     # Define the new list of bloom filters
     for DIRECTORY in ${LEVEL_DIR}/*/; do
         UPPER_LEVEL=$(basename $DIRECTORY)
-        # Each file is the result of the OR operator on all representative bloom filters in the upper taxonomic level
-        echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
+        if [[ -f ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf ]]; then
+            # Each file is the result of the OR operator on all representative bloom filters in the upper taxonomic level
+            echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
+        fi
     done
 
     # Create the index folder
@@ -244,6 +246,7 @@ howdesbt_wrapper () {
     # Move to the index folder
     # This will force howdesbt to build the compressed nodes into the index folder
     cd ${INDEX_DIR}
+    
     # Count how many elements must be clustered
     HOWMANY=$(wc -l ${LEVEL_DIR}/${LEVEL_NAME}.txt | cut -d" " -f1)
     if [[ "$HOWMANY" -gt "1" ]]; then
@@ -318,6 +321,7 @@ kmtricks_index_wrapper () {
     KMER_LEN=$3     # Length of the kmers
     FILTER_SIZE=$4  # Bloom filter size
     NPROC=$5        # Max nproc for multiprocessing
+
     FOLDERPATH=$(dirname "$INPUT")
     if [[ ! -f "$FOLDERPATH/index/kmtricks.fof" ]]; then
         # Run the kmtricks pipeline
@@ -366,23 +370,24 @@ kmtricks_index_wrapper () {
 # Export kmtricks_index_wrapper to sub-shells
 export -f kmtricks_index_wrapper
 
-# Build a kmers matrix with kmtricks
+# Build a kmers presence/absence matrix with kmtricks
 kmtricks_matrix_wrapper () {
-    GENOMES_FOF=$1
-    RUN_DIR=$2
-    NPROC=$3
-    OUT_TABLE=$4
-    WORKDIR=$5
+    GENOMES_FOF=$1  # Path to the input fof file
+    RUN_DIR=$2      # Path to the kmtricks working directory
+    NPROC=$3        # Number of parallel processes
+    OUT_TABLE=$4    # Path to the output kmers table
+    WORKDIR=$5      # Path to the working directory
 
-    # Build matrix
+    # Build kmers presence/absence matrix
     kmtricks pipeline --file ${GENOMES_FOF} \
                       --run-dir ${RUN_DIR} \
-                      --mode kmer:count:bin \
+                      --mode kmer:pa:bin \
                       --hard-min 1 \
                       --cpr \
                       --threads $NPROC \
                       >> $WORKDIR/kmtricks.log 2>&1
-    # Aggregate
+    
+    # Aggregate sub-matrices
     kmtricks aggregate --run-dir ${RUN_DIR} \
                        --matrix kmer \
                        --format text \
