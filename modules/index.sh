@@ -475,7 +475,7 @@ while read tax_id, taxonomy; do
                         mv $TAXDIR/kmers_matrix_wh.txt $TAXDIR/kmers_matrix.txt
 
                         # Dereplicate genomes
-                        python3 ${SCRIPT_DIR}/utils.py dereplicate $TAXDIR/kmers_matrix.txt $TAXDIR/filtered.txt > /dev/null
+                        python3 ${SCRIPT_DIR}/utils.py filter_genomes $TAXDIR/kmers_matrix.txt $TAXDIR/filtered.txt > /dev/null
 
                         if [[ -f $TAXDIR/filtered.txt ]]; then
                             # Dereplicate genomes

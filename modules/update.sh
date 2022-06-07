@@ -490,7 +490,7 @@ if $DEREPLICATE; then
             mv $TMPDIR/kmers_matrix_wh.txt $TMPDIR/kmers_matrix.txt
 
             # Dereplicate genomes
-            python3 ${SCRIPT_DIR}/utils.py dereplicate $TMPDIR/kmers_matrix.txt $TMPDIR/filtered.txt > /dev/null
+            python3 ${SCRIPT_DIR}/utils.py filter_genomes $TMPDIR/kmers_matrix.txt $TMPDIR/filtered.txt > /dev/null
 
             if [[ -f $TMPDIR/filtered.txt ]]; then
                 # Dereplicate genomes
