@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=============================================================================================================================================
 
-DATE="Jun 5, 2022"
+DATE="Jun 7, 2022"
 VERSION="0.1.0"
 
 # Take track of the directory from which this module is launched
@@ -545,6 +545,12 @@ if ${ESTIMATE_FILTER_SIZE}; then
         exit 1
     fi
 fi
+
+# Take track of the kmer length and bloom filter size in the manifest
+printf "%s\n" "--filter-size=${FILTER_SIZE}" \
+              "--kingdom=$KINGDOM" \
+              "--kmer-len=${KMER_LEN}" \
+              > $DBDIR/k__$KINGDOM/manifest.txt
 
 # Run kmtricks and build a sequence bloom tree for each species
 println "\nRunning kmtricks at the species level\n"
