@@ -1,7 +1,7 @@
 if [ ! -z ${MAIN_HELP} ] && ${MAIN_HELP}; then
     echo "
 NAME
-    meta-index -- A pipeline for automatically indexing microbial isolate genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
+    meta-index -- A pipeline for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
 
 VERSION
     "$VERSION" ("$DATE")
