@@ -181,8 +181,6 @@ meta-index update --input-list=~/mygenomes.txt \
                   --db-dir=~/myindex \
                   --kingdom=Bacteria \
                   --tmp-dir=~/tmp \
-                  --kmer-len=31 \
-                  --filter-size=10000 \
                   --dereplicate \
                   --checkm-completeness=50.0 \
                   --checkm-contamination=5.0 \
