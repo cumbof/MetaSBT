@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #=====================================================================================================
 
-DATE="Jun 6, 2022"
+DATE="Jun 7, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -279,26 +279,28 @@ fi
 # Create temporary folder
 mkdir -p $TMPDIR
 
-# Print inputs
-println "Defining boundaries:\n"
-println "\t--db-dir=%s\n" "$DBDIR"
-println "\t--kingdom=%s\n" "$KINGDOM"
-println "\t--min-genomes=%s\n\n" "${MIN_GENOMES}"
-
 # Check whether the output file already exists
 if [[ ! -f $OUTPUT ]]; then
-    # Init output table
-    println "# boundaries version %s (%s)\n" "$VERSION" "$DATE" > $OUTPUT
-    println "# --db-dir=%s\n" "$DBDIR" >> $OUTPUT
-    println "# --kingdom=%s\n" "$KINGDOM" >> $OUTPUT
-    println "# --min-genomes=%s\n" "${MIN_GENOMES}" >> $OUTPUT
+    # Initialise output table
+    println "%s\n" "# boundaries version $VERSION ($DATE)" \
+                   "# --db-dir=$DBDIR" \
+                   "# --kingdom=$KINGDOM" \
+                   "# --min-genomes=${MIN_GENOMES}" \
+                   > $OUTPUT
+    # Add header line
     println "# Lineage\tMin kmers\tMax kmers\n" >> $OUTPUT
+
     # Process all taxonomic levels
     DEPTH=6
-    for LEVEL in "s__" "g__" "f__" "o__" "c__" "p__" "k__"; do
+    for LEVELNAME in "species" "genus" "family" "order" "class" "phylum" "kingdom"; do
+        printf "\nDefining %s boundaries\n" "$LEVELNAME"
+        # Retrieve the level ID from the level name
+        LEVEL="${LEVELNAME:0:1}__"
+        # Define boundaries
         find $DBDIR/k__$KINGDOM -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -I {} bash -c \
             'LEVELDIR={}
              define_boundaries $LEVELDIR '"${MIN_GENOMES}"' '"$TMPDIR"' '"$OUTPUT"' '"$NPROC"' '"$CLEANUP"';'
+        # Move to the next higher taxonomic level
         DEPTH=$(expr $DEPTH - 1)
     done
 
