@@ -190,9 +190,7 @@ meta-index update --input-list=~/mygenomes.txt \
                   --cleanup
 ```
 
-Please note that the `--filter-size` value must be the same used while running the `index` module.
-
-Remember also that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following command in your terminal:
+Please note that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following commands in your terminal:
 ```bash
 INPUTS_DIR=~/mygenomes
 CURRENT_EXTENSION="fa"
