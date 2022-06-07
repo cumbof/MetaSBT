@@ -41,7 +41,6 @@
                help="Selelcting a specific kingdom will result in querying different branches of the database">
             <option value="Bacteria">Bacteria</option>
             <option value="Archaea">Archaea</option>
-            <option value="Fungi">Fungi</option>
             <option value="Viruses">Viruses</option>
         </param>
 
