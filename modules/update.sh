@@ -949,6 +949,11 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
             for MAGPATH in ${UNASSIGNED[@]}; do
                 # Define a genomes.fof file with the unassigned genomes
                 GENOME_NAME="$(basename $MAGPATH)"
+                GENOME_NAME="${GENOME_NAME%.*}"
+                if [[ "$MAGPATH" = *.gz ]]; then
+                    # Remove the extension egain in case of gzip compressed genomes
+                    GENOME_NAME="${GENOME_NAME%.*}"
+                fi
                 echo "${GENOME_NAME} : $MAGPATH" >> ${GENOMES_FOF}
             done
 
