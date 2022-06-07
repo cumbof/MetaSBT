@@ -120,7 +120,7 @@ DESCRIPTION
         Print the module version
 
     --xargs-nproc=num
-        This refers to the number of xargs processes used for launching independent runs of kmtricks
+        This refers to the number of xargs processes used for launching independent runs of kmtricks and howdesbt
         Default: --xargs-nproc=1
 
 EXIT STATUS
