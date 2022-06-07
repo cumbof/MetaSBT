@@ -9,7 +9,8 @@ VERSION="0.1.0"
 
 # Define script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
+# Requirements base path
+REQUIREMENTS_DIR="$(dirname "${SCRIPT_DIR}")/requirements"
 # Import utility functions
 source ${SCRIPT_DIR}/utils.sh
 
@@ -234,7 +235,7 @@ for ARG in "$@"; do
             ;;
         --resolve-dependencies)
             # Check for external software dependencies and python modules
-            check_dependencies true "${SCRIPT_DIR}/boundaries.txt"
+            check_dependencies true "${REQUIREMENTS_DIR}/boundaries.txt"
             exit $?
             ;;
         --tmp-dir=*)
@@ -266,7 +267,7 @@ done
 println "boundaries version %s (%s)\n\n" "$VERSION" "$DATE"
 PIPELINE_START_TIME="$(date +%s.%3N)"
 
-check_dependencies false "${SCRIPT_DIR}/boundaries.txt"
+check_dependencies false "${REQUIREMENTS_DIR}/boundaries.txt"
 if [[ "$?" -gt "0" ]]; then
     println "Unsatisfied software dependencies!\n\n"
     println "Please run the following command for a list of required external software dependencies:\n\n"

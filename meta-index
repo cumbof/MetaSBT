@@ -11,6 +11,8 @@ VERSION="0.1.0"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # Modules base path
 MODULES_DIR=${SCRIPT_DIR}/modules
+# Requirements base path
+REQUIREMENTS_DIR=${SCRIPT_DIR}/requirements
 # Import utility functions
 source ${MODULES_DIR}/utils.sh
 
@@ -87,7 +89,7 @@ else
                     # Remove utils from the list of modules
                     for i in "${!MODULES[@]}"; do
                         if [[ "$(basename ${MODULES[i]})" != "utils.sh" ]]; then
-                            MODULES_DEPENDENCIES+=("${MODULES_DIR}/$(basename ${MODULES[i]%.*}).txt")
+                            MODULES_DEPENDENCIES+=("${REQUIREMENTS_DIR}/$(basename ${MODULES[i]%.*}).txt")
                         fi
                     done
                     # Check for external software dependencies and python modules
