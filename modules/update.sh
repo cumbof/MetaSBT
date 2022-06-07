@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 6, 2022"
+DATE="Jun 7, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -94,6 +94,12 @@ EXTENSION="fna.gz"
 DEREPLICATE=false
 # Remove temporary data at the end of the pipeline
 CLEANUP=false
+
+# Initially set the bloom filter size and the kmer length to 0
+# In case --filter-size and --kmer-len are not specified, try to load these values from the database manifest file
+# The manifest file is stored under the kingdom level directory and it is created by the index module
+FILTER_SIZE=0
+KMER_LEN=0
 
 # Parse input arguments
 for ARG in "$@"; do
@@ -389,6 +395,68 @@ if [[ "$?" -gt "0" ]]; then
     println "\t$ meta-index --resolve-dependencies\n\n"
     
     exit 1
+fi
+
+# Retrieve the bloom filter size and the kmer length used for building the database from the manifest file
+if [[ -f $DBDIR/k__$KINGDOM/menifest.txt ]]; then
+    # Take track of the --filter-size and --kmer-len
+    DB_FILTER_SIZE=0
+    DB_KMER_LEN=0
+    # Load data from the manifest file
+    while read line; do
+        case "$line" in
+            --filter-size=*)
+                # Retrieve the bloom filter size
+                DB_FILTER_SIZE="${line#*=}"
+                ;;
+            --kmer-len=*)
+                # Retrieve the kmer length
+                DB_KMER_LEN="${line#*=}"
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    done < $DBDIR/k__$KINGDOM/menifest.txt
+
+    # Check whether --filter-size and --kmer-len were correctly retrieved from the manifest
+    if [[ "${DB_FILTER_SIZE}" -eq "0" ]] || [[ "${DB_KMER_LEN}" -eq "0" ]]; then
+        println "[ERROR] Data not found!\n"
+        println "%s\n\n" "$DBDIR/k__$KINGDOM/menifest.txt"
+        println "Unable to retrieve the bloom filter size and the kmer length used for building the database\n"
+        exit 1
+    fi
+else
+    println "[ERROR] File not found!\n"
+    println "%s\n\n" "$DBDIR/k__$KINGDOM/menifest.txt"
+    println "Unable to retrieve the bloom filter size and the kmer length used for building the database\n"
+    exit 1
+fi
+
+# Check whether the specified --filter-size matches the one reported in the manifest file
+if [[ ! "${FILTER_SIZE}" -eq "${DB_FILTER_SIZE}" ]]; then
+    if [[ "${FILTER_SIZE}" -eq "0" ]]; then
+        # In case the --filter-size argument is not specified
+        # Use the bloom filter size reported in the manifest file of the database
+        FILTER_SIZE=${DB_FILTER_SIZE}
+    else
+        # Otherwise, raise an error message and exit
+        println "[ERROR] The specified --filter-size does not match with the size of the bloom filters in the database!\n"
+        exit 1
+    fi
+fi
+
+# Also check whether the specified --kmer-len matches the one reported in the manifest file
+if [[ ! "${KMER_LEN}" -eq "${DB_KMER_LEN}" ]]; then
+    if [[ "${KMER_LEN}" -eq "0" ]]; then
+        # In case the --kmer-len argument is not specified
+        # Use the kmer length reported in the manifest file of the database
+        KMER_LEN=${DB_KMER_LEN}
+    else
+        # Otherwise, raise an error message and exit
+        println "[ERROR] The specified --kmer-len does not match with the kmer length used for building the database!\n"
+        exit 1
+    fi
 fi
 
 # Create temporary folder
