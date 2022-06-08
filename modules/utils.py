@@ -207,7 +207,8 @@ def cluster(filepath: str, boundaries_filepath: str, manifest_filepath: str, pro
     if unknown_counter > unknown_counter_manifest:
         if not unknown_counter_found:
             # Append the --unknown-counter info to the manifest file
-
+            with open(manifest_filepath, "a+") as file:
+                file.write("--unknown-counter={}\n".format(unknown_counter))
         else:
             # Update the --unknown-counter info
             updated_manifest_filepath = os.path.join(os.path.dirname(manifest_filepath), "manifest2.txt")
