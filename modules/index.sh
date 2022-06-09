@@ -372,7 +372,7 @@ if [[ "${CHECKM_COMPLETENESS}" -gt "0" ]] && [[ "${CHECKM_CONTAMINATION}" -lt "1
     println "\tDereplicating input genomes\n\n"
 fi
 
-while read tax_id, taxonomy; do
+while read tax_id taxonomy; do
     # Do not consider "unclassified" genomes since two genomes under 
     # the same "unclassified" taxonomic label could potentially be completely different
     # Unclassified genomes can be used with the "update" module with "--type=MAGs"
@@ -550,7 +550,7 @@ fi
 printf "%s\n" "--filter-size=${FILTER_SIZE}" \
               "--kingdom=$KINGDOM" \
               "--kmer-len=${KMER_LEN}" \
-              > $DBDIR/k__$KINGDOM/manifest.txt
+              > $DBDIR/manifest.txt
 
 # Start with species at depth 7 up to the kingdom level
 DEPTH=7
@@ -558,25 +558,17 @@ for LEVELNAME in "species" "genus" "family" "order" "class" "phylum" "kingdom"; 
     # Retrieve the level ID from the level name
     LEVEL="${LEVELNAME:0:1}__"
 
-    # Iterate over the 7 taxonomic levels
-    if [[ "$LEVELNAME" = "species" ]]; then
-        # Process species with kmtricks
-        println "\nRunning kmtricks at the species level\n"
-        find $DBDIR -type f -iname "genomes.fof" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
-            'INPUT={};
-             if [[ ! -f "$(dirname $INPUT)/index/kmtricks.fof" ]]; then
-                kmtricks_index_wrapper "$INPUT" '"$DBDIR"' '"${KMER_LEN}"' '"${FILTER_SIZE}"' '"$NPROC"';
-             fi'
-    else
-        # Process all the other taxonomic levels with howdesbt
-        println "Running howdesbt at the %s level\n" "$LEVELNAME"
-        find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
-            'LEVELDIR={};
-             howdesbt_wrapper $LEVELDIR '"${FILTER_SIZE}"';'
-    fi
+    # Process all the other taxonomic levels with howdesbt
+    println "Running howdesbt at the %s level\n" "$LEVELNAME"
+    find $DBDIR -maxdepth $DEPTH -type d -iname "${LEVEL}*" -follow | xargs -n 1 -P ${XARGS_NPROC} -I {} bash -c \
+        'LEVELDIR={};
+         howdesbt_wrapper $LEVELDIR '"${FILTER_SIZE}"' '"${KMER_LEN}"' '"$NPROC"';'
     # Decrease the depth while moving to a higher taxonomic level
     DEPTH=$(expr $DEPTH - 1)
 done
+
+# Also build the index for the kingdom
+howdesbt_wrapper $DBDIR ${FILTER_SIZE} ${KMER_LEN} $NPROC
 
 # HowDeSBT calls automatically change the current folder to the taxonomy directory
 # Come back to the folder from which this module has been launched

@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 7, 2022"
+DATE="Jun 8, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -97,7 +97,7 @@ CLEANUP=false
 
 # Initially set the bloom filter size and the kmer length to 0
 # In case --filter-size and --kmer-len are not specified, try to load these values from the database manifest file
-# The manifest file is stored under the kingdom level directory and it is created by the index module
+# The manifest file is stored under the database directory and it is created by the index module
 FILTER_SIZE=0
 KMER_LEN=0
 
@@ -256,16 +256,6 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
-        --kingdom=*)
-            # Consider genomes whose lineage belong to a specific kingdom only
-            KINGDOM="${ARG#*=}"
-            # Define helper
-            if [[ "$KINGDOM" =~ "?" ]]; then
-                println "update helper: --kingdom=value\n\n"
-                println "\tSelect the kingdom that will be updated.\n\n"
-                exit 0
-            fi
-            ;;
         --kmer-len=*)
             # Length of the kmers
             KMER_LEN="${ARG#*=}"
@@ -398,7 +388,7 @@ if [[ "$?" -gt "0" ]]; then
 fi
 
 # Retrieve the bloom filter size and the kmer length used for building the database from the manifest file
-if [[ -f $DBDIR/k__$KINGDOM/menifest.txt ]]; then
+if [[ -f $DBDIR/menifest.txt ]]; then
     # Take track of the --filter-size and --kmer-len
     DB_FILTER_SIZE=0
     DB_KMER_LEN=0
@@ -417,18 +407,18 @@ if [[ -f $DBDIR/k__$KINGDOM/menifest.txt ]]; then
                 continue
                 ;;
         esac
-    done < $DBDIR/k__$KINGDOM/menifest.txt
+    done < $DBDIR/menifest.txt
 
     # Check whether --filter-size and --kmer-len were correctly retrieved from the manifest
     if [[ "${DB_FILTER_SIZE}" -eq "0" ]] || [[ "${DB_KMER_LEN}" -eq "0" ]]; then
         println "[ERROR] Data not found!\n"
-        println "%s\n\n" "$DBDIR/k__$KINGDOM/menifest.txt"
+        println "%s\n\n" "$DBDIR/menifest.txt"
         println "Unable to retrieve the bloom filter size and the kmer length used for building the database\n"
         exit 1
     fi
 else
     println "[ERROR] File not found!\n"
-    println "%s\n\n" "$DBDIR/k__$KINGDOM/menifest.txt"
+    println "%s\n\n" "$DBDIR/menifest.txt"
     println "Unable to retrieve the bloom filter size and the kmer length used for building the database\n"
     exit 1
 fi
@@ -630,7 +620,7 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
         # Run the profiler to establish the closest genome and the closest group for each taxonomic level in the tree
         . ${SCRIPT_DIR}/profile.sh --input-file=$FILEPATH \
                                    --input-id=$FILEPATH \
-                                   --tree=$DBDIR/k__$KINGDOM/index/index.detbrief.sbt
+                                   --tree=$DBDIR/index/index.detbrief.sbt
                                    --expand \
                                    --output-dir=$TMPDIR/profiling/ \
                                    --output-prefix=$GENOMENAME \
@@ -1017,20 +1007,8 @@ if [[ "${HOW_MANY}" -gt "1" ]]; then
                 if [[ -f $TAXONOMY/${LEVELNAME}.bf ]]; then 
                     rm -f $TAXONOMY/${LEVELNAME}.bf
                 fi
-                # Rebuild the index
-                if [[ "$POS" -eq "7" ]]; then
-                    # In case of species
-                    # Rebuild the index with kmtricks
-                    kmtricks_index_wrapper $TAXONOMY/genomes.fof \
-                                           $DBDIR \
-                                           ${KMER_LEN} \
-                                           ${FILTER_SIZE} \
-                                           $NPROC
-                else
-                    # In case of all the other taxonomic levels
-                    # Rebuild the index with howdesbt
-                    howdesbt_wrapper $TAXONOMY ${FILTER_SIZE}
-                fi
+                # Rebuild the index with howdesbt
+                howdesbt_wrapper $TAXONOMY ${FILTER_SIZE} ${KMER_LEN} $NPROC
             done
         done
     else

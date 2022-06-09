@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #============================================================================
 
-DATE="Jun 6, 2022"
+DATE="Jun 8, 2022"
 VERSION="0.1.0"
 
 # Define script directory
@@ -146,6 +146,9 @@ for ARG in "$@"; do
                 exit 1
             fi
             ;;
+        --verbose)
+            # Print messages
+            VERBOSE=true
         -v|--version)
             # Print pipeline version
             println "profile version %s (%s)\n" "$VERSION" "$DATE"
@@ -214,9 +217,7 @@ while [[ -f $TREE ]]; do
     println "\t%s\n" "$TREE"
     howdesbt query --tree=$TREE \
                    --threshold=$THRESHOLD \
-                   --distinctkmers \
                    --sort \
-                   --nodesexamined \
                    $INPUTFILE > $OUTPUTDIR/${OUTPUTPREFIX}__${LEVEL}__matches.txt
 
     # Take track of matches in associative array
@@ -284,7 +285,9 @@ done
 
 # Define the output file with a mapping between the input genome name and the taxonomic characterisation
 if [[ ! -f $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv ]]; then
-    println "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" > $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+    # Print header lines
+    println "# Tree: %s" "$TREE" > $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
+    println "# Input ID\tLevel\tTaxonomy\tCommon kmers\tScore\n" >> $OUTPUTDIR/${OUTPUTPREFIX}__profiles.tsv
 fi
 
 # Reconstruct the lineage
@@ -294,11 +297,19 @@ if [ ${#LINEAGE[@]} -gt 0 ]; then
     CLOSEST_LINEAGE=$(printf "|%s" "${LINEAGE[@]}")
     CLOSEST_LINEAGE=${CLOSEST_LINEAGE:1}
     println "\t%s\n\n" "${CLOSEST_LINEAGE}"
+    
+    # Retrieve the maximum length of the level strings
+    MAX_LEN=0
+    for lineage in "${LINEAGE[@]}"; do
+        if [[ "${MAX_LEN}" < "${#lineage}" ]]; then
+            MAX_LEN=${#lineage}
+        fi
+    done
 
     # Print scores
     println "Score:\n"
     for i in "${!LINEAGE[@]}"; do
-        println "\t%s\t%s\n" "${LINEAGE[i]}" "${SCORES[i]}"
+        println "\t%-${MAX_LEN}s\t%s\n" "${LINEAGE[i]}" "${SCORES[i]}"
         # Retrieve taxonomic level
         LEVELID=${LINEAGE[i]:0:1}
         # Expand the level ID to the full level name
