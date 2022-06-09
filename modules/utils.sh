@@ -4,7 +4,7 @@
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================
 
-DATE="Jun 7, 2022"
+DATE="Jun 8, 2022"
 VERSION="0.1.0"
 
 # Check for external software dependencies
@@ -215,10 +215,12 @@ get_last_software_release () {
 }
 
 # Wrapper for the howdesbt pipeline
-# This is applied on all the taxonomic level except the species
+# This is applied on all the taxonomic levels
 howdesbt_wrapper () {
     LEVEL_DIR=$(readlink -m $1)     # Taxonomic level folder
     FILTER_SIZE=$2                  # Bloom filter size
+    KMER_LEN=$3                     # Kmer length
+    NPROC=$4                        # Max nproc for multiprocessing
     
     # Retrieve the name of the current taxonomic level
     LEVEL_NAME=$(basename ${LEVEL_DIR})
@@ -229,17 +231,48 @@ howdesbt_wrapper () {
     # the bloom filter representation of the current level
     rm -f ${LEVEL_DIR}/${LEVEL_NAME}.txt
     rm -f ${LEVEL_DIR}/${LEVEL_NAME}.bf
+    # Remove the old log file
+    rm -f ${LEVEL_DIR}/howdesbt.log
     # Also remove the old index
     rm -rf ${INDEX_DIR}
 
-    # Define the new list of bloom filters
-    for DIRECTORY in ${LEVEL_DIR}/*/; do
-        UPPER_LEVEL=$(basename $DIRECTORY)
-        if [[ -f ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf ]]; then
-            # Each file is the result of the OR operator on all representative bloom filters in the upper taxonomic level
-            echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
-        fi
-    done
+    if [[ "${LEVEL_NAME:0:1}" = "s" ]]; then
+        # In case of species levels
+        # Create the filters folders for taking track of the bloom filter files
+        mkdir -p ${LEVEL_DIR}/filters
+        # Build the bloom filter files
+        find ${LEVEL_DIR}/genomes -type f -iname "*.gz" -follow | xargs -n 1 -I {} bash -c \
+            'GENOME_FILEPATH={};
+             GENOME_NAME=$(basename ${GENOME_FILEPATH});
+             GENOME_FORMAT="${GENOME_NAME##*.}";
+             GENOME_NAME="${GENOME_NAME%.*}";
+             if [[ "${GENOME_FILEPATH}" = *.gz ]]; then
+                GENOME_FORMAT="${GENOME_NAME##*.}";
+                GENOME_NAME="${GENOME_NAME%.*}";
+             fi
+
+             if [[ ! -f '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf ]]; then
+                gzip -dc ${GENOME_FILEPATH} > '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
+                howdesbt makebf --k='"${KMER_LEN}"' --min=2 --bits='"${FILTER_SIZE}"' --hashes=1 --seed=0,0 \
+                                '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT} \
+                                --out='"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf \
+                                --threads='"$NPROC"' \
+                                >> '"${LEVEL_DIR}"'/howdesbt.log 2>&1;
+                rm '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
+             fi
+
+             readlink -m '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf >> '"${LEVEL_DIR}"'/'"${LEVEL_NAME}"'.txt'
+    else
+        # For all the other taxonomic levels
+        # Define the new list of bloom filters
+        for DIRECTORY in ${LEVEL_DIR}/*/; do
+            UPPER_LEVEL=$(basename $DIRECTORY)
+            if [[ -f ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf ]]; then
+                # Each file is the result of the OR operator on all representative bloom filters in the upper taxonomic level
+                echo "$(readlink -m ${LEVEL_DIR}/${UPPER_LEVEL}/${UPPER_LEVEL}.bf)" >> ${LEVEL_DIR}/${LEVEL_NAME}.txt
+            fi
+        done
+    fi
 
     # Create the index folder
     mkdir -p ${INDEX_DIR}
@@ -256,7 +289,7 @@ howdesbt_wrapper () {
                          --tree=${INDEX_DIR}/union.sbt \
                          --nodename=${INDEX_DIR}/node{number} \
                          --keepallnodes \
-                         > ${LEVEL_DIR}/howdesbt.log 2>&1
+                         >> ${LEVEL_DIR}/howdesbt.log 2>&1
         # Build the bloom filter files for the tree
         howdesbt build --howde \
                        --tree=${INDEX_DIR}/union.sbt \
@@ -312,63 +345,6 @@ howdesbt_wrapper () {
 }
 # Export howdesbt_wrapper to sub-shells
 export -f howdesbt_wrapper
-
-# Wrapper for the kmtricks pipeline
-# This is applied at the species level only
-kmtricks_index_wrapper () {
-    INPUT=$1        # Path to the genomes.fof file for a specific species
-    DBDIR=$2        # Database root directory path
-    KMER_LEN=$3     # Length of the kmers
-    FILTER_SIZE=$4  # Bloom filter size
-    NPROC=$5        # Max nproc for multiprocessing
-
-    FOLDERPATH=$(dirname "$INPUT")
-    if [[ ! -f "$FOLDERPATH/index/kmtricks.fof" ]]; then
-        # Run the kmtricks pipeline
-        kmtricks pipeline --file $INPUT \
-                          --run-dir $FOLDERPATH/index \
-                          --kmer-size ${KMER_LEN} \
-                          --mode hash:bft:bin \
-                          --hard-min 1 \
-                          --bloom-size ${FILTER_SIZE} \
-                          --bf-format howdesbt \
-                          --cpr \
-                          --skip-merge \
-                          --threads $NPROC \
-                          > $FOLDERPATH/index/kmtricks.log 2>&1
-        
-        FOLDERNAME="${FOLDERPATH##*/}"
-        HOWMANY=$(wc -l $INPUT | cut -d" " -f1)
-        if [[ "$HOWMANY" -gt "1" ]]; then
-            # Index genomes by building a sequence bloom tree with howdesbt
-            kmtricks index --run-dir $FOLDERPATH/index \
-                           --howde \
-                           --threads $NPROC
-            # Merge all the leaves together by applying the OR logical operator on the bloom filter files
-            # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-            while read line; do
-                GENOME=$(echo "$line" | cut -d" " -f1)
-                if [[ ! -f $FOLDERPATH/${FOLDERNAME}.bf ]]; then
-                    cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
-                else
-                    # Merge bloom filter files applying the OR logical operator
-                    howdesbt bfoperate $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf --or --out=$FOLDERPATH/merged.bf \
-                        >> $FOLDERPATH/index/kmtricks.log 2>&1
-                    # Rename the resulting file
-                    mv $FOLDERPATH/merged.bf $FOLDERPATH/${FOLDERNAME}.bf
-                fi
-            done < $INPUT
-        else
-            # With only one genome, it does not make sense to build an index with howdesbt
-            mkdir -p $FOLDERPATH/index/howde_index
-            cp $INPUT $FOLDERPATH/index/kmtricks.fof
-            GENOME=$(head -n1 "$INPUT" | cut -d" " -f1)
-            cp $FOLDERPATH/index/filters/${GENOME}.bf $FOLDERPATH/${FOLDERNAME}.bf
-        fi
-    fi
-}
-# Export kmtricks_index_wrapper to sub-shells
-export -f kmtricks_index_wrapper
 
 # Build a kmers presence/absence matrix with kmtricks
 kmtricks_matrix_wrapper () {
