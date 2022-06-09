@@ -179,7 +179,6 @@ The `update` module can be launched with the following command:
 meta-index update --input-list=~/mygenomes.txt \
                   --taxa=~/taxonomies.tsv \
                   --db-dir=~/myindex \
-                  --kingdom=Bacteria \
                   --tmp-dir=~/tmp \
                   --dereplicate \
                   --checkm-completeness=50.0 \
