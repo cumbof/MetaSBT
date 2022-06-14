@@ -11,16 +11,26 @@ source:
 
 build:
   number: 0
-  skip: True  # [py<37 or not linux]
+  skip: True  # [py<38 or not linux]
+  entry_points:
+    - meta-index=meta-index.main
+  script: {{ PYTHON }} -m pip install . -vv
 
 requirements:
-  run:
-    - bc >=1.07.1
+  host:
+    - pip
     - python
-    - ncbitax2lin >=2.0.2
-    - wget >=1.20.1
+    - setuptools
+  run:
+    - checkm-genome >=1.2.0
+    - entrez-direct >=11.0
     - howdesbt >=2.00.02
     - kmtricks >=1.2.1
+    - ncbitax2lin >=2.0.2
+    - ntcard >=1.2.2
+    - numpy >=1.16.3
+    - python
+    - wget >=1.20.1
 
 test:
   commands:
@@ -33,8 +43,8 @@ about:
   license_file: LICENSE
   summary: meta-index pipeline
   description: |
-    A pipeline for automatically indexing genomes and accurately 
-    characterizing metagenome-assembled genomes with sequence bloom trees.
+   A pipeline for automatically indexing microbial genomes and accurately 
+   characterizing metagenome-assembled genomes with sequence bloom trees
 
 extra:
   recipe-maintainers:
