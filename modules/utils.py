@@ -1,19 +1,87 @@
 #!/usr/bin/env python
 
-__author__ = ('Fabio Cumbo (fabio.cumbo@gmail.com)')
-__version__ = '0.1.0'
-__date__ = 'Jun 7, 2022'
+__author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
+__version__ = "0.1.0"
+__date__ = "Jun 9, 2022"
 
-import sys, os, errno, math
+import sys, os, errno, logging, math, subprocess
 import numpy as np
-from inspect import getmembers, isfunction, signature
-from typing import Tuple
+from pathlib import Path
+from logging.config import dictConfig
 
-def cluster(filepath: str, boundaries_filepath: str, manifest_filepath: str, profiles_dir: str, outpath: str) -> str:
+def checkm(genomes_paths, tmp_dir, file_extension="fna.gz", nproc=1, pplacer_threads=1):
+    """
+    Run CheckM on a set of genomes
+    Organise genomes in chunks with 1000 genomes at most
+
+    :param genomes_paths:       List of paths to the input genomes
+    :param tmp_dir:             Path to the temporary folder
+    :param file_extension:      Assume all genomes have the same file extension
+    :param nproc:               Make the execution CheckM parallel
+    :param pplacer_threads:     Maximum number of threads for pplacer
+    :return:                    Return the list of paths to the CheckM output tables
+    """
+
+    # Define the output list of paths to the CheckM tables
+    output_tables = list()
+
+    # Check whether there is at least one genome path in list
+    if genomes_paths:
+        run_tmp_dir = os.path.join(tmp_dir, "tmp")
+        
+        # Organise genomes
+        counter = 0
+        run_id = 1
+        os.makedirs(os.path.join(run_tmp_dir, "bins_{}".format(run_id)), exist_ok=True)
+        
+        # Retrieve the input genome extension
+
+        # Iterate over the list of paths to the genome files
+        for genome_path in genome_paths:
+            # Reorganise genomes in chunks with 1000 genomes at most
+            if counter % 1000 > 0:
+                counter = 0
+                run_id += 1
+                os.makedirs(os.path.join(run_tmp_dir, "bins_{}".format(run_id)), exist_ok=True)
+            
+            # Symlink genome files to the bins folder of the current chunk
+            os.symlink(str(genome_path),
+                       os.path.join(run_tmp_dir, "bins_{}".format(run_id)))
+        
+        # Iterate over the genomes chunk folders
+        for bins_folder in Path(run_tmp_dir).glob("bins_*"):
+            if os.path.isdir(str(bins_folder)):
+                # Retrieve the run ID from the file path
+                run_id = int(os.path.splitext(os.path.basename(str(bins_list)))[0].split("_")[-1])
+
+                # Create the run folder
+                run_dir = os.path.join(tmp_dir, "run_{}".format(run_id))
+                os.makedirs(run_dir, exist_ok=True)
+
+                # Define the output table path for the current run
+                table_path = os.path.join(tmp_dir, "run_{}.tsv".format(run_id))
+
+                try:
+                    # Run CheckM
+                    run(["checkm", "lineage_wf", "-t", str(nproc),
+                                                 "-x", file_extension,
+                                                 "--pplacer_threads", str(pplacer_threads),
+                                                 "--tab_table", "-f", table_path,
+                                                 str(bins_folder), run_dir],
+                        stdout=sb.DEVNULL, stderr=sb.DEVNULL)
+                    
+                    # Add the output table path to the output list
+                    output_tables.append(table_path)
+                except:
+                    pass
+
+    return output_tables
+
+def cluster(kmer_matrix_filepath, boundaries_filepath, manifest_filepath, profiles_dir, outpath):
     """
     Define new clusters with the unassigned MAGs
 
-    :param filepath:                Path to the kmers matrix (with header line) computed with kmtricks
+    :param kmer_matrix_filepath:    Path to the kmers matrix (with header line) computed with kmtricks
     :param boundaries_filepath:     Path to the file with the taxonomic boundaries defined by the boudaries module
     :param manifest_filepath:       Path to the manifest file
     :param profiles_dir:            Path to the temporary folder with the genomes profiles defined by the profile module
@@ -37,7 +105,7 @@ def cluster(filepath: str, boundaries_filepath: str, manifest_filepath: str, pro
     
     # Retrieve the list of input genomes
     genomes = list()
-    with open(filepath) as file:
+    with open(kmer_matrix_filepath) as file:
         for line in file:
             line = line.strip()
             if line:
@@ -82,7 +150,7 @@ def cluster(filepath: str, boundaries_filepath: str, manifest_filepath: str, pro
 
     # Load the kmers matrix
     # Skip the header line with the list of genomes
-    matrix = load_matrix(filepath, skiprows=1)
+    matrix = load_matrix(kmer_matrix_filepath, skiprows=1)
 
     # Define the list of level IDs for sorting profiles
     levels = ["k", "p", "c", "o", "f", "g", "s"]
@@ -235,19 +303,63 @@ def cluster(filepath: str, boundaries_filepath: str, manifest_filepath: str, pro
 
     return outpath
 
-def filter_genomes(filepath: str, outpath: str) -> str:
+def download(url, folder):
+    """
+    Download a file from URL to the specified folder
+
+    :param url:     Source file URL
+    :param folder:  Target destination folder path
+    """
+
+    # Check whether the destination folder path exists
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+
+    # Download file from URL to the destination folder
+    run(["wget", "-N", url, "-P", folder],
+        stdout=sb.DEVNULL, stderr=sb.DEVNULL)
+    
+    return os.path.join(folder, url.split(os.sep)[-1])
+
+def filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0):
+    """
+    Filter genomes according to completeness and contamination criteria
+
+    :param checkm_tables:   List of paths to the CheckM output tables
+    :param completeness:    Minimum allowed completeness
+    :param contamination:   Maximum allowed contamination
+    """
+
+    # Define the list of genomes that passed the quality control
+    genomes = list()
+
+    # Iterate over the CheckM output tables
+    for filepath in checkm_tables:
+        if os.path.exists(filepath):
+            with open(filepath) as table:
+                line_count = 0
+                for l in table:
+                    l = l.strip()
+                    if l:
+                        # Always skip the first header line
+                        if line_count > 0:
+                            l_split = l.split("\t")
+                            # Check whether the current genome respect both the completeness and contamination criteria
+                            if float(l_split[-3]) >= completeness and float(l_split[-2]) <= contamination:
+                                genomes.append(l_split[0])
+                        line_count += 1
+    
+    return genomes
+
+def filter_genomes(kmer_matrix_filepath, outpath, similarity=100.0):
     """
     Filter genomes according to their set of kmers.
-    Discard a genome if there is at least one other genome with the same set of kmers
+    Discard a genome if there is at least one other genome with a specific percentage of kmers in common
 
-    :param filepath:    Path to the kmers matrix file (with header line) as output of kmtricks
-    :param outpath:     Path to the output file with the list of filtered genomes
-    :return:            Return the path to the output file
+    :param kmer_matrix_filepath:    Path to the kmers matrix file (with header line) as output of kmtricks
+    :param outpath:                 Path to the output file with the list of filtered genomes
+    :param similarity:              Discard a genome if it result to have at least this percentage of common kmers with another genome
     """
-
-    # Check whether the input file exists
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
     
     # Check whether the output file already exists
     if os.path.exists(outpath):
@@ -255,7 +367,7 @@ def filter_genomes(filepath: str, outpath: str) -> str:
 
     # Retrieve the list of input genomes
     genomes = list()
-    with open(filepath) as file:
+    with open(kmer_matrix_filepath) as file:
         for line in file:
             line = line.strip()
             if line:
@@ -265,7 +377,7 @@ def filter_genomes(filepath: str, outpath: str) -> str:
 
     # Load the kmers matrix
     # Skip the header line with the list of genomes
-    matrix = load_matrix(filepath, skiprows=1)
+    matrix = load_matrix(kmer_matrix_filepath, skiprows=1)
 
     # Take track of the excluded genomes
     excluded = list()
@@ -274,8 +386,15 @@ def filter_genomes(filepath: str, outpath: str) -> str:
     for i1, row1 in enumerate(matrix):
         for i2, row2 in enumerate(matrix):
             if i2 > i1 and genomes[i1] not in excluded and genomes[i2] not in excluded:
-                # Check whether these two genomes have the same set of kmers
-                if np.array_equal(row1, row2):
+                # Count the number of kmers for the first genome
+                mers = sum(row1)
+                # Define the filter threshold
+                threshdold = int(math.ceil(kmers*similarity/100.0))
+                # Count how many times a 1 appear in the same position of both the arrays
+                common = sum([1 for pos, _ in enumerate(row1) if row1[i1]==row2[i2]==1])
+
+                # Check whether these two genomes must be dereplicated
+                if common >= threshold:
                     # Add one of the two genomes to the list of exluded genomes
                     excluded.append(genomes[i2])
 
@@ -287,25 +406,19 @@ def filter_genomes(filepath: str, outpath: str) -> str:
     with open(outpath, "w+") as output:
         for genome in excluded:
             output.write("{}\n".format(genome))
-    
-    return outpath
 
-def get_boundaries(filepath: str) -> Tuple[int, int]:
+def get_boundaries(kmer_matrix_filepath):
     """
     Return kmers boundaries for current taxonomic level defined as the minimum and
     maximum number of common kmers among all the genomes in the current taxonomic level
 
-    :param filepath:    Path to the kmers matrix file (with no header line) as output of kmtricks
-    :return:            Return a tuple with boundaries
+    :param kmer_matrix_filepath:   Path to the kmers matrix file (with no header line) as output of kmtricks
+    :return:                       Return a tuple with boundaries
     """
-    
-    # Check whether the input file exists
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
 
     # Load the kmers matrix
     # It does not contain any header line
-    matrix = load_matrix(filepath)
+    matrix = load_matrix(kmer_matrix_filepath)
 
     # Search for the minimum and maximum number of common kmers among all the genomes
     # in the kmers matrix
@@ -326,20 +439,412 @@ def get_boundaries(filepath: str) -> Tuple[int, int]:
 
     return minv, maxv
 
-def load_matrix(filepath: str, skiprows: int=0) -> np.ndarray:
+def get_level_boundaries(boundaries_filepath, taxonomy):
+    """
+    Retrieve boundaries for a given taxonomic label
+
+    :param boundaries_filepath:     Path to the file with boundaries produced by the boundaries module
+    :param taxonomy:                Taxonomic label
+    """
+
+    minv = 0
+    maxv = 0
+
+    # Load the boundaries file
+    boundaries = dict()
+    with open(boundaries_filepath) as file:
+        for line in file:
+            line = line.strip()
+            if line:
+                if not line.startswith("#"):
+                    line_split = line.split("\t")
+                    boundaries[line_split[0]] = {
+                        "min": int(line_split[1]),
+                        "max": int(line_split[2])
+                    }
+
+    # Keep track of the min and max common kmers
+    min_bounds = list()
+    max_bounds = list()
+
+    # Try searching for boundaries again with a redefined taxonomic label
+    retry = False
+    while minv == 0 and maxv == 0:
+        taxonomic_boundaries = dict()
+        if not retry:
+            if taxonomy in taxonomic_boundaries:
+                # Exact search of the current taxonomic label in boundaries
+                taxonomic_boundaries[taxonomy] = boundaries[taxonomy]
+        else:
+            for tax in boundaries:
+                if tax.startswith("{}|".format(taxonomy)):
+                    # Expand the search to all the taxonomies with a common prefix
+                    taxonomic_boundaries[tax] = boundaries[tax]
+        
+        if taxonomic_boundaries:
+            # In case the current taxonomy is in the boundaries file
+            for tax in taxonomic_boundaries:
+                min_bounds.append(taxonomic_boundaries[tax]["min"])
+                max_bounds.append(taxonomic_boundaries[tax]["max"])
+        
+        else:
+            # Split the taxonomic label into levels
+            taxonomic_levels = taxonomy.split("|")
+
+            if len(taxonomic_levels) == 1:
+                # Get out of the loop of there are no other levels available
+                break
+
+            # Redefine the taxonomic label
+            taxonomy = taxonomic_levels[:-1]
+
+            # Retry
+            retry = True
+
+    return minv, maxv
+
+def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
+    """
+    Run HowDeSBT on a specific taxonomic level
+
+    :param level_dir:       Path to the taxonomic level folder
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
+    :param nproc:           Make it parallel
+    """
+
+    # Check whether the input folder is a valid path
+    if os.path.exists(level_dir) and os.path.isdir(level_dir):
+        # Extract the level name from the level folder path
+        level_name = os.path.basename(level_dir)
+
+        # Define the index folder
+        index_dir = os.path.join(level_dir, "index")
+        if os.path.exists(index_dir):
+            # Remove old index folder if any
+            shutil.rmtree(index_dir, ignore_errors=True)
+        
+        # Define the path to the file with the list of genome under the current taxonomic level
+        level_list = os.path.join(level_dir, "{}.txt".format(level_name))
+        if os.path.exists(level_list):
+            os.unlink(level_list)
+        
+        # Define the path to the bloom filter representation of the current taxonomic level
+        level_filter = os.path.join(level_dir, "{}.bf".format(level_name))
+        if os.path.exists(level_filter):
+            os.unlink(level_filter)
+
+        # Define the log file handler
+        howdesbt_log = open(os.path.join(level_dir, "howdesbt.log"), "w+")
+
+        # Take track of how many genomes under the specific taxonomic levels
+        how_many = 0
+
+        if os.path.basename(level_dir).startswith("s__"):
+            # Search for all the genomes under the current taxonomic level
+            genomes_folder = os.path.join(level_dir, "genomes")
+            if os.path.exists(genomes_folder):
+                # Create the filters folder
+                filters_dir = os.path.join(os.path.dirname(genomes_folder), "filters")
+                os.makedirs(filters_dir, exist_ok=True)
+
+                # Iterate over the genome files
+                for genome_path in Path(genomes_folder).glob("*.fna.gz"):
+                    # Retrieve the genome name from the file path
+                    genome_name = os.path.splitext(os.path.basename(str(genome_path)))[0]
+                    if str(genome_path).endswith(".gz"):
+                        genome_name = os.path.splitext(genome_name)[0]
+                    
+                    if not os.path.exists(os.path.join(filters_dir, "{}.bf".format(genome_name))):
+                        # Uncompress the current genome
+                        with open(os.path.join(genomes_folder, "{}.fna".format(genome_name)), "w+") as genome_file:
+                            run(["gzip", "-dc", str(genome_path)], stdout=genome_file, stderr=genome_file)
+
+                        # Build the bloom filter file from the current genome
+                        run(["howdesbt", "makebf", "--k={}".format(kmer_len),
+                                                   "--min=2",
+                                                   "--bits={}".format(filter_size),
+                                                   "--hashes=1",
+                                                   "--seed=0,0",
+                                                   os.path.join(genomes_folder, "{}.fna".format(genome_name)),
+                                                   "--out={}".format(os.path.join(filters_dir, "{}.bf".format(genome_name))),
+                                                   "--threads={}".format(nproc)],
+                            stdout=howdesbt_log, stderr=howdesbt_log)
+                        
+                        # Get rid of the uncompressed genome file
+                        os.unlink(os.path.join(genomes_folder, "{}.fna".format(genome_name)))
+
+                        # Increment the genomes counter
+                        how_many += 1
+                    
+                    # Take track of the current bloom filter file path
+                    with open(level_list, "a+") as file:
+                        file.write("{}\n".format(os.path.join(filters_dir, "{}.bf".format(genome_name))))
+        else:
+            # Find all the other taxonomic levels
+            # Define the new list of bloom filters
+            for level in os.listdir(level_dir):
+                if os.path.isdir(os.path.join(level_dir, level)):
+                    if os.path.exists(os.path.join(level_dir, level, "{}.bf".format(level))):
+                        with open(level_list, "a+") as file:
+                            file.write("{}\n".format(os.path.join(level_dir, level, "{}.bf".format(level))))
+                        
+                        # Increment the genomes counter
+                        how_many += 1
+        
+        # Build the index folder
+        os.makedirs(index_dir, exist_ok=True)
+
+        # Move to the index folder
+        # This will force howdesbt to build the compressed nodes into the index folder
+        os.chdir(index_dir)
+
+        if how_many > 1:
+            # Create the tree topology file
+            run(["howdesbt", "cluster", "--list={}".format(level_list),
+                                        "--bits={}".format(filter_size),
+                                        "--tree={}".format(os.path.join(index_dir, "union.sbt")),
+                                        "--nodename={}".format(os.path.join(index_dir, "node{number}")),
+                                        "--keepallnodes"],
+                stdout=howdesbt_log, stderr=howdesbt_log)
+
+            # Build all the bloom filter files
+            run(["howdesbt", "build", "--howde",
+                                      "--tree={}".format(os.path.join(index_dir, "union.sbt")),
+                                      "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt"))],
+                stdout=howdesbt_log, stderr=howdesbt_log)
+            
+            # Remove the union.sbt file
+            os.unlink(os.path.join(index_dir, "union.sbt"))
+
+            # Fix node paths in the final index.detbrief.sbt file
+            with open(os.path.join(index_dir, "index.full.detbrief.sbt"), "w+") as file1:
+                with open(os.path.join(index_dir, "index.detbrief.sbt")) as file2:
+                    for line in file2:
+                        line = line.strip()
+                        if line:
+                            # Define the depth of the node in the tree
+                            stars = line.count("*")
+                            # Remove the stars to retrieve the node name
+                            node_name = line[stars:]
+                            # Define the absolute path to the node bloom filter file
+                            node_path = os.path.join(index_dir, node_name)
+                            # Define the new node in the tree
+                            file1.write("{}{}\n".format("*"*stars, node_path))
+            
+            # Get rid of the old tree
+            os.unlink(os.path.join(index_dir, "index.detbrief.sbt"))
+
+            # Rename the new tree
+            shutil.move(os.path.join(index_dir, "index.full.detbrief.sbt"), 
+                        os.path.join(index_dir, "index.detbrief.sbt"))
+            
+            # Merge all the leaves together by applying the OR logic operator on the bloom filter files
+            # The resulting bloom filter is the representative one, which is the same as the root node of the tree
+            with open(level_list) as file:
+                for line in file:
+                    line = line.strip()
+                    if line:
+                        if not os.path.exists(os.path.join(level_dir, "{}.bf".format(level_name))):
+                            shutil.copy(line, os.path.join(level_dir, "{}.bf".format(level_name)))
+                        else:
+                            # Merge the bloom filter files applying the OR logic operator
+                            run(["howdesbt", "bfoperate", line,
+                                                          os.path.join(level_dir, "{}.bf".format(level_name)),
+                                                          "--or",
+                                                          "--out={}".format(os.path.join(level_dir, "merged.bf"))],
+                                stdout=howdesbt_log, stderr=howdesbt_log)
+                            
+                            # Remove the old lovel bloom filter
+                            os.unlink(os.path.join(level_dir, "{}.bf".format(level_name)))
+
+                            # Rename the resulting file
+                            shutil.move(os.path.join(level_dir, "merged.bf"), 
+                                        os.path.join(level_dir, "{}.bf".format(level_name)))
+        
+        else:
+            # With only one bloom filter it does not make sense to cluster genomes
+            with open(level_list) as file:
+                for line in file:
+                    line = line.strip()
+                    if line:
+                        # There is only one line which refers to the only bloom filter file
+                        shutil.copy(line, os.path.join(level_dir, "{}.bf".format(level_name)))
+
+                        # Manually define the union.sbt file with the single node
+                        with open(os.path.join(index_dir, "union.sbt"), "w+") as union:
+                            union.write("{}\n".format(os.path.join(level_dir, "{}.bf".format(level_name))))
+
+                        # Build the RRR compressed bloom filter file for the node
+                        run(["howdesbt", "build", "--howde",
+                                                  "--tree={}".format(os.path.join(index_dir, "union.sbt")),
+                                                  "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt"))],
+                            stdout=howdesbt_log, stderr=howdesbt_log)
+
+                        # Remove the union.sbt file
+                        os.unlink(os.path.join(index_dir, "union.sbt"))
+
+                        break
+
+    else:
+        raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
+
+def it_exists(path):
+    """
+    Check whether a file or folder exists on the file system
+
+    :param path:    File or folder path
+    :return:        Always return True if the input path exists
+                    Otherwise, raise an exception
+    """
+
+    if isinstance(path, str):
+        if os.path.exists(path):
+            return True
+    
+    return False
+
+def init_logger(filepath=None, verbose=True):
+    """
+    Define a logger to print on console, on file, or both
+
+    :param filepath:    Path to the log file
+    :param verbose:     Print on screen
+    :return:            Logger object or None
+    """
+
+    # Define the logger config
+    logging_config = dict(
+        "version" = 1,
+        "formatters" = {
+            "verbose": {
+                "format": ("[%(asctime)s] %(levelname)s "
+                        "[%(name)s:%(lineno)s] %(message)s"),
+                "datefmt": "%d/%b/%Y %H:%M:%S"
+            }
+        },
+        "handlers" = {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "DEBUG",
+                "formatter": "verbose",
+                "stream": sys.stdout
+            },
+            "file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "DEBUG",
+                "formatter": "verbose"
+                "filename": None,
+                "maxBytes": 52428800,
+                "backupCount": 7
+            }
+        },
+        "loggers" = {
+            "console": {
+                "handlers": ["console"],
+                "level": logging.DEBUG
+            },
+            "file": {
+                "handlers": ["file"],
+                "level": logging.DEBUG
+            },
+            "full": {
+                "handlers": ["console", "file"],
+                "level": logging.DEBUG
+            },
+        }
+    )
+
+    # In case of log file
+    if filepath:
+        # Check whether its folder exists
+        log_dir = os.path.dirname(args.log)
+        if not os.path.exists(log_dir):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), log_dir)
+
+        # Update the log file path in the config dictionary
+        logging_config["handlers"]["file"]["filename"] = filepath
+    
+    # Load the logging config
+    dictConfig(logging_config)
+
+    # Define the logger type
+    logtype = None
+
+    if filepath and verbose:
+        # Full logger will print on screen and on the log file
+        logtype = "full"
+
+    elif filepath and not verbose:
+        # File logger will only print on the log file
+        logtype = "file"
+
+    elif not filepath and verbose:
+        # Console logger will only print message on the screen
+        logtype = "console"
+
+    if logtype:
+        # Define and return the logger object
+        logger = logging.getLogger(logtype)
+        return logger
+    
+    # In case no file path and verbose have been specified
+    return None
+
+def kmtricks_matrix(genomes_fof, run_dir, nproc, output_table):
+    """
+    Run kmtricks for building the kmers matrix
+
+    :param genomes_fof:     Path to the fof file with the list of genomes
+    :param run_dir:         Path to the working directory
+    :param nproc:           Make it parallel
+    :param output_table:    Path to the output kmer matrix file
+    """
+
+    # Initialise the kmtricks log handler
+    # Both stdout and stderr will be redirected here
+    kmtricks_log = open(os.path.join(run_dir, "kmtricks.log"), "w+")
+
+    # Run kmtricks for building the kmers matrix
+    run(["kmtricks", "pipeline", "--file", genomes_fof,
+                                 "--run-dir", os.path.join(run_dir, "matrix"),
+                                 "--mode", "kmer:pa:bin",
+                                 "--hard-min", "1",
+                                 "--cpr",
+                                 "--threads", str(nproc)],
+        stdout=kmtricks_log, stderr=kmtricks_log)
+
+    # Aggregate partitions into a single kmer matrix
+    run(["kmtricks", "aggregate", "--run-dir", os.path.join(run_dir, "matrix"),
+                                  "--matrix", "kmer",
+                                  "--format", "text",
+                                  "--cpr-in",
+                                  "--sorted",
+                                  "--threads", int(nproc),
+                                  "--output", output_table],
+        stdout=kmtricks_log, stderr=kmtricks_log)
+
+    # Close the log handles
+    kmtricks_log.close()
+
+def load_matrix(kmer_matrix_filepath, skiprows=0):
     """
     Load a kmtricks kmers matrix into a numpy ndarray with a row for each genome
     and a column for each kmer
 
-    :param filepath:    Path to the kmers matrix file as output of kmtricks
-    :param skiprows:    Define how many lines must be skipped before loading the matrix
-    :return:            Return the kmers matrix
+    :param kmer_matrix_filepath:  Path to the kmers matrix file as output of kmtricks
+    :param skiprows:             Define how many lines must be skipped before loading the matrix
+    :return:                     Return the kmers matrix
     """
+
+    # Check whether the input file exists
+    if not os.path.exists(kmer_matrix_filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), kmer_matrix_filepath)
 
     # Retrieve the number of genomes as the number of columns in the matrix
     # excluding the first one with the list of kmers
     columns = 0
-    with open(filepath) as file:
+    with open(kmer_matrix_filepath) as file:
         for line in file:
             line = line.strip()
             if line:
@@ -353,43 +858,79 @@ def load_matrix(filepath: str, skiprows: int=0) -> np.ndarray:
 
     # Load the whole matrix with numpy
     # Do not consider the first column
-    matrix = np.loadtxt(filepath, delimiter=" ", usecols=np.arange(1, columns), skiprows=skiprows)
+    matrix = np.loadtxt(kmer_matrix_filepath, delimiter=" ", usecols=np.arange(1, columns), skiprows=skiprows)
     # Transpose the kmers matrix
     # One row for each genome
     matrix = matrix.T
 
     return matrix
 
-if __name__ == '__main__':
-    # Define a reference to the current module
-    current_module = sys.modules[__name__]
-    # Define a list with all the available function in this module
-    functions = getmembers(current_module, isfunction)
-    # Get functions names
-    functions_names = [function[0] for function in functions]
+def number(typev, minv=None, maxv=None):
+    """
+    Take full control of input numeric types by defining custom intervals
+    """
 
-    # Check whether there are enough arguments in input
-    if len(sys.argv) <= 1:
-        raise Exception("Not enough arguments")
+    def type_func(value):
+        """
+        Test data type and ranges on the input value
+        """
+
+        try:
+            value = typev(value)
+            if minv and value < minv:
+                raise ap.ArgumentTypeError("Minimum value is {}".format(minv))
+            if maxv and value > maxv:
+                raise ap.ArgumentTypeError("Maximum value is {}".format(maxv))
+            return value
+        except:
+            raise ap.ArgumentTypeError("Input value must be {}".format(typev))
+
+    return type_func
+
+def println(message, logger=None, verbose=True):
+    """
+    Send messages to the logger
+    It will print messages on screen, send messages to the log file, or both
     
-    # Get the target function name
-    function = sys.argv[1]
+    :param message:     Custom message
+    :param logger:      Logger object
+    :param verbose:     Print messages on sceeen if True and logger is None
+    """
 
-    # Check whether the target function exists
-    if function not in functions_names:
-        raise Exception("Target function does not exist")
+    if logger:
+        # Redirect messages to the logger
+        logger.info(message)
+    elif verbose:
+        # In case the logger is not defined
+        # Redirect messages to the screen
+        print(message)
 
-    # Get the target function
-    target_function = functions[functions_names.index(function)][1]
-    # Get the list of arguments in the signature of the target function
-    target_function_parameters = signature(target_function).parameters
+def run(cmdline, stdout=sys.stdout, stderr=sys.stderr, silence=False):
+    """
+    Wrapper for the subprocess.check_call function
 
-    # Check whether the number of input arguments matches the number of parameters
-    # which defines the signature of the target function
-    if len(sys.argv)-2 != len(target_function_parameters):
-        raise Exception("Input arguments do not match the target function parameters")
-    
-    # Run the target function
-    result = target_function(*sys.argv[2:])
-    # Print the result to the standard output
-    print(result)
+    :param cmdline: Command line list
+    :param stdout:  Standard output
+    :param stderr:  Standard error
+    """
+
+    # Check whether ther is something to run
+    if cmdline:
+        try:
+            # In case of silence
+            if silence:
+                # Redirect the stdout and stderr to /dev/null
+                stdout=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL
+
+            # Run a specific command line and redirect the stdout and stderr
+            # to those specified in input
+            subprocess.check_call(cmdline, stdout=stdout, stderr=stderr)
+        except:
+            # This exception will be caught by the main controller
+            raise subprocess.CalledProcessError("An error has occurred while running the following command:\n{}"
+                                                .format(" ".join(cmdline)))
+
+    else:
+        # There is nothing to run
+        raise Exception("Empty command line!")
