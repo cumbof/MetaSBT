@@ -16,7 +16,6 @@ RUN apt-get update && apt-get upgrade -y && apt-get clean
 RUN apt-get install -y \ 
         autoconf \
         automake \
-        bc \
         build-essential \
         curl \
         git \
@@ -99,7 +98,7 @@ RUN conda install -y entrez-direct howdesbt kmtricks
 RUN mkdir -p /home/git && cd /home/git && \
     git clone https://github.com/BlankenbergLab/meta-index && \
     cd /home/git/meta-index && \
-    chmod +x meta-index && \
+    chmod +x meta-index.py && \
     cd /home/git/meta-index/modules && \
     chmod +x *
 # Add meta-index to PATH
