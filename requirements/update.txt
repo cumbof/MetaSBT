@@ -1,6 +1,0 @@
-bc
-checkm
-csvcut
-howdesbt
-kmtricks
-python3
