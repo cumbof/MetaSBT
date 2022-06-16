@@ -93,8 +93,8 @@ def report(db_dir, output_file):
                                 mags_list.append(line)
                 
                 # Do the same with the genomes.txt file
-                if os.path.exists(os.path.join(str(species_dir), "genomes.txt")):
-                    with open(os.path.join(str(species_dir), "genomes.txt")) as file:
+                if os.path.exists(os.path.join(str(species_dir), "references.txt")):
+                    with open(os.path.join(str(species_dir), "references.txt")) as file:
                         for line in file:
                             line = line.strip()
                             if line:
@@ -118,37 +118,41 @@ def report(db_dir, output_file):
                                 }
 
                 # Take track of the number of MAGs and reference genomes
+                # Retrieve also the QC stats
                 mags = 0
                 references = 0
                 completeness = list()
                 contamination = list()
                 strain_heterogeneity = list()
 
-                # In case the genomes.fof file exists in the current species folder
-                if os.path.exists(os.path.join(str(species_dir), "genomes.fof")):
-                    with open(os.path.join(str(species_dir), "genomes.fof")) as file:
-                        for line in file:
-                            line = line.strip()
-                            if line:
-                                line_split = line.split(" : ")
-                                found = False
-                                if line_split[0] in mags_list:
-                                    mags += 1
-                                    found = True
-                                elif line_split[0] in references_list:
-                                    references += 1
-                                    found = True
-                                if found and line_split[0] in qc_stats:
-                                    completeness.append(qc_stats[line_split[0]["completeness"]])
-                                    contamination.append(qc_stats[line_split[0]["contamination"]])
-                                    strain_heterogeneity.append(qc_stats[line_split[0]["strain_heterogeneity"]])
+                # Check whether the reference genomes exist before counting
+                for ref in references_list:
+                    if os.path.join(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(ref))):
+                        references += 1
+                        
+                        # Also retrieve its QC stats
+                        if ref in qc_stats:
+                            completeness.append(qc_stats[ref]["completeness"])
+                            contamination.append(qc_stats[ref]["contamination"])
+                            strain_heterogeneity.append(qc_stats[ref]["strain_heterogeneity"])
+
+                # Do the same with the MAGs
+                for mag in mags_list:
+                    if os.path.join(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(mag))):
+                        mags += 1
+
+                        # Also retrieve its QC stats
+                        if ref in qc_stats:
+                            completeness.append(qc_stats[mag]["completeness"])
+                            contamination.append(qc_stats[mag]["contamination"])
+                            strain_heterogeneity.append(qc_stats[mag]["strain_heterogeneity"])
 
                 output.write("{}\t{}\t{}\t{}\t{}\t{}\n".format(lineage,
                                                                mags,
                                                                references,
-                                                               round(sum(completeness)/len(completeness), 2),
-                                                               round(sum(contamination)/len(contamination), 2),
-                                                               round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2)))
+                                                               round(sum(completeness)/len(completeness), 2) if completeness else 0.0,
+                                                               round(sum(contamination)/len(contamination), 2) if contamination else 0.0,
+                                                               round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2)) if strain_heterogeneity else 0.0)
 
 def main():
     # Load command line parameters
