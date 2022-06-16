@@ -25,7 +25,8 @@ setuptools.setup(name="meta-index",
                  long_description=open("README.md").read(),
                  long_description_content_type="text/markdown",
                  install_requires=[
-                    "numpy==1.16.3"
+                     "numpy==1.22.3",
+                     "tqdm==4.38.0"
                  ],
                  python_requires='>=3.8',
                  zip_safe=False,
