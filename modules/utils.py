@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
 __date__ = "Jun 15, 2022"
