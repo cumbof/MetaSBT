@@ -184,7 +184,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, 
             except:
                 raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS))
 
-def main():
+def main() -> None:
     # In case of --help and --version options
     # Both the arguments are shared among the main controller and modules
     if ("--help" in sys.argv or "--version" in sys.argv) and len(sys.argv) == 3:
