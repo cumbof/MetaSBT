@@ -16,7 +16,12 @@ A pipeline for automatically indexing microbial genomes and accurately character
 
 ## Installing `meta-index`
 
-The pipeline is available as a `conda` package through the following command:
+The pipeline is available as a Python3 package that can be install with the following command:
+```bash
+pip install meta-index
+```
+
+It is also available as a `conda` package:
 ```bash
 conda install -c bioconda meta-index
 ```
@@ -33,8 +38,7 @@ mkdir -p ~/git && cd ~/git
 git clone https://github.com/BlankenbergLab/meta-index.git
 
 # Make the scripts executable
-chmod +x meta-index
-cd modules && chmod +x *
+chmod -R +x meta-index/*.py
 
 # Add meta-index to the PATH env variable
 PATH=$PATH:~/git/meta-index
@@ -43,20 +47,17 @@ PATH=$PATH:~/git/meta-index
 Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
 
 In this last case, remember to check that the following dependencies are installed and available on your system:
-- [bc](https://www.gnu.org/software/bc/)
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.1.3)
-- [csvkit](https://github.com/wireservice/csvkit)
-- [entrez-direct](https://www.ncbi.nlm.nih.gov/books/NBK179288/)
-- [gzip](https://www.gzip.org/)
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
-- [ncbitax2lin](https://github.com/zyxue/ncbitax2lin)
-- [ntcard](https://github.com/bcgsc/ntCard)
-- [pip](https://pip.pypa.io/)
+- [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
+- [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
+- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)
+- [pip](https://pip.pypa.io/) (version >=21.2.4)
 - [python](http://www.python.org/) (version >=3.7)
-- [wget](https://www.gnu.org/software/wget/)
+- [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
 
-Please note that `meta-index` makes use of some advanced `howdesbt` commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
+Please note that `meta-index` makes use of some advanced `howdesbt` sub-commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
 
 For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
 
@@ -109,45 +110,52 @@ Once the container is built, you can finally open an interactive shell on the Ub
 docker run -it meta-index
 ```
 
-In case you are able to install all the `meta-index` dependencies without the help of Docker, please remember that the `meta-index` modules makes use of the `date` command in order to take track of the amount of time the whole pipeline requires to run. Unfortunately, on macOS systems, the `date` command uses a different syntax to produce a timestamp accurate to the nanoseconds compared to the GNU equivalent command. For this reason, in order to make the script fully compatible also with macOS systems, users should follow the next additional steps.
-
-Use homebrew to install `coreutils` from your terminal:
-```bash
-brew install coreutils
-```
-
-The GNU equivalent date will be named `gdate`. At this point, we strongly encourage users to not replace the built-in version of `date` with the GNU equivalent in order to avoid issues with other software components that rely on the original version of `date`.
-
-We instead suggest to add an alias with the following command:
-```bash
-alias date='gdate'
-```
-
-In order to make the alias effective every time you open the shell, this last command should be added to your `.bash_profile` (in case `bash` is your default shell). 
-```bash
-echo "alias date='gdate'" >> ~/.bash_profile
-source ~/.bash_profile
-```
-
 ## Building a database
 
 The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `kmtricks` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed with `howdesbt` by building new sequence bloom trees considering only the root nodes of the upper taxonomic levels.
 
 The following command will trigger the generation of the database with all the available bacterial genomes from isolate sequencing in NCBI GenBank:
 ```bash
-meta-index index --db-dir=~/myindex \
-                 --kmer-len=31 \
+meta-index index --db-dir ~/myindex \
+                 --kmer-len 31 \
                  --estimate-filter-size \
-                 --increase-filter-size=5 \
-                 --kingdom=Bacteria \
+                 --increase-filter-size 5.0 \
+                 --kingdom Bacteria \
                  --dereplicate \
-                 --checkm-completeness=50.0 \
-                 --checkm-contamination=5.0 \
-                 --nproc=4 \
-                 --xargs-nproc=2 \
-                 --tmp-dir=~/tmp \
+                 --similarity 100.0 \
+                 --completeness 50.0 \
+                 --contamination 5.0 \
+                 --parallel 4 \
+                 --nproc 2 \
+                 --pplacer-threads 2 \
+                 --tmp-dir ~/tmp \
                  --cleanup
 ```
+
+**Available options:**
+
+| Option                   | Default | Description  |
+|:-------------------------|:--------|:-------------|
+| `--completeness`         | `0.0`   | Minimum completeness percentage allowed for input genomes |
+| `--contamination`        | `100.0` | Maximum contamination percentage allowed for input genomes |
+| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | Database folder path |
+| `--dereplicate`          | `False` | Dereplicate input genomes |
+| `--estimate-filter-size` | `False` | Estimate the bloom filter size with ntCard |
+| `--filter-size`          |         | Bloom filter size |
+| `--help`                 |         | Print the list of arguments and exit |
+| `--how-many`             | `0`     | Limit the number of genomes per species. The number of genomes per species is not limited by default |
+| `--increase-filter-size` | `0.0`   | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
+| `--kingdom`              |         | Consider genomes whose lineage belongs to a specific kingdom |
+| `--kmer-len`             |         | This is the length of the kmers used for building bloom filters |
+| `--log`                  |         | Path to the log file |
+| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--parallel`             | `1`     | Maximum number of processors to process each NCBI tax ID in parallel |
+| `--pplacer-threads`      | `1`     | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
+| `--similarity`           | `100.0` | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--tmp-dir`              |         | Path to the temporary folder |
+| `--verbose`              | `False` | Print results on screen |
+| `--version`              |         | Print current module version and exit |
 
 ## Defining boundaries
 
@@ -155,16 +163,32 @@ The `boundaries` module is crucial for the definition of taxonomy-specific bound
 
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 ```bash
-meta-index boundaries --db-dir=~/myindex \
-                      --kingdom=Bacteria \
-                      --min-genomes=100 \
-                      --output=~/boundaries.txt \
-                      --tmp-dir=~/tmp \
-                      --nproc=4 \
+meta-index boundaries --db-dir ~/myindex \
+                      --kingdom Bacteria \
+                      --min-genomes 50 \
+                      --output ~/boundaries.txt \
+                      --tmp-dir ~/tmp \
+                      --nproc 4 \
                       --cleanup
 ```
 
 Please note that the `boundaries` module considers clusters with reference genomes only. These clusters can be considered for establishing boundaries depending on a minimum number of reference genomes that can be set with the `--min-genomes` argument.
+
+**Available options:**
+
+| Option                   | Default | Description  |
+|:-------------------------|:--------|:-------------|
+| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | Database directory with the taxonomically organised sequence bloom trees |
+| `--help`                 |         | Print the list of arguments and exit |
+| `--kingdom`              |         | Consider genomes whose lineage belongs to a specific kingdom |
+| `--log`                  |         | Path to the log file |
+| `--min-genomes`          | `0`     | Consider clusters with at least this number of genomes |
+| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--output`               |         | Output file with kmer boundaries for each of the taxonomic labels in the database |
+| `--tmp-dir`              |         | Path to the temporary folder |
+| `--verbose`              | `False` | Print results on screen |
+| `--version`              |         | Print current module version and exit |
 
 ## Updating the database
 
@@ -176,16 +200,19 @@ In case of new reference genomes from isolate sequencing, the `update` module si
 
 The `update` module can be launched with the following command:
 ```bash
-meta-index update --input-list=~/mygenomes.txt \
-                  --taxa=~/taxonomies.tsv \
-                  --db-dir=~/myindex \
-                  --tmp-dir=~/tmp \
+meta-index update --input-list ~/mygenomes.txt \
+                  --taxa ~/taxonomies.tsv \
+                  --db-dir ~/myindex \
+                  --tmp-dir ~/tmp \
                   --dereplicate \
-                  --checkm-completeness=50.0 \
-                  --checkm-contamination=5.0 \
-                  --type=references \
-                  --extension=fna.gz \
-                  --nproc=8 \
+                  --similarity 100.0 \
+                  --completeness 50.0 \
+                  --contamination 5.0 \
+                  --type references \
+                  --extension fna.gz \
+                  --parallel 4 \
+                  --nproc 2 \
+                  --pplacer-threads 2 \
                   --cleanup
 ```
 
@@ -200,31 +227,79 @@ find ${INPUTS_DIR} \
          mv "$INPUT" "${INPUT%.'"${CURRENT_EXTENSION}"'}.'"${NEW_EXTENSION}"'";'
 ```
 
+**Available options:**
+
+| Option                   | Default | Description  |
+|:-------------------------|:--------|:-------------|
+| `--boundaries`           |         | Path to the output table produced by the `boundaries` module. It is required in case of MAGs as input genomes only |
+| `--boundary-uncertainty` | `0.0`   | Define the percentage of kmers to enlarge and reduce boundaries |
+| `--completeness`         | `0.0`   | Minimum completeness percentage allowed for input genomes |
+| `--contamination`        | `100.0` | Maximum contamination percentage allowed for input genomes |
+| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | Database folder path |
+| `--dereplicate`          | `False` | Dereplicate input genomes |
+| `--extension`            |         | Specify the input genome files extension. All the input genomes must have the same file extension before running this module |
+| `--input-list`           |         | This file contains the list of paths to the new genomes that will be added to the database |
+| `--log`                  |         | Path to the log file |
+| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--parallel`             | `1`     | Maximum number of processors to process each NCBI tax ID in parallel |
+| `--pplacer-threads`      | `1`     | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
+| `--similarity`           | `100.0` | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--taxa`                 |         | Input file with the mapping between input genome IDs and their taxonomic label. This is used in case of reference genomes only |
+| `--tmp-dir`              |         | Path to the temporary folder |
+| `--type`                 |         | Define the nature of the input genomes |
+| `--verbose`              | `False` | Print results on screen |
+| `--version`              |         | Print current module version and exit |
+
 ## Building the database report
 
 Once the database is built and updated with new MAGs and reference genomes, you can easily extract relevant information about all the species in your database by running the following command:
 ```bash
-meta-index report --db-dir=~/myindex \
-                  --output-file=~/report.tsv
+meta-index report --db-dir ~/myindex \
+                  --output-file ~/report.tsv
 ```
 
 The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness, contamination, and strain heterogeneity percentages for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
+
+**Available options:**
+
+| Option                   | Description  |
+|:-------------------------|:-------------|
+| `--db-dir`               | Database folder path |
+| `--output-file`          | Path to the output table |
+| `--version`              | Print current module version and exit |
 
 ## Profiling genomes
 
 The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
 ```bash
-meta-index profile --input-file=~/mymag.fna \
-                   --input-id=mymag \
-                   --tree=~/myindex/k__Bacteria/index.detbrief.sbt \
-                   --threshold=0.7 \
+meta-index profile --input-file ~/mymag.fna \
+                   --input-id mymag \
+                   --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
+                   --threshold 0.7 \
                    --expand \
-                   --stop-at=family \
-                   --output-dir=~/profiles \
-                   --output-prefix=mymag
+                   --stop-at family \
+                   --output-dir ~/profiles \
+                   --output-prefix mymag
 ```
 
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
+
+**Available options:**
+
+| Option                   | Default | Description  |
+|:-------------------------|:--------|:-------------|
+| `--expand`               | `False` | Expand the input query on all the taxonomic levels |
+| `--input-file`           |         | Path to the input query |
+| `--input-id`             |         | Unique identifier of the input query |
+| `--log`                  |         | Path to the log file |
+| `--output-dir`           |         | Output folders with queries results |
+| `--output-prefix`        |         | Prefix of the output files with query matches |
+| `--stop-at`              |         | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
+| `--threshold`            | `0.0`   | Fraction of query kmers that must be present in a leaf to be considered a match |
+| `--tree`                 |         | This is the tree definition file |
+| `--verbose`              | `False` | Print results on screen |
+| `--version`              |         | Print current module version and exit |
 
 ## Unlocking unknown species profiling with `kraken2`
 
