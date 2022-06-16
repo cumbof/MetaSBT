@@ -32,17 +32,6 @@ MODULES_DIR = os.path.join(SCRIPT_DIR, "modules")
 
 # Define the paths to the file with Python requirements
 REQUIREMENTS = os.path.join(SCRIPT_DIR, "requirements.txt")
-# Also define the list of external software dependencies
-DEPENDENCIES = [
-    "checkm",                # https://github.com/Ecogenomics/CheckM
-    "howdesbt",              # https://github.com/medvedevgroup/HowDeSBT
-    "kmtricks",              # https://github.com/tlemane/kmtricks/
-    "ncbi-genome-download",  # https://github.com/kblin/ncbi-genome-download/
-    "ncbitax2lin",           # https://github.com/zyxue/ncbitax2lin
-    "ntcard",                # https://github.com/bcgsc/ntCard
-    "python3",               # https://www.python.org
-    "wget",                  # https://www.gnu.org/software/wget/
-]
 
 # Define the software repository URLs
 REPOSITORY_URL = "https://github.com/BlankenbergLab/{}".format(TOOL_ID)
@@ -150,15 +139,18 @@ def print_modules():
     for module_id in sorted(modules_list):
         println("\t{}".format(module_id))
 
-def resolve_dependencies(stop_unavailable=False, verbose=True):
+def resolve_dependencies(dependencies, stop_unavailable=False, verbose=True):
     """
     Check whether all the external software dependencies and Python requirements are available
     """
     
+    # Sort the list of dependencies
+    dependencies = sorted(list(set(dependencies)))
+
     println("Checking for software dependencies", verbose=verbose)
     # Iterate over the list of external software dependencies
     howdesbt = False
-    for dependency in DEPENDENCIES:
+    for dependency in dependencies:
         available = "OK" if which(dependency) is not None else "--"
         println("\t[{}] {}".format(available, dependency), verbose=verbose)
         if dependency == "howdesbt":
@@ -229,15 +221,21 @@ def main():
             print_modules()
 
         elif args.resolve_dependencies:
+            # Load the list of available modules
+            modules_list = get_modules(MODULES_DIR)
+
+            # Load the list of module-specific dependencies
+            dependencies = list()
+            for module_id in modules_list:
+                module = importlib.import_module("modules.{}".format(module_id))
+                dependencies.extend(module.DEPENDENCIES)
+
             # Resolve external software dependencies and Python requirements
-            resolve_dependencies(stop_unavailable=False, verbose=True)
+            resolve_dependencies(dependencies, stop_unavailable=False, verbose=True)
         
         else:
             # Check for software updates
             check_for_software_updates()
-
-            # Resolve external software dependencies
-            resolve_dependencies(stop_unavailable=True, verbose=False)
 
             # Load the list of available modules
             modules_list = get_modules(MODULES_DIR)
@@ -248,9 +246,14 @@ def main():
                     # Build the command line
                     cmd_line = [sys.executable, os.path.join(MODULES_DIR, "{}.py".format(unknown_arg))]
                     
-                    # Fix paths to the input files and folders
+                    # Import the external module
                     module = importlib.import_module("modules.{}".format(unknown_arg))
-                    for pos in range(unknown):
+
+                    # Resolve external software dependencies
+                    resolve_dependencies(module.DEPENDENCIES, stop_unavailable=True, verbose=False)
+
+                    # Fix paths to the input files and folders
+                    for pos in range(len(unknown)):
                         if unknown[pos] in module.FILES_AND_FOLDERS:
                             unknown[pos+1] = os.path.abspath(unknown[pos+1])
 
@@ -261,6 +264,7 @@ def main():
                     try:
                         # Run the specified module
                         run(cmd_line, extended_error=True)
+                    
                     except Exception as e:
                         println(str(e))
                         sys.exit(os.EX_SOFTWARE)

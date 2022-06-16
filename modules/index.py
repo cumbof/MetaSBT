@@ -19,8 +19,8 @@ except:
 # Define the module name
 TOOL_ID = "index"
 
-# Define the url to the NCBI taxdump
-TAXDUMP_URL = "ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
+# Define the list of dependencies
+DEPENDENCIES = ["checkm", "howdesbt", "kmtricks", "ncbi-genome-download", "ncbitax2lin", "ntcard", "wget"]
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -28,6 +28,9 @@ FILES_AND_FOLDERS = [
     "--log",      # Path to the log file
     "--tmp-dir"   # Temporary folder path
 ]
+
+# Define the url to the NCBI taxdump
+TAXDUMP_URL = "ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
 def read_params():
     p = ap.ArgumentParser(prog=TOOL_ID,

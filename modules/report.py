@@ -17,6 +17,9 @@ except:
 # Define the module name
 TOOL_ID = "report"
 
+# Define the list of dependencies
+DEPENDENCIES = list()
+
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
     "--db-dir",      # Database folder path
@@ -157,7 +160,9 @@ def main():
     
     # Check whether the output file and folder exist
     output_folder = os.path.dirname(args.output_file)
-    if it_exists(args.output_file, path_type="file") or not it_exists(output_folder, path_type="folder"):
+    if it_exists(args.output_file, path_type="file"):
+        raise Exception("The output file already exists")
+    if not it_exists(output_folder, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
 
     report(args.db_dir, args.output_file)

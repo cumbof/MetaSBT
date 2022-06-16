@@ -11,12 +11,15 @@ from functools import partial
 
 try:
     # Load utility functions
-    from utils import init_logger, it_exists, println
+    from utils import get_boundaries, init_logger, it_exists, kmtricks_matrix, println
 except:
     pass
 
 # Define the module name
 TOOL_ID = "boundaries"
+
+# Define the list of dependencies
+DEPENDENCIES = ["kmtricks"]
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -50,7 +53,7 @@ def read_params():
     p.add_argument( "--min-genomes",
                     type = number(int, minv=3),
                     default = 3,
-                    dest = "min_genomes"
+                    dest = "min_genomes",
                     help = "Consider clusters with at least this number of genomes" )
     p.add_argument( "--nproc",
                     type = number(int, minv=1, maxv=os.cpu_count()),
@@ -110,7 +113,7 @@ def define_boundaries(level_dir, level_id, tmp_dir, output, min_genomes=3, nproc
         kmtricks_matrix(os.path.join(tmp_level_dir, "genomes.fof"), 
                         os.path.join(tmp_level_dir, "matrix"), 
                         nproc,
-                        os.path.join(tmp_level_dir, "kmers_matrix.txt")):
+                        os.path.join(tmp_level_dir, "kmers_matrix.txt"))
         
         # Extract boundaries from the kmtricks kmers matrix
         min_kmers, max_kmers = get_boundaries(os.path.join(tmp_level_dir, "kmers_matrix.txt"))

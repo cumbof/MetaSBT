@@ -17,6 +17,9 @@ except:
 # Define the module name
 TOOL_ID = "profile"
 
+# Define the list of dependencies
+DEPENDENCIES = ["howdesbt"]
+
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
     "--input-file", # Path to the input file

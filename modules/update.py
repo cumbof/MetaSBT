@@ -19,8 +19,8 @@ except:
 # Define the module name
 TOOL_ID = "update"
 
-# Define the software root directory
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+# Define the list of dependencies
+DEPENDENCIES = ["checkm", "howdesbt", "kmtricks"]
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -29,6 +29,9 @@ FILES_AND_FOLDERS = [
     "--log",        # Path to the log file
     "--tmp-dir"     # Temporary folder path
 ]
+
+# Define the software root directory
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 def read_params():
     p = ap.ArgumentParser(prog=TOOL_ID,
