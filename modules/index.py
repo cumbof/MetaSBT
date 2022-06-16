@@ -98,9 +98,10 @@ def read_params():
                     type = number(int, minv=1, maxv=os.cpu_count()),
                     default = 1,
                     help = "Maximum number of processors to process each NCBI tax ID in parallel" )
-    p.add_argument( "--pplacer_threads",
+    p.add_argument( "--pplacer-threads",
                     type = number(int, minv=1, maxv=os.cpu_count()),
                     default = 1,
+                    dest = "pplacer_threads",
                     help = "Maximum number of threads for pplacer. This is required to maximise the CheckM performances" )
     p.add_argument( "--similarity",
                     type = number(float, minv=0.0, maxv=100.0),
@@ -672,9 +673,6 @@ def index(db_dir, kingdom, tmp_dir, kmer_len, filter_size, how_many=None,
 
     printline("Indexing all the taxonomic levels")
 
-
-
-
     # Define a partial function around the howdesbt wrapper
     howdesbt_partial = partial(howdesbt, kmer_len=kmer_len, filter_size=filter_size, nproc=nproc)
 
@@ -702,7 +700,7 @@ def index(db_dir, kingdom, tmp_dir, kmer_len, filter_size, how_many=None,
     # Also run HowDeSBT on the database folder to build 
     # the bloom filter representation of the kingdom
     printline("Building the database root bloom filter with HowDeSBT")
-    howdesbt(db_dir, kmer_len, filter_size, nproc)
+    howdesbt_partial(db_dir)
 
     # The howdesbt function automatically set the current working directory to 
     # the index folder of the taxonomic labels
