@@ -71,19 +71,11 @@ def read_params():
                     choices=["fa", "fa.gz", "fasta", "fasta.gz", "fna", "fna.gz"],
                     help = ("Specify the input genome files extension. "
                             "All the input genomes must have the same file extension before running this module") )
-    p.add_argument( "--filter-size",
-                    type = number(int, minv=10000),
-                    dest = "filter_size",
-                    help = "This is the size of the bloom filters" )
     p.add_argument( "--input-list",
                     type = os.path.abspath,
                     required = True,
                     dest = "input_list",
                     help = "This file contains the list of paths to the new genomes that will be added to the database" )
-    p.add_argument( "--kmer-len",
-                    type = number(int, minv=6),
-                    dest = "kmer_len",
-                    help = "This is the length of the kmers used for building bloom filters" )
     p.add_argument( "--log",
                     type = os.path.abspath,
                     help = "Path to the log file" )
@@ -91,9 +83,14 @@ def read_params():
                     type = number(int, minv=1, maxv=os.cpu_count()),
                     default = 1,
                     help = "This argument refers to the number of processors used for parallelizing the pipeline when possible" )
-    p.add_argument( "--pplacer_threads",
+    p.add_argument( "--parallel",
                     type = number(int, minv=1, maxv=os.cpu_count()),
                     default = 1,
+                    help = "Maximum number of processors to process input genomes in parallel" )
+    p.add_argument( "--pplacer-threads",
+                    type = number(int, minv=1, maxv=os.cpu_count()),
+                    default = 1,
+                    dest = "pplacer_threads",
                     help = "Maximum number of threads for pplacer. This is required to maximise the CheckM performances" )
     p.add_argument( "--similarity",
                     type = number(float, minv=0.0, maxv=100.0),
@@ -125,9 +122,10 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundaries,
-           boundary_uncertainty=None, taxa_map=None, completeness=0.0, contamination=100.0, 
-           dereplicate=False, similarity=100.0, logger=None, verbose=False, nproc=1, pplacer_threads=1):
+def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundaries=None,
+           boundary_uncertainty=0.0, taxa_map=None, completeness=0.0, contamination=100.0, 
+           dereplicate=False, similarity=100.0, logger=None, verbose=False, nproc=1, 
+           pplacer_threads=1, parallel=1):
     """
     Update a database with a new set of metagenome-assembled genomes and reference genomes.
     Also create new clusters in case the input genomes result too far from everything in the database
@@ -150,6 +148,7 @@ def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundari
     :param verbose:                 Print messages on screen
     :param nproc:                   Make the process parallel when possible
     :param pplacer_threads:         Maximum number of threads to make pplacer parallel with CheckM
+    :param parallel:                Maximum number of processors to process input genomes in parallel
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -438,6 +437,9 @@ def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundari
             if not skip_genome:
                 # Retrieve the minimum and maximum common kmers for the closest taxa
                 min_bound, max_bound = get_level_boundaries(boundaries, closest_taxa)
+                # Add uncertainty to the boundaries
+                min_bound -= int(min_bound*boundary_uncertainty/100.0)
+                max_bound += int(max_bound*boundary_uncertainty/100.0)
 
                 if input_type == "MAGs":
                     # In case the input genome is a MAG
@@ -800,10 +802,11 @@ def main():
 
     t0 = time.time()
 
-    update(args.input_list, args.type, args.extension, args.db_dir, args.kingdom, args.tmp_dir, args.boundaries,
-           boundary_uncertainty=args.boundary_uncertainty, taxa_map=args.taxa, completeness=args.completeness, 
-           contamination=args.contamination, dereplicate=args.dereplicate, similarity=args.similarity, logger=logger, 
-           verbose=args.verbose, nproc=args.nproc, pplacer_threads=args.pplacer_threads)
+    update(args.input_list, args.type, args.extension, args.db_dir, args.kingdom, args.tmp_dir, 
+           boundaries=args.boundaries, boundary_uncertainty=args.boundary_uncertainty, taxa_map=args.taxa, 
+           completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
+           similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
+           pplacer_threads=args.pplacer_threads, parallel=args.parallel)
 
     if args.cleanup:
         # Remove the temporary folder
