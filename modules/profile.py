@@ -2,25 +2,39 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 9, 2022"
+__date__ = "Jun 16, 2022"
 
 import sys, os, time, errno
 import argparse as ap
 from functools import partial
-from utils import init_logger, it_exists, println, run
+
+try:
+    # Load utility functions
+    from utils import init_logger, it_exists, println, run
+except:
+    pass
 
 # Define the module name
 TOOL_ID = "profile"
 
+# Define the list of input files and folders
+FILES_AND_FOLDERS = [
+    "--input-file", # Path to the input file
+    "--log",        # Path to the log file
+    "--output-dir", # Output folder path
+    "--tree"        # Path to the tree definition file
+]
+
 def read_params():
-    p = ap.ArgumentParser(description="Query the sequence bloom trees at all the 7 taxonomic levels",
+    p = ap.ArgumentParser(prog=TOOL_ID,
+                          description="Query the sequence bloom trees at all the 7 taxonomic levels",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
     p.add_argument( "--expand",
                     action = "store_true",
                     default = False,
                     help = "Expand the input query on all the taxonomic levels" )
     p.add_argument( "--input-file",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "input_file",
                     help = "Path to the input query" )
@@ -29,10 +43,10 @@ def read_params():
                     dest = "input_id",
                     help = "Unique identifier of the input query" )
     p.add_argument( "--log",
-                    type = str,
+                    type = os.path.abspath,
                     help = "Path to the log file" )
     p.add_argument( "--output-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "output_dir",
                     help = "This is the output folder with queries results" )
@@ -52,7 +66,7 @@ def read_params():
                     help = ("Fraction of query kmers that must be present in a leaf to be considered a match. "
                             "This must be between 0.0 and 1.0") )
     p.add_argument( "--tree",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     help = "This is the tree definition file" )
     p.add_argument( "--verbose",
@@ -109,9 +123,9 @@ def profile(input_file, input_id, tree, threshold=0.0,
         output_file = os.path.join(output_dir, "{}__{}__matches.txt".format(output_prefix, level))
 
         # Run HowDeSBT
-        with open(output_file, "w") as output:
+        with open(output_file, "w+") as file:
             run(["howdesbt", "query", "--sort", "--tree", tree, "--threshold", threshold],
-                stdout=output, stderr=output)
+                stdout=file, stderr=file)
 
         if os.path.exists(output_file):
             # Take track of common and total kmers
@@ -229,16 +243,16 @@ def main():
     args = read_params()
 
     # Initialise the logger
-    logger = init_logger(filepath=args.log, verbose=args.verbose)
+    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the input files and folders exist on the file system
-    if not it_exists(args.input_file):
+    if not it_exists(args.input_file, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input_file)
     
-    if not it_exists(args.tree):
+    if not it_exists(args.tree, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.tree)
     
-    if not it_exists(args.output_dir):
+    if not it_exists(args.output_dir, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_dir)
 
     # In case --input_id is not provided

@@ -2,26 +2,40 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 12, 2022"
+__date__ = "Jun 16, 2022"
 
 import sys, os, time, errno, shutil
 import argparse as ap
 from pathlib import Path
-from itertools import partial
-from utils import init_logger, it_exists, println
+from functools import partial
+
+try:
+    # Load utility functions
+    from utils import init_logger, it_exists, println
+except:
+    pass
 
 # Define the module name
 TOOL_ID = "boundaries"
 
+# Define the list of input files and folders
+FILES_AND_FOLDERS = [
+    "--db-dir",   # Database folder path
+    "--log",      # Path to the log file
+    "--output",   # Output table path
+    "--tmp-dir"   # Temporary folder path
+]
+
 def read_params():
-    p = ap.ArgumentParser(description="Define taxonomy-specific boundaries based on kmers for the definition of new clusters",
+    p = ap.ArgumentParser(prog=TOOL_ID,
+                          description="Define taxonomy-specific boundaries based on kmers for the definition of new clusters",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
     p.add_argument( "--cleanup",
                     action = "store_true",
                     default = False,
                     help = "Remove temporary data at the end of the pipeline" )
     p.add_argument( "--db-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "db_dir",
                     help = "This is the database directory with the taxonomically organised sequence bloom trees" )
@@ -31,7 +45,7 @@ def read_params():
                     choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
                     help = "Consider genomes whose lineage belongs to a specific kingdom" )
     p.add_argument( "--log",
-                    type = str,
+                    type = os.path.abspath,
                     help = "Path to the log file" )
     p.add_argument( "--min-genomes",
                     type = number(int, minv=3),
@@ -43,11 +57,11 @@ def read_params():
                     default = 1,
                     help = "This argument refers to the number of processors used for parallelizing the pipeline when possible" )
     p.add_argument( "--output",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     help = "Output file with kmer boundaries for each of the taxonomic labels in the database" )
     p.add_argument( "--tmp-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "tmp_dir",
                     help = "Path to the folder for storing temporary data" )
@@ -170,11 +184,11 @@ def main():
     logger = init_logger(filepath=args.log, verbose=args.verbose)
 
     # Check whether the database folder exists
-    if not it_exists(args.db_dir):
+    if not it_exists(args.db_dir, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
     
     # Check whether the output boundaries table alrady exists
-    if os.path.exists(args.output):
+    if it_exists(args.output, path_type="file"):
         raise Exception("The output boundaries table already exists")
 
     # Also create the temporary folder
@@ -188,7 +202,7 @@ def main():
 
     if args.cleanup:
         # Remove the temporary folder
-        println("Cleaning up temporary space".format(level), logger=logger, verbose=verbose)
+        println("Cleaning up temporary space".format(level), logger=logger, verbose=args.verbose)
         shutil.rmtree(args.tmp_dir, ignore_errors=True)
 
     t1 = time.time()

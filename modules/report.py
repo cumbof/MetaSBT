@@ -2,25 +2,38 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 9, 2022"
+__date__ = "Jun 16, 2022"
 
 import sys, os, time, errno
 import argparse as ap
 from pathlib import Path
 
+try:
+    # Load utility functions
+    from utils import it_exists
+except:
+    pass
+
 # Define the module name
 TOOL_ID = "report"
 
+# Define the list of input files and folders
+FILES_AND_FOLDERS = [
+    "--db-dir",      # Database folder path
+    "--output-file"  # Output file path
+]
+
 def read_params():
-    p = ap.ArgumentParser(description="Build the database report table",
+    p = ap.ArgumentParser(prog=TOOL_ID,
+                          description="Build the database report table",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
     p.add_argument( "--db-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "db_dir",
                     help = "This is the database directory with the taxonomically organised sequence bloom trees" )
     p.add_argument( "--output-file",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "output_file",
                     help = "This is the path to the output table" )
@@ -139,18 +152,13 @@ def main():
     args = read_params()
 
     # Check whether the input database folder path exists
-    if not isinstance(args.db_dir, str):
-        raise TypeError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
-    if not os.path.exists(args.db_dir) or not os.path.isdir(args.db_dir):
+    if not it_exists(args.db_dir, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
     
-    # In case the output file path is not specified
-    if not args.output_file:
-        raise TypeError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
-    # Check whether its folder exists
+    # Check whether the output file and folder exist
     output_folder = os.path.dirname(args.output_file)
-    if not os.path.exists(output_folder):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_folder)
+    if it_exists(args.output_file, path_type="file") or not it_exists(output_folder, path_type="folder"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
 
     report(args.db_dir, args.output_file)
 

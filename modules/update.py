@@ -2,14 +2,19 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 13, 2022"
+__date__ = "Jun 15, 2022"
 
 import sys, os, time, errno, re, shutil
 import argparse as ap
 from pathlib import Path
-from itertools import partial
+from functools import partial
 from collections import Counter
-from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
+
+try:
+    # Load utility functions
+    from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
+except:
+    pass
 
 # Define the module name
 TOOL_ID = "update"
@@ -17,11 +22,20 @@ TOOL_ID = "update"
 # Define the software root directory
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
+# Define the list of input files and folders
+FILES_AND_FOLDERS = [
+    "--db-dir",     # Database folder path
+    "--input-list", # Input file path
+    "--log",        # Path to the log file
+    "--tmp-dir"     # Temporary folder path
+]
+
 def read_params():
-    p = ap.ArgumentParser(description="Update a database with new genomes",
+    p = ap.ArgumentParser(prog=TOOL_ID,
+                          description="Update a database with new genomes",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
     p.add_argument( "--boundaries",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     help = ("Path to the output table produced by the boundaries module. "
                             "It is required in case of MAGs as input genomes only") )
@@ -43,7 +57,7 @@ def read_params():
                     default = False,
                     help = "Remove temporary data at the end of the pipeline" )
     p.add_argument( "--db-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "db_dir",
                     help = "This is the database directory with the taxonomically organised sequence bloom trees" )
@@ -62,7 +76,7 @@ def read_params():
                     dest = "filter_size",
                     help = "This is the size of the bloom filters" )
     p.add_argument( "--input-list",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "input_list",
                     help = "This file contains the list of paths to the new genomes that will be added to the database" )
@@ -71,7 +85,7 @@ def read_params():
                     dest = "kmer_len",
                     help = "This is the length of the kmers used for building bloom filters" )
     p.add_argument( "--log",
-                    type = str,
+                    type = os.path.abspath,
                     help = "Path to the log file" )
     p.add_argument( "--nproc",
                     type = number(int, minv=1, maxv=os.cpu_count()),
@@ -87,11 +101,11 @@ def read_params():
                     help = ("Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. "
                             "This is used exclusively in conjunction with the --dereplicate argument") )
     p.add_argument( "--taxa",
-                    type = str,
+                    type = os.path.abspath,
                     help = ("Input file with the mapping between input genome IDs and their taxonomic label. "
                             "This is used in case of reference genomes only \"--type=references\"") )
     p.add_argument( "--tmp-dir",
-                    type = str,
+                    type = os.path.abspath,
                     required = True,
                     dest = "tmp_dir",
                     help = "Path to the folder for storing temporary data" )
@@ -327,7 +341,8 @@ def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundari
             genome_name = os.path.splitext(os.path.basename(filepath))[0]
             genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
             # Unzip the current genome to the tmp folder
-            run(["gunzip", "-c", genome_path], stdout=filepath)
+            with open(filepath, "w+") as file:
+                run(["gunzip", "-c", genome_path], stdout=file)
         
         printline("Profiling {}".format(genome_name))
 
@@ -764,19 +779,19 @@ def main():
     args = read_params()
 
     # Initialise the logger
-    logger = init_logger(filepath=args.log, verbose=args.verbose)
+    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the database folder exists
-    if not it_exists(args.db_dir):
+    if not it_exists(args.db_dir, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
     
     # Check whether the file with the list of input genome paths exists
-    if not it_exists(args.input_list):
+    if not it_exists(args.input_list, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input_list)
 
     # Check whether the input file with the mapping between genome name and taxonomic labels exists
     # Only in case of input reference genomes
-    if args.type == "references" and not it_exists(args.taxa):
+    if args.type == "references" and not it_exists(args.taxa, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.taxa)
 
     # Also create the temporary folder
@@ -786,13 +801,13 @@ def main():
     t0 = time.time()
 
     update(args.input_list, args.type, args.extension, args.db_dir, args.kingdom, args.tmp_dir, args.boundaries,
-           boundary_uncertainty=args.boundary_uncertainty, taxa_map=taxa, completeness=completeness, 
-           contamination=contamination, dereplicate=dereplicate, similarity=similarity, logger=logger, 
+           boundary_uncertainty=args.boundary_uncertainty, taxa_map=args.taxa, completeness=args.completeness, 
+           contamination=args.contamination, dereplicate=args.dereplicate, similarity=args.similarity, logger=logger, 
            verbose=args.verbose, nproc=args.nproc, pplacer_threads=args.pplacer_threads)
 
     if args.cleanup:
         # Remove the temporary folder
-        println("Cleaning up temporary space".format(level), logger=logger, verbose=verbose)
+        println("Cleaning up temporary space".format(level), logger=logger, verbose=args.verbose)
         shutil.rmtree(args.tmp_dir, ignore_errors=True)
 
     t1 = time.time()
