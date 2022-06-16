@@ -152,7 +152,7 @@ def report(db_dir, output_file):
                                                                references,
                                                                round(sum(completeness)/len(completeness), 2) if completeness else 0.0,
                                                                round(sum(contamination)/len(contamination), 2) if contamination else 0.0,
-                                                               round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2)) if strain_heterogeneity else 0.0)
+                                                               round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2) if strain_heterogeneity else 0.0))
 
 def main():
     # Load command line parameters
