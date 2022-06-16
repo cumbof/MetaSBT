@@ -240,8 +240,8 @@ def level_name(current_level, prev_level):
     """
 
     # Remove special characters from current and previous level names
-    current_level = re.sub(r'\W+', "", current_level).strip("_")
-    prev_level = re.sub(r'\W+', "", prev_level).strip("_")
+    current_level = re.sub(r"_+", "_", re.sub(r"\W+", "_", current_level)).strip("_")
+    prev_level = re.sub(r"_+", "_", re.sub(r"\W+", "_", prev_level)).strip("_")
 
     # Build the new level name
     level_prefix = current_level.strip()
