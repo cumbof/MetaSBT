@@ -47,7 +47,7 @@ PATH=$PATH:~/git/meta-index
 Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
 
 In this last case, remember to check that the following dependencies are installed and available on your system:
-- [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.1.3)
+- [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
 - [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
