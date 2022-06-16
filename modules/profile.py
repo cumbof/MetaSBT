@@ -7,6 +7,7 @@ __date__ = "Jun 16, 2022"
 import sys, os, time, errno
 import argparse as ap
 from functools import partial
+from logging import Logger
 
 try:
     # Load utility functions
@@ -83,8 +84,8 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def profile(input_file, input_id, tree, threshold=0.0,
-            expand=False, stop_at=None, output_dir=None, output_prefix=None, logger=None, verbose=False):
+def profile(input_file: str, input_id: str, tree: str, threshold: float=0.0, expand: bool=False, 
+            stop_at: bool=None, output_dir: str=None, output_prefix: str=None, logger: Logger=None, verbose: bool=False) -> None:
     """
     Query the input sequence against a specific tree
     Also expand the query to the lower taxonomic levels if requested
@@ -241,7 +242,7 @@ def profile(input_file, input_id, tree, threshold=0.0,
                                                                       closest_genome_total_kmers), # Total number of kmers in query
                                                        closest_genome_score))                      # Score
 
-def main():
+def main() -> None:
     # Load command line parameters
     args = read_params()
 

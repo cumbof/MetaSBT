@@ -9,6 +9,7 @@ import argparse as ap
 from pathlib import Path
 from functools import partial
 from collections import Counter
+from logging import Logger
 
 try:
     # Load utility functions
@@ -125,10 +126,10 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundaries=None,
-           boundary_uncertainty=0.0, taxa_map=None, completeness=0.0, contamination=100.0, 
-           dereplicate=False, similarity=100.0, logger=None, verbose=False, nproc=1, 
-           pplacer_threads=1, parallel=1):
+def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdom: str, tmp_dir: str, boundaries: str=None,
+           boundary_uncertainty: float=0.0, taxa_map: str=None, completeness: float=0.0, contamination: float=100.0, 
+           dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False, nproc: int=1, 
+           pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Update a database with a new set of metagenome-assembled genomes and reference genomes.
     Also create new clusters in case the input genomes result too far from everything in the database
@@ -779,7 +780,7 @@ def update(input_list, input_type, extension, db_dir, kingdom, tmp_dir, boundari
     else:
         printline("No lineages have been updated")
 
-def main():
+def main() -> None:
     # Load command line parameters
     args = read_params()
 

@@ -8,6 +8,7 @@ import sys, os, time, errno, shutil
 import argparse as ap
 from pathlib import Path
 from functools import partial
+from logging import Logger
 
 try:
     # Load utility functions
@@ -79,7 +80,7 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def define_boundaries(level_dir, level_id, tmp_dir, output, min_genomes=3, nproc=1):
+def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, min_genomes: int=3, nproc: int=1) -> None:
     """
     Compute boundaries for the specified taxonomic level
 
@@ -132,7 +133,7 @@ def define_boundaries(level_dir, level_id, tmp_dir, output, min_genomes=3, nproc
         with open(output, "a+") as table:
             table.write("{}\t{}\t{}\n".format(lineage, min_kmers, max_kmers))
 
-def boundaries(db_dir, kingdom, tmp_dir, output, min_genomes=3, logger=None, verbose=False, nproc=1):
+def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes: int=3, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
     """
     Define boundaries for each of the taxonomic levels in the database
     Boundaries are defined as the minimum and maximum number of common kmers among all 
@@ -179,7 +180,7 @@ def boundaries(db_dir, kingdom, tmp_dir, output, min_genomes=3, logger=None, ver
     # Report the path to the output boundaries table file
     printline("Output table: {}".format(output))
 
-def main():
+def main() -> None:
     # Load command line parameters
     args = read_params()
 

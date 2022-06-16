@@ -9,6 +9,8 @@ import argparse as ap
 import multiprocessing as mp
 from pathlib import Path
 from functools import partial
+from logging import Logger
+from typing import List, Tuple
 
 try:
     # Load utility functions
@@ -127,7 +129,7 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def count_genomes(tax_id, kingdom, out_dir):
+def count_genomes(tax_id: str, kingdom: str, out_dir: str) -> int:
     """
     Count the number of genomes classified as the provided NCBI tax ID
 
@@ -166,7 +168,7 @@ def count_genomes(tax_id, kingdom, out_dir):
     
     return genomes_counter
 
-def download_taxdump(taxdump_url, folder_path):
+def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     """
     Download and extract the NCBI taxdump tarball
 
@@ -191,7 +193,7 @@ def download_taxdump(taxdump_url, folder_path):
     
     return os.path.join(taxdump_dir, "nodes.dmp"), os.path.join(taxdump_dir, "names.dmp")
 
-def estimate_bf_size(genomes_filepath, kmer_len, prefix, nproc=1):
+def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, nproc: int=1) -> int:
     """
     Estimate the bloom filter size with ntCard
 
@@ -231,12 +233,13 @@ def estimate_bf_size(genomes_filepath, kmer_len, prefix, nproc=1):
     # Compute the bloom filter size
     return F0-f1
 
-def level_name(current_level, prev_level):
+def level_name(current_level: str, prev_level: str) -> str:
     """
     Define a taxonomic level name
 
     :param current_level:   Current level name
     :param prev_level:      Previous level name in case of unclassified
+    :return:                The new level name
     """
 
     # Remove special characters from current and previous level names
@@ -253,7 +256,7 @@ def level_name(current_level, prev_level):
     
     return "{}{}".format(level_prefix, level_suffix)
 
-def load_taxa(ncbitax2lin_table, kingdom=None, dump=None):
+def load_taxa(ncbitax2lin_table: str, kingdom: str=None, dump: str=None) -> Tuple[list, list]:
     """
     Load the ncbitax2lin output table
 
@@ -313,7 +316,7 @@ def load_taxa(ncbitax2lin_table, kingdom=None, dump=None):
     
     return tax_ids, tax_labels
 
-def ncbitax2lin(nodes, names, out_dir):
+def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
     """
     Extract lineages from the NCBI taxdump
 
@@ -335,8 +338,9 @@ def ncbitax2lin(nodes, names, out_dir):
     
     return ncbitax2lin_table
 
-def process_tax_id(tax_id, tax_label, kingdom, db_dir, tmp_dir, how_many=0, nproc=1, pplacer_threads=1, 
-                   completeness=0.0, contamination=100.0, dereplicate=False, similarity=100.0, logger=None, verbose=False):
+def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, how_many: int=0, 
+                   nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, contamination: float=100.0, 
+                   dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False) -> List[str]:
     """
     Process a specific NCBI tax ID
     Download, quality-control, and dereplicate genomes
@@ -506,7 +510,7 @@ def process_tax_id(tax_id, tax_label, kingdom, db_dir, tmp_dir, how_many=0, npro
     # Return the list of paths to the genome files
     return genomes_paths
 
-def retrieve_genomes(tax_id, kingdom, out_dir, how_many=0, nproc=1, retries=1):
+def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, how_many: int=0, nproc: int=1, retries: int=1) -> Tuple[List[str], str]:
     """
     Retrieve genomes from NCBI under a specific tax ID
 
@@ -557,9 +561,10 @@ def retrieve_genomes(tax_id, kingdom, out_dir, how_many=0, nproc=1, retries=1):
     # Return the list of paths to the genome files
     return genomes, os.path.join(out_dir, "metadata.tsv")
 
-def index(db_dir, kingdom, tmp_dir, kmer_len, filter_size, how_many=None,
-          estimate_filter_size=False, increase_filter_size=0.0, completeness=0.0, contamination=100.0,
-          dereplicate=False, similarity=100.0, logger=None, verbose=False, nproc=1, pplacer_threads=1, parallel=1):
+def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, how_many: int=None,
+          estimate_filter_size: bool=False, increase_filter_size: float=0.0, completeness: float=0.0, 
+          contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, 
+          verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Build the database baseline
 
@@ -710,7 +715,7 @@ def index(db_dir, kingdom, tmp_dir, kmer_len, filter_size, how_many=None,
     # Come back to the original folder
     os.chdir(current_folder)
 
-def main():
+def main() -> None:
     # Load command line parameters
     args = read_params()
 

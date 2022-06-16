@@ -2,12 +2,14 @@ __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
 __date__ = "Jun 15, 2022"
 
-import sys, os, errno, logging, math, subprocess
+import sys, os, io, errno, logging, math, subprocess
 import numpy as np
 from pathlib import Path
+from logging import Logger
 from logging.config import dictConfig
+from typing import List, Tuple
 
-def checkm(genomes_paths, tmp_dir, file_extension="fna.gz", nproc=1, pplacer_threads=1):
+def checkm(genomes_paths: List[str], tmp_dir: str, file_extension: str="fna.gz", nproc: int=1, pplacer_threads: int=1) -> List[str]:
     """
     Run CheckM on a set of genomes
     Organise genomes in chunks with 1000 genomes at most
@@ -75,7 +77,7 @@ def checkm(genomes_paths, tmp_dir, file_extension="fna.gz", nproc=1, pplacer_thr
 
     return output_tables
 
-def cluster(kmer_matrix_filepath, boundaries_filepath, manifest_filepath, profiles_dir, outpath):
+def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepath: str, profiles_dir: str, outpath: str) -> str:
     """
     Define new clusters with the unassigned MAGs
 
@@ -301,7 +303,7 @@ def cluster(kmer_matrix_filepath, boundaries_filepath, manifest_filepath, profil
 
     return outpath
 
-def download(url, folder):
+def download(url: str, folder: str) -> str:
     """
     Download a file from URL to the specified folder
 
@@ -319,7 +321,7 @@ def download(url, folder):
     
     return os.path.join(folder, url.split(os.sep)[-1])
 
-def filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0):
+def filter_checkm_tables(checkm_tables: List[str], completeness: float=0.0, contamination: float=100.0) -> List[str]:
     """
     Filter genomes according to completeness and contamination criteria
 
@@ -349,7 +351,7 @@ def filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0):
     
     return genomes
 
-def filter_genomes(kmer_matrix_filepath, outpath, similarity=100.0):
+def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float=100.0) -> None:
     """
     Filter genomes according to their set of kmers.
     Discard a genome if there is at least one other genome with a specific percentage of kmers in common
@@ -405,7 +407,7 @@ def filter_genomes(kmer_matrix_filepath, outpath, similarity=100.0):
         for genome in excluded:
             output.write("{}\n".format(genome))
 
-def get_boundaries(kmer_matrix_filepath):
+def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
     """
     Return kmers boundaries for current taxonomic level defined as the minimum and
     maximum number of common kmers among all the genomes in the current taxonomic level
@@ -437,12 +439,13 @@ def get_boundaries(kmer_matrix_filepath):
 
     return minv, maxv
 
-def get_level_boundaries(boundaries_filepath, taxonomy):
+def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, int]:
     """
     Retrieve boundaries for a given taxonomic label
 
     :param boundaries_filepath:     Path to the file with boundaries produced by the boundaries module
     :param taxonomy:                Taxonomic label
+    :return:                        Boundaries
     """
 
     minv = 0
@@ -501,7 +504,7 @@ def get_level_boundaries(boundaries_filepath, taxonomy):
 
     return minv, maxv
 
-def howdesbt(level_dir, kmer_len=21, filter_size=10000, nproc=1):
+def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: int=1) -> None:
     """
     Run HowDeSBT on a specific taxonomic level
 
@@ -692,7 +695,7 @@ def howdesbt(level_dir, kmer_len=21, filter_size=10000, nproc=1):
     else:
         raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
 
-def it_exists(path, path_type="file"):
+def it_exists(path: str, path_type: str="file") -> bool:
     """
     Check whether a file or folder exists on the file system
 
@@ -713,7 +716,7 @@ def it_exists(path, path_type="file"):
     
     return False
 
-def init_logger(filepath=None, toolid=None, verbose=True):
+def init_logger(filepath: str=None, toolid: str=None, verbose: bool=True) -> Logger:
     """
     Define a logger to print on console, on file, or both
 
@@ -811,7 +814,7 @@ def init_logger(filepath=None, toolid=None, verbose=True):
     # In case no file path and verbose have been specified
     return None
 
-def kmtricks_matrix(genomes_fof, run_dir, nproc, output_table):
+def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: str) -> None:
     """
     Run kmtricks for building the kmers matrix
 
@@ -848,7 +851,7 @@ def kmtricks_matrix(genomes_fof, run_dir, nproc, output_table):
     # Close the log file handler
     kmtricks_log.close()
 
-def load_matrix(kmer_matrix_filepath, skiprows=0):
+def load_matrix(kmer_matrix_filepath: str, skiprows: int=0) -> np.ndarray:
     """
     Load a kmtricks kmers matrix into a numpy ndarray with a row for each genome
     and a column for each kmer
@@ -908,7 +911,7 @@ def number(typev, minv=None, maxv=None):
 
     return type_func
 
-def println(message, logger=None, verbose=True):
+def println(message: str, logger: Logger=None, verbose: bool=True) -> None:
     """
     Send messages to the logger
     It will print messages on screen, send messages to the log file, or both
@@ -926,7 +929,7 @@ def println(message, logger=None, verbose=True):
         # Redirect messages to the screen
         print(message)
 
-def run(cmdline, stdout=sys.stdout, stderr=sys.stderr, silence=False, extended_error=False):
+def run(cmdline: List[str], stdout: io.TextIOWrapper=sys.stdout, stderr: io.TextIOWrapper=sys.stderr, silence: bool=False, extended_error: bool=False) -> None:
     """
     Wrapper for the subprocess.check_call function
 

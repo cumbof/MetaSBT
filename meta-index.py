@@ -19,6 +19,7 @@ import os, time, errno, subprocess, requests, importlib
 import argparse as ap
 from pathlib import Path
 from shutil import which
+from typing import List
 from modules.utils import println, run
 
 # Define the software root directory
@@ -72,7 +73,7 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_known_args()
 
-def check_for_software_updates():
+def check_for_software_updates() -> None:
     """
     Check for software updates
     """
@@ -85,7 +86,7 @@ def check_for_software_updates():
             if "v{}".format(__version__) != data["tag_name"]:
                 println("A new software update is available!\n{}\n".format(REPOSITORY_URL))
 
-def get_modules(dirpath):
+def get_modules(dirpath: str) -> List[str]:
     """
     Return the list of modules under the specified directory
     """
@@ -106,7 +107,7 @@ def get_modules(dirpath):
     
     return modules_list
 
-def print_citations():
+def print_citations() -> None:
     """
     Print citations and exit
     """
@@ -114,7 +115,7 @@ def print_citations():
     println("If you are using this software for your research, please credit us in your manuscript by citing:\n")
     println("TBA\n")
 
-def print_license():
+def print_license() -> None:
     """
     Print the software license and exit
     """
@@ -125,7 +126,7 @@ def print_license():
     with open(LICENSE, "r") as file:
         println(file.read())
 
-def print_modules():
+def print_modules() -> None:
     """
     List all the available modules and exit
     """
@@ -139,7 +140,7 @@ def print_modules():
     for module_id in sorted(modules_list):
         println("\t{}".format(module_id))
 
-def resolve_dependencies(dependencies, stop_unavailable=False, verbose=True):
+def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, verbose: bool=True) -> None:
     """
     Check whether all the external software dependencies and Python requirements are available
     """
@@ -255,7 +256,7 @@ def main():
                     # Fix paths to the input files and folders
                     for pos in range(len(unknown)):
                         if unknown[pos] in module.FILES_AND_FOLDERS:
-                            unknown[pos+1] = os.path.abspath(unknown[pos+1])
+                            unknown[pos+1] = str(Path(unknown[pos+1]).resolve())
 
                     # Expand the command line with all the input arguments
                     cmd_line.extend(unknown)

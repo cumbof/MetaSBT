@@ -47,7 +47,7 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def report(db_dir, output_file):
+def report(db_dir: str, output_file: str) -> None:
     """
     Build the database report table
 
@@ -154,7 +154,7 @@ def report(db_dir, output_file):
                                                                round(sum(contamination)/len(contamination), 2) if contamination else 0.0,
                                                                round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2) if strain_heterogeneity else 0.0))
 
-def main():
+def main() -> None:
     # Load command line parameters
     args = read_params()
 
