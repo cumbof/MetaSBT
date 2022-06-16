@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 9, 2022"
+__date__ = "Jun 16, 2022"
 
 import sys
 
@@ -15,11 +15,11 @@ if sys.version_info[0] < 3:
     raise Exception("{} requires Python 3, your current Python version is {}.{}.{}"
                     .format(TOOL_ID, sys.version_info[0], sys.version_info[1], sys.version_info[2]))
 
-import os, time, errno, subprocess, requests
+import os, time, errno, subprocess, requests, importlib
 import argparse as ap
 from pathlib import Path
 from shutil import which
-from modules.utils import println
+from modules.utils import println, run
 
 # Define the software root directory
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -34,19 +34,54 @@ MODULES_DIR = os.path.join(SCRIPT_DIR, "modules")
 REQUIREMENTS = os.path.join(SCRIPT_DIR, "requirements.txt")
 # Also define the list of external software dependencies
 DEPENDENCIES = [
-    "checkm",               # https://github.com/Ecogenomics/CheckM
-    "howdesbt",             # https://github.com/medvedevgroup/HowDeSBT
-    "kmtricks",             # https://github.com/tlemane/kmtricks/
-    "ncbi-genome-download"  # https://github.com/kblin/ncbi-genome-download/
-    "ncbitax2lin",          # https://github.com/zyxue/ncbitax2lin
-    "ntcard",               # https://github.com/bcgsc/ntCard
-    "python3",              # https://www.python.org
-    "wget",                 # https://www.gnu.org/software/wget/
+    "checkm",                # https://github.com/Ecogenomics/CheckM
+    "howdesbt",              # https://github.com/medvedevgroup/HowDeSBT
+    "kmtricks",              # https://github.com/tlemane/kmtricks/
+    "ncbi-genome-download",  # https://github.com/kblin/ncbi-genome-download/
+    "ncbitax2lin",           # https://github.com/zyxue/ncbitax2lin
+    "ntcard",                # https://github.com/bcgsc/ntCard
+    "python3",               # https://www.python.org
+    "wget",                  # https://www.gnu.org/software/wget/
 ]
 
 # Define the software repository URLs
 REPOSITORY_URL = "https://github.com/BlankenbergLab/{}".format(TOOL_ID)
 RELEASES_API_URL = "https://api.github.com/repos/BlankenbergLab/{}/releases/latest".format(TOOL_ID)
+
+def read_params():
+    p = ap.ArgumentParser(prog=TOOL_ID,
+                          description=("A pipeline for automatically indexing microbial genomes and accurately "
+                                       "characterizing metagenome-assembled genomes with sequence bloom trees"),
+                          formatter_class=ap.ArgumentDefaultsHelpFormatter)
+    p.add_argument( "--check-updates",
+                    action = "store_true",
+                    default = False,
+                    dest = "check_updates",
+                    help = "Check for software updates" )
+    p.add_argument( "--citations",
+                    action = "store_true",
+                    default = False,
+                    help = ("Print software citations. "
+                            "You are kindly asked to cite this software in your manuscript in case it results useful for your analyses") )
+    p.add_argument( "--license",
+                    action = "store_true",
+                    default = False,
+                    help = "Print the software license" )
+    p.add_argument( "--modules",
+                    action = "store_true",
+                    default = False,
+                    help = "List all the available modules" )
+    p.add_argument( "--resolve-dependencies",
+                    action = "store_true",
+                    default = False,
+                    dest = "resolve_dependencies",
+                    help = "Check whether all the external software dependencies are available on your system" )
+    p.add_argument( "-v",
+                    "--version",
+                    action = "version",
+                    version = "{} version {} ({})".format(TOOL_ID, __version__, __date__),
+                    help = "Print the current {} version and exit".format(TOOL_ID) )
+    return p.parse_known_args()
 
 def check_for_software_updates():
     """
@@ -135,7 +170,7 @@ def resolve_dependencies(stop_unavailable=False, verbose=True):
     if howdesbt:
         # Check whether the advanced bfoperate command is available with the current HowDeSBT installation
         try:
-            run(["howdesbt", "bfoperate", "--help"], stdout=sb.DEVNULL, stderr=sb.DEVNULL)
+            run(["howdesbt", "bfoperate", "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except:
             println(("\n[WARNING] The HowDeSBT version installed on your system does not provide advanced commands required for indexing and updating a database!\n"
                      "Please, follow the instructions on the official HowDeSBT repository on GitHub to compile the software with its alternative version of the Makefile"), 
@@ -156,40 +191,6 @@ def resolve_dependencies(stop_unavailable=False, verbose=True):
             except:
                 raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS))
 
-def read_params():
-    p = ap.ArgumentParser(description=("A pipeline for automatically indexing microbial genomes and accurately "
-                                       "characterizing metagenome-assembled genomes with sequence bloom trees"),
-                          formatter_class=ap.ArgumentDefaultsHelpFormatter)
-    p.add_argument( "--check-updates",
-                    action = "store_true",
-                    default = False,
-                    dest = "check_updates",
-                    help = "Check for software updates" )
-    p.add_argument( "--citations",
-                    action = "store_true",
-                    default = False,
-                    help = ("Print software citations. "
-                            "You are kindly asked to cite this software in your manuscript in case it results useful for your analyses") )
-    p.add_argument( "--license",
-                    action = "store_true",
-                    default = False,
-                    help = "Print the software license" )
-    p.add_argument( "--modules",
-                    action = "store_true",
-                    default = False,
-                    help = "List all the available modules" )
-    p.add_argument( "--resolve-dependencies",
-                    action = "store_true",
-                    default = False,
-                    dest = "resolve_dependencies",
-                    help = "Check whether all the external software dependencies are available on your system" )
-    p.add_argument( "-v",
-                    "--version",
-                    action = "version",
-                    version = "{} version {} ({})".format(TOOL_ID, __version__, __date__),
-                    help = "Print the current {} version and exit".format(TOOL_ID) )
-    return p.parse_known_args()
-
 def main():
     # In case of --help and --version options
     # Both the arguments are shared among the main controller and modules
@@ -198,8 +199,9 @@ def main():
         modules_list = get_modules(MODULES_DIR)
 
         if sys.argv[1] in modules_list:
-            # Run the helper of the specified module
-            subprocess.check_call([sys.executable, os.path.join(MODULES_DIR, "{}.py".format(sys.argv[1])), sys.argv[2]])
+            run([sys.executable, os.path.join(MODULES_DIR, "{}.py".format(sys.argv[1])), sys.argv[2]],
+                extended_error=True)
+
         else:
             raise Exception("Unrecognised module")
     
@@ -239,29 +241,34 @@ def main():
 
             # Load the list of available modules
             modules_list = get_modules(MODULES_DIR)
+
             module_found = False
             for unknown_arg in unknown:
                 if unknown_arg in modules_list:
+                    # Build the command line
+                    cmd_line = [sys.executable, os.path.join(MODULES_DIR, "{}.py".format(unknown_arg))]
+                    
+                    # Fix paths to the input files and folders
+                    module = importlib.import_module("modules.{}".format(unknown_arg))
+                    for pos in range(unknown):
+                        if unknown[pos] in module.FILES_AND_FOLDERS:
+                            unknown[pos+1] = os.path.abspath(unknown[pos+1])
+
+                    # Expand the command line with all the input arguments
+                    cmd_line.extend(unknown)
+                    cmd_line.remove(unknown_arg)
+
                     try:
-                        # Build the command line
-                        cmd_line = [sys.executable, os.path.join(MODULES_DIR, "{}.py".format(unknown_arg))]
-                        # Add all the unknown arguments
-                        cmd_line.extend(unknown)
-                        cmd_line.remove(unknown_arg)
                         # Run the specified module
-                        subprocess.check_call(cmd_line)
-                        module_found = True
-                        break
-                    except subprocess.CalledProcessError as e:
-                        # Report the exception
-                        println("{}\n".format(e.output))
-                        # Print some additional message
-                        println("If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.")
-                        println("We would be happy to answer your questions and help you troubleshoot any kind of issues with the {} framework.\n".format(TOOL_ID))
-                        println("{}/issues".format(REPOSITORY_URL))
-                        println("{}/discussions\n".format(REPOSITORY_URL))
-                        # Exit
+                        run(cmd_line, extended_error=True)
+                    except Exception as e:
+                        println(str(e))
                         sys.exit(os.EX_SOFTWARE)
+
+                    # Mark module as found and exit
+                    module_found = True
+
+                    break
 
             if module_found:
                 # Print citations and credits
