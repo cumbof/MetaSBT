@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 9, 2022"
+__date__ = "Jun 15, 2022"
 
 import sys, os, errno, logging, math, subprocess
 import numpy as np
@@ -68,7 +68,7 @@ def checkm(genomes_paths, tmp_dir, file_extension="fna.gz", nproc=1, pplacer_thr
                                                  "--pplacer_threads", str(pplacer_threads),
                                                  "--tab_table", "-f", table_path,
                                                  str(bins_folder), run_dir],
-                        stdout=sb.DEVNULL, stderr=sb.DEVNULL)
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     # Add the output table path to the output list
                     output_tables.append(table_path)
@@ -317,7 +317,7 @@ def download(url, folder):
 
     # Download file from URL to the destination folder
     run(["wget", "-N", url, "-P", folder],
-        stdout=sb.DEVNULL, stderr=sb.DEVNULL)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     return os.path.join(folder, url.split(os.sep)[-1])
 
@@ -503,7 +503,7 @@ def get_level_boundaries(boundaries_filepath, taxonomy):
 
     return minv, maxv
 
-def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
+def howdesbt(level_dir, kmer_len=21, filter_size=10000, nproc=1):
     """
     Run HowDeSBT on a specific taxonomic level
 
@@ -534,8 +534,9 @@ def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
         if os.path.exists(level_filter):
             os.unlink(level_filter)
 
-        # Define the log file handler
-        howdesbt_log = open(os.path.join(level_dir, "howdesbt.log"), "w+")
+        # Define the log file
+        howdesbt_log_filepath = os.path.join(level_dir, "howdesbt.log")
+        howdesbt_log = open(howdesbt_log_filepath, "w+")
 
         # Take track of how many genomes under the specific taxonomic levels
         how_many = 0
@@ -557,8 +558,9 @@ def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
                     
                     if not os.path.exists(os.path.join(filters_dir, "{}.bf".format(genome_name))):
                         # Uncompress the current genome
-                        with open(os.path.join(genomes_folder, "{}.fna".format(genome_name)), "w+") as genome_file:
-                            run(["gzip", "-dc", str(genome_path)], stdout=genome_file, stderr=genome_file)
+                        genome_file = os.path.join(genomes_folder, "{}.fna".format(genome_name))
+                        with open(genome_file, "w+") as file:
+                            run(["gzip", "-dc", str(genome_path)], stdout=file, stderr=file)
 
                         # Build the bloom filter file from the current genome
                         run(["howdesbt", "makebf", "--k={}".format(kmer_len),
@@ -566,13 +568,13 @@ def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
                                                    "--bits={}".format(filter_size),
                                                    "--hashes=1",
                                                    "--seed=0,0",
-                                                   os.path.join(genomes_folder, "{}.fna".format(genome_name)),
+                                                   genome_file,
                                                    "--out={}".format(os.path.join(filters_dir, "{}.bf".format(genome_name))),
                                                    "--threads={}".format(nproc)],
                             stdout=howdesbt_log, stderr=howdesbt_log)
                         
                         # Get rid of the uncompressed genome file
-                        os.unlink(os.path.join(genomes_folder, "{}.fna".format(genome_name)))
+                        os.unlink(genome_file)
 
                         # Increment the genomes counter
                         how_many += 1
@@ -685,26 +687,35 @@ def howdesbt(level_dir, kmer_len, filter_size, nproc=1):
                         os.unlink(os.path.join(index_dir, "union.sbt"))
 
                         break
+        
+        # Close the log file handler
+        howdesbt_log.close()
 
     else:
         raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
 
-def it_exists(path):
+def it_exists(path, path_type="file"):
     """
     Check whether a file or folder exists on the file system
 
-    :param path:    File or folder path
-    :return:        Always return True if the input path exists
-                    Otherwise, raise an exception
+    :param path:        File or folder path
+    :param path_type:   Type of the input path (file, folder)
+    :return:            Always return True if the input path exists
+                        Otherwise, raise an exception
     """
 
     if isinstance(path, str):
-        if os.path.exists(path):
-            return True
+        if path_type.strip().lower() == "file":
+            if os.path.isfile(path):
+                return True
+        
+        elif path_type.strip().lower() == "folder":
+            if os.path.isdir(path):
+                return True
     
     return False
 
-def init_logger(filepath=None, verbose=True):
+def init_logger(filepath=None, toolid=None, verbose=True):
     """
     Define a logger to print on console, on file, or both
 
@@ -715,42 +726,41 @@ def init_logger(filepath=None, verbose=True):
 
     # Define the logger config
     logging_config = dict(
-        "version" = 1,
-        "formatters" = {
+        version = 1,
+        formatters = {
             "verbose": {
-                "format": ("[%(asctime)s] %(levelname)s "
-                        "[%(name)s:%(lineno)s] %(message)s"),
+                "format": "[%(toolid)s][%(levelname)s][%(asctime)s] %(message)s",
                 "datefmt": "%d/%b/%Y %H:%M:%S"
             }
         },
-        "handlers" = {
+        handlers = {
             "console": {
                 "class": "logging.StreamHandler",
-                "level": "DEBUG",
+                "level": "INFO",
                 "formatter": "verbose",
                 "stream": sys.stdout
             },
             "file": {
                 "class": "logging.handlers.RotatingFileHandler",
-                "level": "DEBUG",
-                "formatter": "verbose"
-                "filename": None,
+                "level": "INFO",
+                "formatter": "verbose",
+                "filename": os.devnull,
                 "maxBytes": 52428800,
                 "backupCount": 7
             }
         },
-        "loggers" = {
+        loggers = {
             "console": {
                 "handlers": ["console"],
-                "level": logging.DEBUG
+                "level": logging.INFO
             },
             "file": {
                 "handlers": ["file"],
-                "level": logging.DEBUG
+                "level": logging.INFO
             },
             "full": {
                 "handlers": ["console", "file"],
-                "level": logging.DEBUG
+                "level": logging.INFO
             },
         }
     )
@@ -767,6 +777,18 @@ def init_logger(filepath=None, verbose=True):
     
     # Load the logging config
     dictConfig(logging_config)
+
+    # Get the record factory
+    factory = logging.getLogRecordFactory()
+
+    # Customise the record_factory function to add the toolid attribute
+    def record_factory(*args, **kwargs):
+        record = factory(*args, **kwargs)
+        record.toolid = toolid
+        return record
+
+    # Register the new record factory
+    logging.setLogRecordFactory(record_factory)
 
     # Define the logger type
     logtype = None
@@ -801,9 +823,10 @@ def kmtricks_matrix(genomes_fof, run_dir, nproc, output_table):
     :param output_table:    Path to the output kmer matrix file
     """
 
-    # Initialise the kmtricks log handler
+    # Initialise the kmtricks log
     # Both stdout and stderr will be redirected here
-    kmtricks_log = open(os.path.join(run_dir, "kmtricks.log"), "w+")
+    kmtricks_log_filepath = os.path.join(run_dir, "kmtricks.log")
+    kmtricks_log = open(kmtricks_log_filepath, "w+")
 
     # Run kmtricks for building the kmers matrix
     run(["kmtricks", "pipeline", "--file", genomes_fof,
@@ -823,8 +846,8 @@ def kmtricks_matrix(genomes_fof, run_dir, nproc, output_table):
                                   "--threads", int(nproc),
                                   "--output", output_table],
         stdout=kmtricks_log, stderr=kmtricks_log)
-
-    # Close the log handles
+    
+    # Close the log file handler
     kmtricks_log.close()
 
 def load_matrix(kmer_matrix_filepath, skiprows=0):
@@ -905,7 +928,7 @@ def println(message, logger=None, verbose=True):
         # Redirect messages to the screen
         print(message)
 
-def run(cmdline, stdout=sys.stdout, stderr=sys.stderr, silence=False):
+def run(cmdline, stdout=sys.stdout, stderr=sys.stderr, silence=False, extended_error=False):
     """
     Wrapper for the subprocess.check_call function
 
@@ -926,10 +949,17 @@ def run(cmdline, stdout=sys.stdout, stderr=sys.stderr, silence=False):
             # Run a specific command line and redirect the stdout and stderr
             # to those specified in input
             subprocess.check_call(cmdline, stdout=stdout, stderr=stderr)
-        except:
-            # This exception will be caught by the main controller
-            raise subprocess.CalledProcessError("An error has occurred while running the following command:\n{}"
-                                                .format(" ".join(cmdline)))
+        
+        except subprocess.CalledProcessError as e:
+            # Define the error message
+            error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(" ".join(cmdline))
+            
+            if extended_error:
+                # Extend the error message
+                error_message += ("If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
+                                  "We would be happy to answer your questions and help you troubleshoot any kind of issues with our framework.\n")
+
+            raise Exception(error_message)
 
     else:
         # There is nothing to run
