@@ -37,7 +37,7 @@ def checkm(genomes_paths: List[str], tmp_dir: str, file_extension: str="fna.gz",
         # Retrieve the input genome extension
 
         # Iterate over the list of paths to the genome files
-        for genome_path in genome_paths:
+        for genome_path in genomes_paths:
             # Reorganise genomes in chunks with 1000 genomes at most
             if counter % 1000 > 0:
                 counter = 0
