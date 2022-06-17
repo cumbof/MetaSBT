@@ -144,11 +144,13 @@ meta-index index --db-dir ~/myindex \
 | `--estimate-filter-size` | `False` | Estimate the bloom filter size with ntCard |
 | `--filter-size`          |         | Bloom filter size |
 | `--help`                 |         | Print the list of arguments and exit |
-| `--how-many`             | `0`     | Limit the number of genomes per species. The number of genomes per species is not limited by default |
 | `--increase-filter-size` | `0.0`   | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
 | `--kingdom`              |         | Consider genomes whose lineage belongs to a specific kingdom |
 | `--kmer-len`             |         | This is the length of the kmers used for building bloom filters |
+| `--limit-genomes`        | `Inf`   | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
 | `--log`                  |         | Path to the log file |
+| `--max-genomes`          | `Inf`   | Consider species with this number of genomes at most |
+| `--min-genomes`          | `1`     | Consider species with a minimum number of genomes |
 | `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
 | `--parallel`             | `1`     | Maximum number of processors to process each NCBI tax ID in parallel |
 | `--pplacer-threads`      | `1`     | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
