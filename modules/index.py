@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 16, 2022"
+__date__ = "Jun 17, 2022"
 
 import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm
 import argparse as ap
@@ -69,12 +69,6 @@ def read_params():
                     type = number(int, minv=10000),
                     dest = "filter_size",
                     help = "This is the size of the bloom filters" )
-    p.add_argument( "--how-many",
-                    type = number(int, minv=1),
-                    default = 0,
-                    dest = "how_many",
-                    help = ("Limit the number of genomes per species. "
-                            "The number of genomes per species is not limited by default") )
     p.add_argument( "--increase-filter-size",
                     type = number(float, minv=0.0, maxv=100.0),
                     default = 0.0,
@@ -92,9 +86,28 @@ def read_params():
                     required = True,
                     dest = "kmer_len",
                     help = "This is the length of the kmers used for building bloom filters" )
+    p.add_argument( "--limit-genomes",
+                    type = number(int, minv=1),
+                    default = numpy.Inf,
+                    dest = "limit_genomes",
+                    help = ("Limit the number of genomes per species. "
+                            "This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number. "
+                            "The number of genomes per species is not limited by default") )
     p.add_argument( "--log",
                     type = os.path.abspath,
                     help = "Path to the log file" )
+    p.add_argument( "--max-genomes",
+                    type = number(int, minv=1),
+                    default = numpy.Inf,
+                    dest = "max_genomes",
+                    help = ("Consider species with this number of genomes at most. "
+                            "There is not a maximum number of genomes per species by default") )
+    p.add_argument( "--min-genomes",
+                    type = number(int, minv=1),
+                    default = 1,
+                    dest = "min_genomes",
+                    help = ("Consider species with a minimum number of genomes. "
+                            "There is not a minimum number of genomes per species by default") )
     p.add_argument( "--nproc",
                     type = number(int, minv=1, maxv=os.cpu_count()),
                     default = 1,
@@ -338,9 +351,9 @@ def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
     
     return ncbitax2lin_table
 
-def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, how_many: int=0, 
-                   nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, contamination: float=100.0, 
-                   dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False) -> List[str]:
+def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, limit_genomes: float=numpy.Inf, 
+                   max_genomes: float=numpy.Inf, min_genomes: float=1.0, nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, 
+                   contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False) -> List[str]:
     """
     Process a specific NCBI tax ID
     Download, quality-control, and dereplicate genomes
@@ -350,7 +363,9 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
     :param kingdom:             Retrieve genomes that belong to a specific kingdom
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
-    :param how_many:            Consider species with at most this number of genomes
+    :param limit_genomes:       Limit the number of genomes per species
+    :param max_genomes:         Consider species with this number of genomes at most
+    :param min_genomes:         Consider species with a minimum number of genomes
     :param nproc:               Make the process parallel when possible
     :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
     :param completeness:        Threshold on the CheckM completeness
@@ -376,15 +391,21 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
     # Take track of the paths to the genome files
     genomes_paths = list()
 
-    # Check whether the number of genomes is greater than the number provided with --how_many
     if genomes_counter > 0:
         if verbose:
             printline("Processing NCBI tax ID {} with {} genomes".format(tax_id, genomes_counter))
-            if how_many > 0 and genomes_counter > how_many:
-                printline("WARNING: the number of genomes per species is limited to {} at most".format(how_many))
+
+            # Check whether the number of genomes falls in the --min-genomes --max-genomes interval            
+            if genomes_counter < min_genomes or genomes_counter > max_genomes:
+                printline("WARNING: the number of genomes does not respect the minimum and maximum number of genomes allowed")
+                return list()
+            
+            # Check whether the number of genomes is greater than the number provided with --limit-genomes
+            if genomes_counter > limit_genomes:
+                printline("WARNING: the number of genomes per species is limited to {} at most".format(limit_genomes))
 
         # Retrieve the genome files from NCBI
-        genomes, metadata = retrieve_genomes(tax_id, kingdom, tmp_genomes_dir, how_many=how_many, nproc=nproc, retries=1)
+        genomes, metadata = retrieve_genomes(tax_id, kingdom, tmp_genomes_dir, limit_genomes=limit_genomes, nproc=nproc, retries=1)
         if verbose:
             printline("Retrieved {}/{} genomes".format(len(genomes), genomes_counter))
 
@@ -510,17 +531,17 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
     # Return the list of paths to the genome files
     return genomes_paths
 
-def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, how_many: int=0, nproc: int=1, retries: int=1) -> Tuple[List[str], str]:
+def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, limit_genomes: float=numpy.Inf, nproc: int=1, retries: int=1) -> Tuple[List[str], str]:
     """
     Retrieve genomes from NCBI under a specific tax ID
 
-    :param tax_id:      NCBI tax ID
-    :param kingdom:     Search for a specific kingdom
-    :param out_dir:     Folder path for storing temporary data
-    :param how_many:    Limit the number of genomes
-    :param nproc:       Make it parallel
-    :param retries:     Retry downloading genomes
-    :return:            List of paths to the genome files and path to the metadata table
+    :param tax_id:          NCBI tax ID
+    :param kingdom:         Search for a specific kingdom
+    :param out_dir:         Folder path for storing temporary data
+    :param limit_genomes:   Limit the number of genomes
+    :param nproc:           Make it parallel
+    :param retries:         Retry downloading genomes
+    :return:                List of paths to the genome files and path to the metadata table
     """
 
     ncbi_genome_download = ["ncbi-genome-download", "--assembly-levels", "complete",                            # Search for complete genomes only
@@ -546,11 +567,11 @@ def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, how_many: int=0, n
         # Add the genome path to the list of genome paths
         genomes.append(os.path.join(out_dir, "{}.fna.gz".format(genome_name)))
     
-    if how_many > 0 and len(genomes) > how_many:
+    if len(genomes) > limit_genomes:
         # ncbi-genome-download does not allow to limit the number of genomes that must be retrieved
-        # Selecte a random set of at most "how_many" genomes
+        # Selecte a random set of at most "--limit-genomes" genomes
         selected = list()
-        random_choice = numpy.random.choice(len(genomes), size=how_many, replace=False)
+        random_choice = numpy.random.choice(len(genomes), size=limit_genomes, replace=False)
         for pos, value in enumerate(random_choice):
             if value == 0:
                 os.unlink(genomes[pos])
@@ -561,9 +582,9 @@ def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, how_many: int=0, n
     # Return the list of paths to the genome files
     return genomes, os.path.join(out_dir, "metadata.tsv")
 
-def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, how_many: int=None,
-          estimate_filter_size: bool=False, increase_filter_size: float=0.0, completeness: float=0.0, 
-          contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, 
+def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, limit_genomes: float=numpy.Inf,
+          max_genomes: float=numpy.Inf, min_genomes: float=1.0, estimate_filter_size: bool=False, increase_filter_size: float=0.0, 
+          completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, 
           verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Build the database baseline
@@ -573,7 +594,9 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
     :param tmp_dir:                 Path to the temporary folder
     :param kmer_len:                Length of the kmers
     :param filter_size:             Size of the bloom filters
-    :param how_many:                Consider species with at most this number of genomes
+    :param limit_genomes:           Limit the number of genomes per species
+    :param max_genomes:             Consider species with this number of genomes at most
+    :param min_genomes:             Consider species with a minimum number of genomes
     :param estimate_filter_size:    Run ntCard to estimate the most appropriate bloom filter size
     :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
     :param completeness:            Threshold on the CheckM completeness
@@ -624,9 +647,10 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
                   .format(similarity))
 
     # Build a partial function around process_tax_id
-    process_tax_id_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, how_many=how_many, nproc=nproc, 
-                                                     pplacer_threads=pplacer_threads, completeness=completeness, contamination=contamination, 
-                                                     dereplicate=dereplicate, similarity=similarity, logger=logger, verbose=False)
+    process_tax_id_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, limit_genomes=limit_genomes, 
+                                                     max_genomes=max_genomes, min_genomes=min_genomes, nproc=nproc, pplacer_threads=pplacer_threads, 
+                                                     completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
+                                                     logger=logger, verbose=False)
 
     # Initialise the progress bar
     pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
@@ -735,10 +759,10 @@ def main() -> None:
 
     t0 = time.time()
 
-    index(args.db_dir, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, how_many=args.how_many,
-          estimate_filter_size=args.estimate_filter_size, increase_filter_size=args.increase_filter_size, 
-          completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
-          similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
+    index(args.db_dir, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, limit_genomes=args.limit_genomes,
+          max_genomes=args.max_genomes, min_genomes=args.min_genomes, estimate_filter_size=args.estimate_filter_size, 
+          increase_filter_size=args.increase_filter_size, completeness=args.completeness, contamination=args.contamination, 
+          dereplicate=args.dereplicate, similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
           pplacer_threads=args.pplacer_threads, parallel=args.parallel)
 
     if args.cleanup:
