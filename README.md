@@ -129,7 +129,8 @@ meta-index index --db-dir ~/myindex \
                  --nproc 2 \
                  --pplacer-threads 2 \
                  --tmp-dir ~/tmp \
-                 --cleanup
+                 --cleanup \
+                 --verbose
 ```
 
 **Available options:**
@@ -171,7 +172,8 @@ meta-index boundaries --db-dir ~/myindex \
                       --output ~/boundaries.txt \
                       --tmp-dir ~/tmp \
                       --nproc 4 \
-                      --cleanup
+                      --cleanup \
+                      --verbose
 ```
 
 Please note that the `boundaries` module considers clusters with reference genomes only. These clusters can be considered for establishing boundaries depending on a minimum number of reference genomes that can be set with the `--min-genomes` argument.
@@ -215,7 +217,8 @@ meta-index update --input-list ~/mygenomes.txt \
                   --parallel 4 \
                   --nproc 2 \
                   --pplacer-threads 2 \
-                  --cleanup
+                  --cleanup \
+                  --verbose
 ```
 
 Please note that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following commands in your terminal:
@@ -282,7 +285,8 @@ meta-index profile --input-file ~/mymag.fna \
                    --expand \
                    --stop-at family \
                    --output-dir ~/profiles \
-                   --output-prefix mymag
+                   --output-prefix mymag \
+                   --verbose
 ```
 
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
