@@ -134,30 +134,30 @@ meta-index index --db-dir ~/myindex \
 
 **Available options:**
 
-| Option                   | Default | Description  |
-|:-------------------------|:--------|:-------------|
-| `--completeness`         | `0.0`   | Minimum completeness percentage allowed for input genomes |
-| `--contamination`        | `100.0` | Maximum contamination percentage allowed for input genomes |
-| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
-| `--db-dir`               |         | Database folder path |
-| `--dereplicate`          | `False` | Dereplicate input genomes |
-| `--estimate-filter-size` | `False` | Estimate the bloom filter size with ntCard |
-| `--filter-size`          |         | Bloom filter size |
-| `--help`                 |         | Print the list of arguments and exit |
-| `--increase-filter-size` | `0.0`   | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
-| `--kingdom`              |         | Consider genomes whose lineage belongs to a specific kingdom |
-| `--kmer-len`             |         | This is the length of the kmers used for building bloom filters |
-| `--limit-genomes`        | `Inf`   | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
-| `--log`                  |         | Path to the log file |
-| `--max-genomes`          | `Inf`   | Consider species with this number of genomes at most |
-| `--min-genomes`          | `1`     | Consider species with a minimum number of genomes |
-| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
-| `--parallel`             | `1`     | Maximum number of processors to process each NCBI tax ID in parallel |
-| `--pplacer-threads`      | `1`     | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
-| `--similarity`           | `100.0` | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
-| `--tmp-dir`              |         | Path to the temporary folder |
-| `--verbose`              | `False` | Print results on screen |
-| `--version`              |         | Print current module version and exit |
+| Option                   | Default | Mandatory | Description  |
+|:-------------------------|:--------|:---------:|:-------------|
+| `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
+| `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
+| `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | ⚑         | Database folder path |
+| `--dereplicate`          | `False` |           | Dereplicate input genomes |
+| `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically override the `--filter-size` option |
+| `--filter-size`          |         | ⚑         | Bloom filter size |
+| `--help`                 |         |           | Print the list of arguments and exit |
+| `--increase-filter-size` | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
+| `--kingdom`              |         | ⚑         | Consider genomes whose lineage belongs to a specific kingdom |
+| `--kmer-len`             |         | ⚑         | This is the length of the kmers used for building bloom filters |
+| `--limit-genomes`        | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
+| `--log`                  |         |           | Path to the log file |
+| `--max-genomes`          | `Inf`   |           | Consider species with this number of genomes at most |
+| `--min-genomes`          | `1`     |           | Consider species with a minimum number of genomes |
+| `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--parallel`             | `1`     |           | Maximum number of processors to process each NCBI tax ID in parallel |
+| `--pplacer-threads`      | `1`     |           | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
+| `--similarity`           | `100.0` |           | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
+| `--verbose`              | `False` |           | Print results on screen |
+| `--version`              |         |           | Print current module version and exit |
 
 ## Defining boundaries
 
@@ -178,19 +178,19 @@ Please note that the `boundaries` module considers clusters with reference genom
 
 **Available options:**
 
-| Option                   | Default | Description  |
-|:-------------------------|:--------|:-------------|
-| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
-| `--db-dir`               |         | Database directory with the taxonomically organised sequence bloom trees |
-| `--help`                 |         | Print the list of arguments and exit |
-| `--kingdom`              |         | Consider genomes whose lineage belongs to a specific kingdom |
-| `--log`                  |         | Path to the log file |
-| `--min-genomes`          | `0`     | Consider clusters with at least this number of genomes |
-| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
-| `--output`               |         | Output file with kmer boundaries for each of the taxonomic labels in the database |
-| `--tmp-dir`              |         | Path to the temporary folder |
-| `--verbose`              | `False` | Print results on screen |
-| `--version`              |         | Print current module version and exit |
+| Option                   | Default | Mandatory | Description  |
+|:-------------------------|:--------|:---------:|:-------------|
+| `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | ⚑         | Database directory with the taxonomically organised sequence bloom trees |
+| `--help`                 |         |           | Print the list of arguments and exit |
+| `--kingdom`              |         | ⚑         | Consider genomes whose lineage belongs to a specific kingdom |
+| `--log`                  |         |           | Path to the log file |
+| `--min-genomes`          | `3`     |           | Consider clusters with at least this number of genomes |
+| `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--output`               |         | ⚑         | Output file with kmer boundaries for each of the taxonomic labels in the database |
+| `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
+| `--verbose`              | `False` |           | Print results on screen |
+| `--version`              |         |           | Print current module version and exit |
 
 ## Updating the database
 
@@ -231,27 +231,27 @@ find ${INPUTS_DIR} \
 
 **Available options:**
 
-| Option                   | Default | Description  |
-|:-------------------------|:--------|:-------------|
-| `--boundaries`           |         | Path to the output table produced by the `boundaries` module. It is required in case of MAGs as input genomes only |
-| `--boundary-uncertainty` | `0.0`   | Define the percentage of kmers to enlarge and reduce boundaries |
-| `--completeness`         | `0.0`   | Minimum completeness percentage allowed for input genomes |
-| `--contamination`        | `100.0` | Maximum contamination percentage allowed for input genomes |
-| `--cleanup`              | `False` | Remove temporary data at the end of the pipeline |
-| `--db-dir`               |         | Database folder path |
-| `--dereplicate`          | `False` | Dereplicate input genomes |
-| `--extension`            |         | Specify the input genome files extension. All the input genomes must have the same file extension before running this module |
-| `--input-list`           |         | This file contains the list of paths to the new genomes that will be added to the database |
-| `--log`                  |         | Path to the log file |
-| `--nproc`                | `1`     | This argument refers to the number of processors used for parallelizing the pipeline when possible |
-| `--parallel`             | `1`     | Maximum number of processors to process each NCBI tax ID in parallel |
-| `--pplacer-threads`      | `1`     | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
-| `--similarity`           | `100.0` | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
-| `--taxa`                 |         | Input file with the mapping between input genome IDs and their taxonomic label. This is used in case of reference genomes only |
-| `--tmp-dir`              |         | Path to the temporary folder |
-| `--type`                 |         | Define the nature of the input genomes |
-| `--verbose`              | `False` | Print results on screen |
-| `--version`              |         | Print current module version and exit |
+| Option                   | Default | Mandatory | Description  |
+|:-------------------------|:--------|:---------:|:-------------|
+| `--boundaries`           |         | ⚑         | Path to the output table produced by the `boundaries` module. It is required in case of MAGs as input genomes only |
+| `--boundary-uncertainty` | `0.0`   |           | Define the percentage of kmers to enlarge and reduce boundaries |
+| `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
+| `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
+| `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
+| `--db-dir`               |         | ⚑         | Database folder path |
+| `--dereplicate`          | `False` |           | Dereplicate input genomes |
+| `--extension`            |         |           | Specify the input genome files extension. All the input genomes must have the same file extension before running this module |
+| `--input-list`           |         | ⚑         | This file contains the list of paths to the new genomes that will be added to the database |
+| `--log`                  |         |           | Path to the log file |
+| `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--parallel`             | `1`     |           | Maximum number of processors to process each NCBI tax ID in parallel |
+| `--pplacer-threads`      | `1`     |           | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
+| `--similarity`           | `100.0` |           | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--taxa`                 |         | ⚑         | Input file with the mapping between input genome IDs and their taxonomic label. This is used in case of reference genomes only |
+| `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
+| `--type`                 |         | ⚑         | Define the nature of the input genomes |
+| `--verbose`              | `False` |           | Print results on screen |
+| `--version`              |         |           | Print current module version and exit |
 
 ## Building the database report
 
@@ -265,11 +265,11 @@ The output file is a table that will contain the number of MAGs and reference ge
 
 **Available options:**
 
-| Option                   | Description  |
-|:-------------------------|:-------------|
-| `--db-dir`               | Database folder path |
-| `--output-file`          | Path to the output table |
-| `--version`              | Print current module version and exit |
+| Option                   | Mandatory | Description  |
+|:-------------------------|:---------:|:-------------|
+| `--db-dir`               | ⚑         | Database folder path |
+| `--output-file`          | ⚑         | Path to the output table |
+| `--version`              |           | Print current module version and exit |
 
 ## Profiling genomes
 
@@ -289,19 +289,19 @@ Please note that in the example above we explicitly set the `--stop-at` argument
 
 **Available options:**
 
-| Option                   | Default | Description  |
-|:-------------------------|:--------|:-------------|
-| `--expand`               | `False` | Expand the input query on all the taxonomic levels |
-| `--input-file`           |         | Path to the input query |
-| `--input-id`             |         | Unique identifier of the input query |
-| `--log`                  |         | Path to the log file |
-| `--output-dir`           |         | Output folders with queries results |
-| `--output-prefix`        |         | Prefix of the output files with query matches |
-| `--stop-at`              |         | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
-| `--threshold`            | `0.0`   | Fraction of query kmers that must be present in a leaf to be considered a match |
-| `--tree`                 |         | This is the tree definition file |
-| `--verbose`              | `False` | Print results on screen |
-| `--version`              |         | Print current module version and exit |
+| Option                   | Default | Mandatory | Description  |
+|:-------------------------|:--------|:---------:|:-------------|
+| `--expand`               | `False` |           | Expand the input query on all the taxonomic levels |
+| `--input-file`           |         | ⚑         | Path to the input query |
+| `--input-id`             |         |           | Unique identifier of the input query |
+| `--log`                  |         |           | Path to the log file |
+| `--output-dir`           |         | ⚑         | Output folders with queries results |
+| `--output-prefix`        |         |           | Prefix of the output files with query matches |
+| `--stop-at`              |         |           | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
+| `--threshold`            | `0.0`   |           | Fraction of query kmers that must be present in a leaf to be considered a match |
+| `--tree`                 |         | ⚑         | This is the tree definition file |
+| `--verbose`              | `False` |           | Print results on screen |
+| `--version`              |         |           | Print current module version and exit |
 
 ## Unlocking unknown species profiling with `kraken2`
 
