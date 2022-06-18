@@ -389,7 +389,7 @@ def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float=10
                 # Count the number of kmers for the first genome
                 kmers = sum([1 for k in row1 if k > 0])
                 # Define the filter threshold
-                threshdold = int(math.ceil(kmers*similarity/100.0))
+                threshold = int(math.ceil(kmers*similarity/100.0))
                 # Count how many times a 1 appear in the same position of both the arrays
                 common = sum([1 for pos, _ in enumerate(row1) if row1[i1] > 0 and row2[i2] > 0])
 
