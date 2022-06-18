@@ -45,14 +45,14 @@ def checkm(genomes_paths: List[str], tmp_dir: str, file_extension: str="fna.gz",
                 os.makedirs(os.path.join(run_tmp_dir, "bins_{}".format(run_id)), exist_ok=True)
             
             # Symlink genome files to the bins folder of the current chunk
-            os.symlink(str(genome_path),
-                       os.path.join(run_tmp_dir, "bins_{}".format(run_id)))
+            os.symlink(genome_path,
+                       os.path.join(run_tmp_dir, "bins_{}".format(run_id), os.path.basename(genome_path)))
         
         # Iterate over the genomes chunk folders
         for bins_folder in Path(run_tmp_dir).glob("bins_*"):
             if os.path.isdir(str(bins_folder)):
                 # Retrieve the run ID from the file path
-                run_id = int(os.path.splitext(os.path.basename(str(bins_list)))[0].split("_")[-1])
+                run_id = int(os.path.splitext(os.path.basename(str(bins_folder)))[0].split("_")[-1])
 
                 # Create the run folder
                 run_dir = os.path.join(tmp_dir, "run_{}".format(run_id))
@@ -263,7 +263,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
                 for i2, row2 in enumerate(matrix):
                     if i2 > i:
                         # Count how many times a 1 appear in the same position of both the arrays
-                        common = sum([1 for pos, _ in enumerate(row) if row[pos]==row2[pos]==1])
+                        common = sum([1 for pos, _ in enumerate(row) if row[pos] > 0 and row2[pos] > 0])
                         # In case this number falls into the [last_known_level_mink, last_known_level_maxk] interval
                         if common <= last_known_level_maxk and common >= last_known_level_mink:
                             # Set the second genome as assigned
@@ -391,7 +391,7 @@ def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float=10
                 # Define the filter threshold
                 threshdold = int(math.ceil(kmers*similarity/100.0))
                 # Count how many times a 1 appear in the same position of both the arrays
-                common = sum([1 for pos, _ in enumerate(row1) if row1[i1]==row2[i2]==1])
+                common = sum([1 for pos, _ in enumerate(row1) if row1[i1] > 0 and row2[i2] > 0])
 
                 # Check whether these two genomes must be dereplicated
                 if common >= threshold:
@@ -430,7 +430,7 @@ def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
         for i2, row2 in enumerate(matrix):
             if i2 > i1:
                 # Count how many times a 1 appear in the same position of both the arrays
-                common = sum([1 for i, _ in enumerate(row1) if row1[i]==row2[i]==1])
+                common = sum([1 for i, _ in enumerate(row1) if row1[i] > 0 and row2[i] > 0])
                 # Update the minimum and maximum common matrix
                 if common > maxv:
                     maxv = common
@@ -832,7 +832,7 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: st
     # Run kmtricks for building the kmers matrix
     run(["kmtricks", "pipeline", "--file", genomes_fof,
                                  "--run-dir", os.path.join(run_dir, "matrix"),
-                                 "--mode", "kmer:pa:bin",
+                                 "--mode", "kmer:count:bin",
                                  "--hard-min", "1",
                                  "--cpr",
                                  "--threads", str(nproc)],
@@ -844,7 +844,7 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: st
                                   "--format", "text",
                                   "--cpr-in",
                                   "--sorted",
-                                  "--threads", int(nproc),
+                                  "--threads", str(nproc),
                                   "--output", output_table],
         stdout=kmtricks_log, stderr=kmtricks_log)
     

@@ -14,7 +14,7 @@ from typing import List, Tuple
 
 try:
     # Load utility functions
-    from utils import checkm, download, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
+    from utils import checkm, download, filter_checkm_tables, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
 except:
     pass
 
@@ -431,7 +431,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
                 printline("Quality control: excluding {}/{} genomes".format(len(genomes), before_qc))
 
         # Dereplication
-        if genomes and dereplicate:
+        if len(genomes) > 1 and dereplicate:
             # Define the kmtricks temporary folder
             kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks", tax_id)
             os.makedirs(kmtricks_tmp_dir, exist_ok=True)
@@ -453,7 +453,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
 
             # Add the header line to the kmer matrix
             with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-                file1.write("# kmer\t{}\n".format("\t".join(ordered_genome_names)))
+                file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
                 with open(output_table) as file2:
                     for line in file2:
                         line = line.strip()

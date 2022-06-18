@@ -281,7 +281,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
         # Add the header line to the kmer matrix
         with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-            file1.write("# kmer\t{}\n".format("\t".join(ordered_genome_names)))
+            file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
             with open(output_table) as file2:
                 for line in file2:
                     line = line.strip()
@@ -681,7 +681,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
             # Add the header line to the kmer matrix
             with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-                file1.write("# kmer\t{}\n".format("\t".join(ordered_genome_names)))
+                file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
                 with open(output_table) as file2:
                     for line in file2:
                         line = line.strip()
