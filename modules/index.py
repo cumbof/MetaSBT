@@ -695,52 +695,49 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
             # Increment the estimated bloom filter size
             increment = int(math.ceil(filter_size*increase_filter_size/100.0))
             filter_size += increment
-            
-    # Define the database manifest file
-    with open(os.path.join(db_dir, "manifest.txt"), "w+") as manifest:
-        # Take track of the filter size, kingdom, and kmer length
-        manifest.write("--filter-size {}\n".format(filter_size))
-        manifest.write("--kingdom {}\n".format(kingdom))
-        manifest.write("--kmer-len {}\n".format(kmer_len))
+
+            with open(os.path.join(db_dir, "manifest.txt"), "a+") as manifest:
+                manifest.write("--filter-size {}\n".format(filter_size))
     
-    # Retrieve the current working directory
-    current_folder = os. getcwd()
+    if genomes_paths and filter_size and kmer_len:
+        # Retrieve the current working directory
+        current_folder = os. getcwd()
 
-    printline("Indexing all the taxonomic levels")
+        printline("Indexing all the taxonomic levels")
 
-    # Define a partial function around the howdesbt wrapper
-    howdesbt_partial = partial(howdesbt, kmer_len=kmer_len, filter_size=filter_size, nproc=nproc)
+        # Define a partial function around the howdesbt wrapper
+        howdesbt_partial = partial(howdesbt, kmer_len=kmer_len, filter_size=filter_size, nproc=nproc)
 
-    # Iterate over all the taxonomic levels from the species up to the kingdom
-    for level in ["species", "genus", "family", "order", "class", "phylum", "kingdom"]:
-        printline("Running HowDeSBT at the {} level".format(level))
-        folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
-        
-        # Initialise the progress bar
-        pbar = tqdm.tqdm(total=len(folders), disable=(not verbose))
-
-        with mp.Pool(processes=parallel) as pool:
-            def update_bar(*args):
-                # Update the progress bar
-                pbar.update()
-                return
+        # Iterate over all the taxonomic levels from the species up to the kingdom
+        for level in ["species", "genus", "family", "order", "class", "phylum", "kingdom"]:
+            printline("Running HowDeSBT at the {} level".format(level))
+            folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
             
-            # Process the NCBI tax IDs
-            jobs = [pool.apply_async(howdesbt_partial, args=(level_dir, ), callback=update_bar) 
-                        for level_dir in folders]
-        
-        # Close the progress bar
-        pbar.close()
+            # Initialise the progress bar
+            pbar = tqdm.tqdm(total=len(folders), disable=(not verbose))
 
-    # Also run HowDeSBT on the database folder to build 
-    # the bloom filter representation of the kingdom
-    printline("Building the database root bloom filter with HowDeSBT")
-    howdesbt_partial(db_dir)
+            with mp.Pool(processes=parallel) as pool:
+                def update_bar(*args):
+                    # Update the progress bar
+                    pbar.update()
+                    return
+                
+                # Process the NCBI tax IDs
+                jobs = [pool.apply_async(howdesbt_partial, args=(level_dir, ), callback=update_bar) 
+                            for level_dir in folders]
+            
+            # Close the progress bar
+            pbar.close()
 
-    # The howdesbt function automatically set the current working directory to 
-    # the index folder of the taxonomic labels
-    # Come back to the original folder
-    os.chdir(current_folder)
+        # Also run HowDeSBT on the database folder to build 
+        # the bloom filter representation of the kingdom
+        printline("Building the database root bloom filter with HowDeSBT")
+        howdesbt_partial(db_dir)
+
+        # The howdesbt function automatically set the current working directory to 
+        # the index folder of the taxonomic labels
+        # Come back to the original folder
+        os.chdir(current_folder)
 
 def main() -> None:
     # Load command line parameters
@@ -756,6 +753,36 @@ def main() -> None:
     
     # Create the database folder
     os.makedirs(args.db_dir, exist_ok=True)
+
+    # Skip the bloom filter size estimation if the filter size is passed as input
+    if args.filter_size:
+        args.estimate_filter_size = False
+    else:
+        if not args.estimate_filter_size:
+            raise Exception(("Please specify a bloom filter size with the --filter-size option or "
+                             "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard"))
+
+    # Define the database manifest file
+    manifest_filepath = os.path.join(db_dir, "manifest.txt")
+    if os.path.exists(manifest_filepath):
+        # Load and compare kmer-len and filter-size
+        with open(manifest_filepath) as manifest:
+            for line in manifest:
+                line = line.strip()
+                if line:
+                    line_split = line.split(" ")
+                    if line_split[0] == "--kmer-len":
+                        if args.kmer_len != int(line_split[1]):
+                            raise Exception("The kmer length is not compatible with the specified database")
+                    elif line_split[0] == "--filter-size":
+                        if args.filter_size:
+                            if args.filter_size != int(line_split[1]):
+                                raise Exception("The bloom filter size is not compatible with the specified database")
+    else:
+        with open(manifest_filepath, "w+") as manifest:
+            manifest.write("--kmer-len {}\n".format(kmer_len))
+            if args.filter_size:
+                manifest.write("--filter-size {}\n".format(filter_size))
 
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
