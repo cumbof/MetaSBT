@@ -395,14 +395,15 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
         if verbose:
             printline("Processing NCBI tax ID {} with {} genomes".format(tax_id, genomes_counter))
 
-            # Check whether the number of genomes falls in the --min-genomes --max-genomes interval            
-            if genomes_counter < min_genomes or genomes_counter > max_genomes:
+        # Check whether the number of genomes falls in the --min-genomes --max-genomes interval            
+        if genomes_counter < min_genomes or genomes_counter > max_genomes:
+            if verbose:
                 printline("WARNING: the number of genomes does not respect the minimum and maximum number of genomes allowed")
-                return list()
-            
-            # Check whether the number of genomes is greater than the number provided with --limit-genomes
-            if genomes_counter > limit_genomes:
-                printline("WARNING: the number of genomes per species is limited to {} at most".format(limit_genomes))
+            return list()
+
+        # Check whether the number of genomes is greater than the number provided with --limit-genomes
+        if genomes_counter > limit_genomes and verbose:
+            printline("WARNING: the number of genomes per species is limited to {} at most".format(limit_genomes))
 
         # Retrieve the genome files from NCBI
         genomes, metadata = retrieve_genomes(tax_id, kingdom, tmp_genomes_dir, limit_genomes=limit_genomes, nproc=nproc, retries=1)
@@ -484,7 +485,8 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
         
         # Check whether no genomes survived the quality control and the dereplication steps
         if not genomes:
-            printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
+            if verbose:
+                printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
             return genomes
 
         # In case at least one genome survived both the quality control and dereplication steps
