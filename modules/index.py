@@ -750,11 +750,12 @@ def main() -> None:
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the database folder exists
-    if it_exists(args.db_dir, path_type="folder"):
-        raise Exception("The database folder already exists")
+    if it_exists(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), path_type="folder"):
+        raise Exception(("An indexed version of the {} kingdom already exists in the database!\n"
+                         "Please use the update module to add new genomes").format(args.kingdom))
     
     # Create the database folder
-    os.makedirs(args.db_dir)
+    os.makedirs(args.db_dir, exist_ok=True)
 
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
