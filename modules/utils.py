@@ -309,6 +309,7 @@ def download(url: str, folder: str) -> str:
 
     :param url:     Source file URL
     :param folder:  Target destination folder path
+    :return:        Path to the downloaded file
     """
 
     # Check whether the destination folder path exists
@@ -328,6 +329,7 @@ def filter_checkm_tables(checkm_tables: List[str], completeness: float=0.0, cont
     :param checkm_tables:   List of paths to the CheckM output tables
     :param completeness:    Minimum allowed completeness
     :param contamination:   Maximum allowed contamination
+    :return:                The list of genomes that passed the quality-control criteria
     """
 
     # Define the list of genomes that passed the quality control
@@ -359,6 +361,7 @@ def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float=10
     :param kmer_matrix_filepath:    Path to the kmers matrix file (with header line) as output of kmtricks
     :param outpath:                 Path to the output file with the list of filtered genomes
     :param similarity:              Discard a genome if it result to have at least this percentage of common kmers with another genome
+    :return:                        List of excluded genomes
     """
     
     # Check whether the output file already exists

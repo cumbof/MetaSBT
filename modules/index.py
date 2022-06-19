@@ -428,7 +428,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
             genomes = [os.path.join(tmp_genomes_dir, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids]
 
             if before_qc > len(genomes) and verbose:
-                printline("Quality control: excluding {}/{} genomes".format(len(genomes), before_qc))
+                printline("Quality control: excluding {}/{} genomes".format(before_qc-len(genomes), before_qc))
 
         # Dereplication
         if len(genomes) > 1 and dereplicate:
@@ -465,21 +465,22 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
             shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
 
             # Filter genomes according to their percentage of common kmers defined with --similarity
-            dereplicated_genomes_filepath = os.path.join(tmp_dir, "kmtricks", tax_id, "dereplicated.txt")
-            filter_genomes(output_table, dereplicated_genomes_filepath, similarity=similarity)
+            filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", tax_id, "filtered.txt")
+            filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
             
             before_dereplication = len(genomes)
 
             # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
-            genomes = list()
-            with open(dereplicated_genomes_filepath) as dereplicated_genomes:
-                for l in dereplicated_genomes:
+            with open(filtered_genomes_filepath) as filtered_genomes:
+                for l in filtered_genomes:
                     l = l.strip()
                     if l:
-                        genomes.append(os.path.join(tmp_genomes_dir, "{}.fna.gz".format(l)))
+                        gpath = os.path.join(tmp_genomes_dir,"{}.fna.gz".format(l))
+                        if gpath in genomes:
+                            genomes.remove(gpath)
             
             if before_dereplication > len(genomes) and verbose:
-                printline("Dereplication: excluding {}/{} genomes".format(len(genomes), before_dereplication))
+                printline("Dereplication: excluding {}/{} genomes".format(before_dereplication-len(genomes), before_dereplication))
         
         # Check whether no genomes survived the quality control and the dereplication steps
         if not genomes:

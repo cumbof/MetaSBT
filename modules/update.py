@@ -243,18 +243,18 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         # Filter genomes according to the input --completeness and --contamination thresholds
         genome_ids = filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0)
         # Build the new list of genome paths that passed the filter
-        filtered_genomes_paths = list()
+        new_genomes_paths = list()
         for genome_path in genomes_paths:
             genome_id = os.path.splitext(os.path.basename(genome_path))[0]
             if genome_path.endswith(".gz"):
                 genome_id = os.path.splitext(genome_id)[0]
             if genome_id in genome_ids:
-                filtered_genomes_paths.append(genome_path)
+                new_genomes_paths.append(genome_path)
 
-        printline("{} genomes have been excluded".format(len(genomes_paths)-len(filtered_genomes_paths)))
+        printline("{} genomes have been excluded".format(len(genomes_paths)-len(new_genomes_paths)))
 
         # Define the new list of genomes
-        genomes_paths = filtered_genomes_paths
+        genomes_paths = new_genomes_paths
     
     # Check whether the input genomes must be dereplicated
     if len(genomes_paths) > 1 and dereplicate:
@@ -293,25 +293,21 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
 
         # Filter genomes according to their percentage of common kmers defined with --similarity
-        dereplicated_genomes_filepath = os.path.join(tmp_dir, "kmtricks", "dereplicated.txt")
-        filter_genomes(output_table, dereplicated_genomes_filepath, similarity=similarity)
-
-        # Load the list of dereplicated genomes
-        dereplicated_genomes = [genome_id.strip() for genome_id in open(dereplicated_genomes_filepath).readlines() if genome_id.strip()]
-
-        # Build the new list of genome paths that passed the filter
-        filtered_genomes_paths = list()
-        for genome_path in genomes_paths:
-            genome_id = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_id = os.path.splitext(genome_id)[0]
-            if genome_id in dereplicated_genomes:
-                filtered_genomes_paths.append(genome_path)
+        filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", "filtered.txt")
+        filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
         
-        printline("{} genomes have been excluded".format(len(genomes_paths)-len(filtered_genomes_paths)))
+        before_dereplication = len(genomes_paths)
 
-        # Define the new list of genomes
-        genomes_paths = filtered_genomes_paths
+        # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
+        with open(filtered_genomes_filepath) as filtered_genomes:
+            for l in filtered_genomes:
+                l = l.strip()
+                if l:
+                    gpath = os.path.join(tmp_genomes_dir,"{}.fna.gz".format(l))
+                    if gpath in genomes_paths:
+                        genomes_paths.remove(gpath)
+
+        printline("{} genomes have been excluded".format(before_dereplication-len(genomes_paths)))
 
     # Check whether at least one genome survived both the quality control and dereplication steps
     if not genomes_paths:
