@@ -221,15 +221,18 @@ meta-index update --input-list ~/mygenomes.txt \
                   --verbose
 ```
 
-Please note that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by typing the following commands in your terminal:
+Please note that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by running the `uniform_inputs.sh` script under the `scripts` folder of this repository:
 ```bash
-INPUTS_DIR=~/mygenomes
-CURRENT_EXTENSION="fa"
-NEW_EXTENSION="fna"
-find ${INPUTS_DIR} \
-    -type f -iname "*.${CURRENT_EXTENSION}" -follow | xargs -n 1 -I {} bash -c \
-        'INPUT={}; \
-         mv "$INPUT" "${INPUT%.'"${CURRENT_EXTENSION}"'}.'"${NEW_EXTENSION}"'";'
+sh ./scripts/uniform_inputs.sh ~/mygenomes fa fna
+```
+
+The first argument is the path to the folder with the set of input genome files, while the second and third arguments are the current and new file extensions respectively. In this particular case, all the `*.fa` files are converted to `*.fna` files.
+
+In case of files with multiple extensions, please run the same script as many times as you need to uniform all the input genome files extensions, until the number of files with the new extension matches the actual number of files in the input folder:
+```bash
+sh ./scripts/uniform_inputs.sh ~/mygenomes fa fna
+sh ./scripts/uniform_inputs.sh ~/mygenomes fasta fna
+sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 ```
 
 **Available options:**
