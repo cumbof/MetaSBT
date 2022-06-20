@@ -132,7 +132,7 @@ howdesbt_wrapper () {
         howdesbt build --howde \
                        --tree=${INDEX_DIR}/union.sbt \
                        --outtree=${INDEX_DIR}/index.detbrief.sbt \
-                       > ${LEVEL_DIR}/howdesbt.log 2>&1
+                       >> ${LEVEL_DIR}/howdesbt.log 2>&1
         # Remove the union.sbt file
         rm -f ${INDEX_DIR}/union.sbt
     fi
