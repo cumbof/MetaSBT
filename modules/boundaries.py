@@ -12,7 +12,7 @@ from logging import Logger
 
 try:
     # Load utility functions
-    from utils import get_boundaries, init_logger, it_exists, kmtricks_matrix, println
+    from utils import get_boundaries, init_logger, it_exists, kmtricks_matrix, number, println
 except:
     pass
 
@@ -94,7 +94,7 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
 
     # Create a temporary folder for the specific taxonomic level
     tmp_level_dir = os.path.join(tmp_dir, "boundaries", level_id, os.path.basename(level_dir))
-    makedirs(tmp_level_dir, exist_ok=True)
+    os.makedirs(tmp_level_dir, exist_ok=True)
 
     # Search and merge all the reference genomes paths under all references.txt files in the current taxonomic level
     how_many = 0
@@ -109,10 +109,10 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
     
     # In case the number of genomes in the current taxonomic level
     # is greater than or equals to the minimum number of genomes specified in input
-    if how_may >= min_genomes:
+    if how_many >= min_genomes:
         # Run kmtricks to build the kmers matrix
         kmtricks_matrix(os.path.join(tmp_level_dir, "genomes.fof"), 
-                        os.path.join(tmp_level_dir, "matrix"), 
+                        tmp_level_dir, 
                         nproc,
                         os.path.join(tmp_level_dir, "kmers_matrix.txt"))
         
@@ -167,7 +167,7 @@ def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes
     # Iterate over the taxonomic levels from species up to the phylum
     for level in ["species", "genus", "family", "order", "class", "phylum"]:
         printline("Defining {} boundaries".format(level))
-        for level_dir in Path(os.path.join(db_dir, kingdom)).glob("**/{}__*".format(level[0])):
+        for level_dir in Path(os.path.join(db_dir, "k__{}".format(kingdom))).glob("**/{}__*".format(level[0])):
             if os.path.isdir(str(level_dir)):
                 # Define boundaries for the current taxonomic level
                 define_boundaries(str(level_dir), level, tmp_dir, output, 
