@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 15, 2022"
+__date__ = "Jun 20, 2022"
 
 import sys, os, time, errno, re, shutil
 import argparse as ap
@@ -115,6 +115,10 @@ def read_params():
                     required = True,
                     choices=["MAGs", "references"],
                     help = "Define the nature of the input genomes" )
+    p.add_argument( "--unknown-label",
+                    type = str,
+                    default = "MI",
+                    help = "Prefix label of the newly defined clusters" )
     p.add_argument( "--verbose",
                     action = "store_true",
                     default = False,
@@ -128,8 +132,8 @@ def read_params():
 
 def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdom: str, tmp_dir: str, boundaries: str=None,
            boundary_uncertainty: float=0.0, taxa_map: str=None, completeness: float=0.0, contamination: float=100.0, 
-           dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False, nproc: int=1, 
-           pplacer_threads: int=1, parallel: int=1) -> None:
+           dereplicate: bool=False, similarity: float=100.0, unknown_label: str="MI", logger: Logger=None, 
+           verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Update a database with a new set of metagenome-assembled genomes and reference genomes.
     Also create new clusters in case the input genomes result too far from everything in the database
@@ -148,6 +152,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     :param contamination:           Threshold on the CheckM contamination
     :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
     :param similarity:              Get rid of genomes according to this threshold in case the dereplication step is enabled
+    :param unknown_label:           Prefix label of the newly defined clusters
     :param logger:                  Logger object
     :param verbose:                 Print messages on screen
     :param nproc:                   Make the process parallel when possible
@@ -692,7 +697,8 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         # Define a cluster for each taxomomic level
         # Look at the genomes profiles and update or build new clusters 
         assignments_filepath = os.path.join(db_dir, "assignments.txt")
-        cluster(output_table, boundaries, manifest_filepath, os.path.join(tmp_dir, "profiling"), assignments_filepath)
+        cluster(output_table, boundaries, manifest_filepath, os.path.join(tmp_dir, "profiling"), assignments_filepath,
+                unknown_label=unknown_label)
 
         # Load the new assignments
         assignments = dict()
@@ -805,8 +811,8 @@ def main() -> None:
     update(args.input_list, args.type, args.extension, args.db_dir, args.kingdom, args.tmp_dir, 
            boundaries=args.boundaries, boundary_uncertainty=args.boundary_uncertainty, taxa_map=args.taxa, 
            completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
-           similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
-           pplacer_threads=args.pplacer_threads, parallel=args.parallel)
+           similarity=args.similarity, unknown_label=args.unknown_label, logger=logger, verbose=args.verbose, 
+           nproc=args.nproc, pplacer_threads=args.pplacer_threads, parallel=args.parallel)
 
     if args.cleanup:
         # Remove the temporary folder
