@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 16, 2022"
+__date__ = "Jun 20, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -125,6 +125,10 @@ def profile(input_file: str, input_id: str, tree: str, threshold: float=0.0, exp
         
         # Define the output file path
         output_file = os.path.join(output_dir, "{}__{}__matches.txt".format(output_prefix, level))
+
+        # There is no need to run HowDeSBT in case of clusters with only one node/genome
+        # The result is the same of profiling the higher level
+        # TODO
 
         # Run HowDeSBT
         with open(output_file, "w+") as file:
