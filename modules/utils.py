@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 15, 2022"
+__date__ = "Jun 20, 2022"
 
 import sys, os, io, errno, logging, math, subprocess
 import numpy as np
@@ -77,7 +77,8 @@ def checkm(genomes_paths: List[str], tmp_dir: str, file_extension: str="fna.gz",
 
     return output_tables
 
-def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepath: str, profiles_dir: str, outpath: str) -> str:
+def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepath: str, profiles_dir: str, outpath: str,
+            unknown_label: str="MI") -> str:
     """
     Define new clusters with the unassigned MAGs
 
@@ -86,6 +87,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
     :param manifest_filepath:       Path to the manifest file
     :param profiles_dir:            Path to the temporary folder with the genomes profiles defined by the profile module
     :param outpath:                 Path to the output file with the new assignments
+    :param unknown_label:           Prefix label of the newly defined clusters
     :return:                        Return the path to the output table with the new assignments
     """
 
@@ -143,7 +145,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
             line = line.strip()
             if line:
                 if line.startswith("--unknown-counter"):
-                    unknown_counter_manifest = int(line.split("=")[-1])
+                    unknown_counter_manifest = int(line.split(" ")[-1])
                     unknown_counter_found = True
     # Initialise variable for counting the unknown clusters
     unknown_counter = unknown_counter_manifest
@@ -245,7 +247,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
                 assigned_levels = len(assignment)
                 for i in range(assigned_levels, len(levels)):
                     # Create new clusters
-                    assignment.append("{}__cluster{}".format(levels[i], unknown_counter))
+                    assignment.append("{}__{}{}".format(levels[i], unknown_label, unknown_counter))
                     # Increment the unknown counter
                     unknown_counter += 1
 
@@ -276,7 +278,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
         if not unknown_counter_found:
             # Append the --unknown-counter info to the manifest file
             with open(manifest_filepath, "a+") as file:
-                file.write("--unknown-counter={}\n".format(unknown_counter))
+                file.write("--unknown-counter {}\n".format(unknown_counter))
         else:
             # Update the --unknown-counter info
             updated_manifest_filepath = os.path.join(os.path.dirname(manifest_filepath), "manifest2.txt")
@@ -285,10 +287,10 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
                     for line in file2:
                         line = line.strip()
                         if line:
-                            line_split = line.split("=")
+                            line_split = line.split(" ")
                             if line_split[0] == "--unknown-counter":
                                 line_split[-1] = str(unknown_counter)
-                            file1.write("{}\n".format("=".join(line_split)))
+                            file1.write("{}\n".format(" ".join(line_split)))
             # Replace the old manifest file with the updated one
             os.unlink(manifest_filepath)
             os.rename(updated_manifest_filepath, manifest_filepath)
