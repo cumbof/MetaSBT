@@ -220,7 +220,7 @@ def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, nproc: i
     # Estimate the bloom filter size with ntCard
     run(["ntcard", "--kmer={}".format(kmer_len),    # Kmer length
                    "--threads={}".format(nproc),    # Maximum number of threads
-                   "--pref={}".format(prefix),    # Prefix of the output histogram file
+                   "--pref={}".format(prefix),      # Prefix of the output histogram file
                    "@{}".format(genomes_filepath)], # Input file with the list of genomes paths
         silence=True)
 

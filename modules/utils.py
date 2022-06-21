@@ -434,9 +434,10 @@ def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
     for i1, row1 in enumerate(matrix):
         for i2, row2 in enumerate(matrix):
             if i2 > i1:
-                # Count how many times a 1 appear in the same position of both the arrays
+                # Count how many times a value >0 appear in the same position of both the arrays
+                # in the count matrix produced by kmtricks
                 common = sum([1 for i, _ in enumerate(row1) if row1[i] > 0 and row2[i] > 0])
-                # Update the minimum and maximum common matrix
+                # Update the minimum and maximum number of common kmers
                 if common > maxv:
                     maxv = common
                 if common < minv:
@@ -492,6 +493,9 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
             for tax in taxonomic_boundaries:
                 min_bounds.append(taxonomic_boundaries[tax]["min"])
                 max_bounds.append(taxonomic_boundaries[tax]["max"])
+            
+            minv = sum(min_bounds[tax])/len(min_bounds[tax])
+            maxv = sum(max_bounds[tax])/len(max_bounds[tax])
         
         else:
             # Split the taxonomic label into levels

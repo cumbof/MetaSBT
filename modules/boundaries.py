@@ -136,8 +136,7 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
 def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes: int=3, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
     """
     Define boundaries for each of the taxonomic levels in the database
-    Boundaries are defined as the minimum and maximum number of common kmers among all 
-    the reference genomes under a specific taxonomic level
+    Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level
 
     :param db_dir:          Path to the database root folder
     :param kingdom:         Retrieve genomes that belong to a specific kingdom
@@ -160,9 +159,7 @@ def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes
         file.write("# --db-dir {}\n".format(db_dir))
         file.write("# --kingdom {}\n".format(kingdom))
         file.write("# --min-genomes {}\n".format(min_genomes))
-        file.write("# {}\t{}\t{}\n".format("Lineage",
-                                           "Min kmers",
-                                           "Max kmers"))
+        file.write("# {}\t{}\t{}\n".format("Lineage", "Min kmers", "Max kmers"))
     
     # Iterate over the taxonomic levels from species up to the phylum
     for level in ["species", "genus", "family", "order", "class", "phylum"]:

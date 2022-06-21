@@ -440,15 +440,14 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
             
             # In case the input genome survived the dereplication with the closest genome in the database
             if not skip_genome:
-                # Retrieve the minimum and maximum common kmers for the closest taxa
-                min_bound, max_bound = get_level_boundaries(boundaries, closest_taxa)
+                # Retrieve the minimum number of common kmers for the closest taxa
+                min_bound, _ = get_level_boundaries(boundaries, closest_taxa)
                 # Add uncertainty to the boundaries
                 min_bound -= int(min_bound*boundary_uncertainty/100.0)
-                max_bound += int(max_bound*boundary_uncertainty/100.0)
 
                 if input_type == "MAGs":
                     # In case the input genome is a MAG
-                    if closest_common_kmers <= max_bound and closest_common_kmers >= min_bound:
+                    if closest_common_kmers >= min_bound:
                         # Assign the current genome to the closest lineage
                         target_genome = oa.path.join(closest_taxadir, "genomes", "{}.{}".format(genome_name, genome_ext))
                         
@@ -488,7 +487,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                     # Retrieve the taxonomic label from the input mapping file
                     taxalabel = taxonomies[genome_name]
 
-                    if closest_common_kmers <= max_bound and closest_common_kmers >= min_bound:
+                    if closest_common_kmers >= min_bound:
                         # Check whether the closest taxonomy contains any reference genome
                         how_many_references = 0
                         if os.path.exists(os.path.join(closest_taxadir, "references.txt")):
