@@ -2,14 +2,15 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 20, 2022"
+__date__ = "Jun 21, 2022"
 
-import sys, os, time, errno, re, shutil
+import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
 from pathlib import Path
 from functools import partial
 from collections import Counter
 from logging import Logger
+from typing import Tuple
 
 try:
     # Load utility functions
@@ -130,6 +131,303 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
+def load_taxa(taxa_filepath, genomes_path):
+    """
+    Load the taxa file with the mapping between the input genome names and their taxonomic labels
+
+    :param taxa_filepath:   Path to the input mapping file with the taxonomic labels
+    :param genomes_path:    List with paths to the input genome files
+    :return:                Dictionary with mapping between genome names and their taxonomic labels
+    """
+
+    taxonomies = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(taxa_filepath).readlines() \
+                    if line.strip() and not line.strip().startswith("#")}
+    
+    # Check whether a taxonomic label is defined for each of the input genome
+    genome_names = list()
+    for genome_path in genomes_path:
+        genome_name = os.path.splitext(os.path.basename(genome_path))[0]
+        if genome_path.endswith(".gz"):
+            genome_name = os.path.splitext(genome_name)[0]
+        gneome_names.append(genome_name)
+    
+    if len(set(genome_names).intersection(set(taxonomies.keys()))) < len(set(genome_names)):
+        raise Exception("Unable to find all the taxonomic labels for the input reference genomes")
+    
+    return taxonomies
+
+def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tmp_genomes_dir: str=None, boundaries: str=None, taxonomies: dict=dict(), 
+                       dereplicate: bool=False, similarity: float=100.0, checkm_data: dict=dict(), logger: Logger=None, verbose: bool=False) -> Tuple[dict, list, list]:
+    """
+    Profile and assign one input genome
+
+    :param genome_path:         Path to the input genome file
+    :param tmp_dir:             Path to the temporary folder
+    :param db_dir:              Path to the database root folder
+    :param tmp_genomes_dir:     Path to the temporary folder for uncompressing input genomes
+    :param boundaries:          Path to the table with taxonomic boundaries
+    :param taxonomies:          Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
+    :param dereplicate:         Enable dereplication of input genome against genomes in the closest cluster
+    :param similarity:          Exclude input genome if its similarity with the closest genome in the database exceed this threshold
+    :param checkm_data:         Dictionary with CheckM statistics
+    :param logger:              Logger object
+    :param verbose:             Print messages on screen
+    :return:                    The assignment
+    """
+
+    # Define a partial println function to avoid specifying logger and verbose
+    # every time the println function is invoked
+    printline = partial(println, logger=logger, verbose=verbose)
+
+    # The input genome is added to the "to_known_taxa" in case it is a reference genome and the closest cluster is unknown
+    to_known_taxa = dict()
+    # Add its closest taxonomic label in case the input genome is assigned to that taxonomy
+    rebuild = list()
+    # Otherwise, the input genome is unassigned
+    unassigned = list()
+
+    filepath = genome_path
+    genome_name = os.path.splitext(os.path.basename(filepath))[0]
+    genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
+    # in case the current genome is gzip compressed
+    if genome_path.endswith(".gz"):
+        filepath = os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])
+        genome_name = os.path.splitext(os.path.basename(filepath))[0]
+        genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
+        # Unzip the current genome to the tmp folder
+        with open(filepath, "w+") as file:
+            run(["gunzip", "-c", genome_path], stdout=file)
+    
+    printline("Profiling {}".format(genome_name))
+
+    # Run the profiler to establish the closest genome and the closest group 
+    # for each taxonomic level in the tree
+    # The profile module is in the same folder of the update module
+    run([sys.executable, os.path.join(SCRIPT_DIR, "profile.py"), "--input-file", filepath,
+                                                                 "--input-id", filepath,
+                                                                 "--tree", os.path.join(db_dir, "index", "index.detbrief.sbt"),
+                                                                 "--expand",
+                                                                 "--output-dir", os.path.join(tmp_dir, "profiling"),
+                                                                 "--output-prefix", genome_name],
+        silence=True)
+    
+    # Define the path to the profiler output file
+    profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".join(genome_name))
+
+    # Check whether the profile exists
+    if os.path.exists(profile_path):
+        # Load the profile
+        profile_data = dict()
+        with open(profile_path) as profile:
+            for line in profile:
+                line = line.strip()
+                if line:
+                    line_split = line.split("\t")
+                    profile_data[line_split[1]] = {
+                        "taxonomy": line_split[2],
+                        "common_kmers": int(line_split[3]),
+                        "score": float(line_split[4])
+                    }
+        
+        # Discard the genome if it is too similar with the closest genome according to the similarity score
+        # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
+        # a MAG with a high number of overlapped kmers according to the similarity score
+        closest_genome = profile_data["genome"]
+
+        # Reconstruct the full lineage of the closest taxa
+        closest_taxa = list()
+        closest_common_kmers = 0
+        closest_score = 0.0
+        for level in ["kingdom", "phylum", "class", "order", "family", "genus", "species"]:
+            closest_taxa.append(profile_data[level]["taxonomy"])
+            if level == "species":
+                closest_common_kmers = profile_data[level]["common_kmers"]
+                closest_score = profile_data[level]["score"]
+        closest_taxa = "|".join(closest_taxa)
+
+        printline("Closest lineage: {} (score {})".format(closest_taxa, closest_score))
+        printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_genome["score"]))
+
+        # Define the folder path of the closest taxonomy under the database
+        closest_taxadir = os.path.join(db_dir, closest_taxa.replace("|", os.sep))
+
+        # Load the set of reference genomes that belongs to the closest species
+        references_filepath = os.path.join(closest_taxadir, "references.txt")
+        references = list()
+        if os.path.exists(references_filepath):
+            references = [ref.strip() for ref in open(references_filepath).readlines() if ref.strip()]
+
+        # Also load the set of MAGs that belongs to the closest species
+        mags_filepath = os.path.join(closest_taxadir, "mags.txt")
+        mags = list()
+        if os.path.exists(mags_filepath):
+            mags = [mag.strip() for mag in open(mags_filepath).readlines() if mag.strip()]
+
+        # Check whether the input genome must be discarded
+        skip_genome = False
+        if dereplicate and closest_genome["score"]*100.0 >= similarity:
+            printline("Dereplicating genome")
+            if input_type == "MAGs":
+                # In case the input genome is a MAG
+                if closest_genome["taxonomy"] in references:
+                    # In case the closest genome is a reference genome
+                    skip_genome = True
+                    # Print the reason why the current genome is excluded
+                    printline("Discarding genome\nInput genome is a MAG and the closest genome is a reference")
+                elif closest_genome["taxonomy"] in mags:
+                    # In case the closest genome is a MAG
+                    skip_genome = True
+                    # Print the reason why the current genome is excluded
+                    printline("Discarding genome\nInput genome and the closest genome are both MAGs")
+            
+            elif input_type == "references":
+                # In case the input genome is a reference genome
+                if closest_genome["taxonomy"] in references:
+                    # In case the closest genome is a reference genome
+                    skip_genome = True
+                    # Print the reason why the current genome is excluded
+                    printline("Discarding genome\nInput genome and the closest genome are both reference genomes")
+        
+        # In case the input genome survived the dereplication with the closest genome in the database
+        if not skip_genome:
+            # Retrieve the minimum number of common kmers for the closest taxa
+            min_bound, _ = get_level_boundaries(boundaries, closest_taxa)
+            # Add uncertainty to the boundaries
+            min_bound -= int(min_bound*boundary_uncertainty/100.0)
+
+            if input_type == "MAGs":
+                # In case the input genome is a MAG
+                if closest_common_kmers >= min_bound:
+                    # Assign the current genome to the closest lineage
+                    target_genome = oa.path.join(closest_taxadir, "genomes", "{}.{}".format(genome_name, genome_ext))
+                    
+                    # The input genome is always uncompressed
+                    # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                    run(["gzip", target_genome], silence=True)
+                    target_genome = "{}.gz".format(target_genome)
+
+                    # Add the current genome to the list of MAGs
+                    with open(mags_filepath, "a+") as file:
+                        file.write("{}\n".format(genome_name))
+                    
+                    # Also add its CheckM statistics if available
+                    if genome_name in checkm_data:
+                        checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
+                        checkm_exists = os.path.exists(checkm_filepath)
+                        with open(checkm_filepath, "a+") as checkm_file:
+                            if not checkm_exists:
+                                checkm_file.write("{}\n".format(checkm_header))
+                            checkm_file.write("{}\n".format(checkm_data[genome_name]))
+                    
+                    # Do not remove the index here because there could be other input genome
+                    # with the same closest taxonomic label
+                    rebuild.append(closest_taxa)
+
+                    printline("{} has been characterised as {}".format(genome_name, closest_taxa))
+            
+                else:
+                    # Mark the input genome as unassigned
+                    # The CheckM statistics for this genome will be reported after the assignment
+                    unassigned.append(genome_path)
+
+                    printline("{} is still unassigned".format(genome_name))
+            
+            elif input_type == "references":
+                # In case the input genome is a reference genome
+                # Retrieve the taxonomic label from the input mapping file
+                taxalabel = taxonomies[genome_name]
+
+                if closest_common_kmers >= min_bound:
+                    # Check whether the closest taxonomy contains any reference genome
+                    how_many_references = 0
+                    if os.path.exists(references_filepath):
+                        how_many_references = sum([1 for ref in open(references_filepath).readlines() if ref.strip()])
+                    
+                    if how_many_references == 0:
+                        # If the closest genome belongs to a new cluster with no reference genomes
+                        # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
+                        # Do not change lineage here because there could be more than one reference genome assigned to the same unknown cluster
+                        # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
+                        if closest_taxa not in to_known_taxa:
+                            to_known_taxa[closest_taxa] = list()
+                        to_known_taxa[closest_taxa].append(genome_name)
+
+                        printline("{} has been characterised as {}".format(genome_name, closest_taxa))
+
+                    elif how_many_references >= 1:
+                        # If the closest genome belongs to a cluster with at least one reference genome
+                        if taxalabel != closest_taxa:
+                            # If the taxonomic labels of the current reference genome and that one of the closest genomedo not match
+                            # Report the inconsistency
+                            printline("Inconsistency found:\nInput genome: {}\nClosest lineage: {}".format(taxalabel, closest_taxa))
+                        
+                        # Assign the current genome to the closest lineage
+                        target_genome = oa.path.join(closest_taxadir, "genomes", "{}.{}".format(genome_name, genome_ext))
+                        
+                        # The input genome is always uncompressed
+                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                        run(["gzip", target_genome], silence=True)
+                        target_genome = "{}.gz".format(target_genome)
+
+                        # Add the current genome to the list of reference genomes
+                        with open(references_filepath, "a+") as file:
+                            file.write("{}\n".format(genome_name))
+
+                        # Do not remove the index here because there could be other input genome
+                        # with the same closest taxonomic label
+                        rebuild.append(closest_taxa)
+
+                        printline("{} has been characterised as {}".format(genome_name, closest_taxa))
+                    
+                    # Also add its CheckM statistics if available
+                    if genome_name in checkm_data:
+                        checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
+                        checkm_exists = os.path.exists(checkm_filepath)
+                        with open(checkm_filepath, "a+") as checkm_file:
+                            if not checkm_exists:
+                                checkm_file.write("{}\n".format(checkm_header))
+                            checkm_file.write("{}\n".format(checkm_data[genome_name]))
+                
+                else:
+                    # If nothing is closed enough to the current genome and its taxonomic label does not exist in the database
+                    # Create a new branch with the new taxonomy for the current genome
+                    taxdir = os.path.join(db_dir, taxalabel.replace("|", os.sep))
+                    os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
+
+                    # Assign the current genome to the closest lineage
+                    target_genome = oa.path.join(taxdir, "genomes", "{}.{}".format(genome_name, genome_ext))
+                    shutil.copy(filepath, target_genome)
+                    
+                    # The input genome is always uncompressed
+                    # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                    run(["gzip", target_genome], silence=True)
+                    target_genome = "{}.gz".format(target_genome)
+
+                    # Add the current genome to the list of reference genomes
+                    with open(os.path.join(taxdir, "references.txt"), "a+") as file:
+                        file.write("{}\n".format(genome_name))
+                    
+                    # Do not remove the index here because there could be other input genome
+                    # with the same closest taxonomic label
+                    rebuild.append(closest_taxa)
+
+                    printline("{} has been characterised as {}".format(genome_name, closest_taxa))
+
+                    # Also add its CheckM statistics if available
+                    if genome_name in checkm_data:
+                        checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
+                        checkm_exists = os.path.exists(checkm_filepath)
+                        with open(checkm_filepath, "a+") as checkm_file:
+                            if not checkm_exists:
+                                checkm_file.write("{}\n".format(checkm_header))
+                            checkm_file.write("{}\n".format(checkm_data[genome_name]))
+
+    # Remove the uncompressed version of the input genome in the temporary folder
+    if os.path.exists(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])):
+        os.unlink(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0]))
+
+    return to_known_taxa, rebuild, unassigned
+
 def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdom: str, tmp_dir: str, boundaries: str=None,
            boundary_uncertainty: float=0.0, taxa_map: str=None, completeness: float=0.0, contamination: float=100.0, 
            dereplicate: bool=False, similarity: float=100.0, unknown_label: str="MI", logger: Logger=None, 
@@ -195,21 +493,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
     # Load the file with the mapping between genome names and taxonomic labels
     # Only in case of input reference genomes
-    taxonomies = dict()
-    if input_type == "references":
-        taxonomies = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(taxa_map).readlines() \
-                        if line.strip() and not line.strip().startswith("#")}
-        
-        # Check whether a taxonomic label is defined for each of the input genome
-        genome_names = list()
-        for genome_path in genomes_path:
-            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_name = os.path.splitext(genome_name)[0]
-            gneome_names.append(genome_name)
-        
-        if len(set(genome_names).intersection(set(taxonomies.keys()))) < len(set(genome_names)):
-            raise Exception("Unable to find all the taxonomic labels for the input reference genomes")
+    taxonomies = load_taxa(taxa_map, genomes_paths) if input_type == "references" else dict()
 
     printline("Processing {} input genomes ({})".format(len(genomes_paths), input_type))
 
@@ -334,250 +618,40 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     # They will be assigned to new groups
     unassigned = list()
 
-    # Start processing input genomes
-    for genome_path in genomes_paths:
-        filepath = genome_path
-        genome_name = os.path.splitext(os.path.basename(filepath))[0]
-        genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
-        # in case the current genome is gzip compressed
-        if genome_path.endswith(".gz"):
-            filepath = os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])
-            genome_name = os.path.splitext(os.path.basename(filepath))[0]
-            genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
-            # Unzip the current genome to the tmp folder
-            with open(filepath, "w+") as file:
-                run(["gunzip", "-c", genome_path], stdout=file)
+    # Define a partial function around the profile_and_assign
+    profile_and_assign_partial = partial(profile_and_assign, tmp_dir=tmp_dir, db_dir=db_dir, tmp_genomes_dir=tmp_genomes_dir,
+                                                             boundaries=boundaries, taxonomies=taxonomies, dereplicate=dereplicate,
+                                                             similarity=similarity, checkm_data=checkm_data, 
+                                                             logger=logger if parallel == 1 else None, 
+                                                             verbose=verbose if parallel == 1 else False)
+
+    # Initialise the progress bar
+    pbar = tqdm.tqdm(total=len(genomes_paths), disable=(not verbose))
+
+    with mp.Pool(processes=parallel) as pool:
+        def update_bar(*args):
+            # Update the progress bar
+            pbar.update()
+            return
         
-        printline("Profiling {}".format(genome_name))
+        # Process the input genome files
+        jobs = [pool.apply_async(profile_and_assign_partial, args=(genome_path, ), callback=update_bar) 
+                    for genome_path in genomes_paths]
 
-        # Run the profiler to establish the closest genome and the closest group 
-        # for each taxonomic level in the tree
-        # The profile module is in the same folder of the update module
-        run([sys.executable, os.path.join(SCRIPT_DIR, "profile.py"), "--input-file", filepath,
-                                                                     "--input-id", filepath,
-                                                                     "--tree", os.path.join(db_dir, "index", "index.detbrief.sbt"),
-                                                                     "--expand",
-                                                                     "--output-dir", os.path.join(tmp_dir, "profiling"),
-                                                                     "--output-prefix", genome_name],
-            silence=True)
-        
-        # Define the path to the profiler output file
-        profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".join(genome_name))
-
-        # Check whether the profile exists
-        if os.path.exists(profile_path):
-            # Load the profile
-            profile_data = dict()
-            with open(profile_path) as profile:
-                for line in profile:
-                    line = line.strip()
-                    if line:
-                        line_split = line.split("\t")
-                        profile_data[line_split[1]] = {
-                            "taxonomy": line_split[2],
-                            "common_kmers": int(line_split[3]),
-                            "score": float(line_split[4])
-                        }
+        # Get results from jobs
+        for job in jobs:
+            partial_to_known_taxa, partial_rebuild, partial_unassigned = job.get()
             
-            # Discard the genome if it is too similar with the closest genome according to the similarity score
-            # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
-            # a MAG with a high number of overlapped kmers according to the similarity score
-            closest_genome = profile_data["genome"]
-
-            # Reconstruct the full lineage of the closest taxa
-            closest_taxa = list()
-            closest_common_kmers = 0
-            closest_score = 0.0
-            for level in ["kingdom", "phylum", "class", "order", "family", "genus", "species"]:
-                closest_taxa.append(profile_data[level]["taxonomy"])
-                if level == "species":
-                    closest_common_kmers = profile_data[level]["common_kmers"]
-                    closest_score = profile_data[level]["score"]
-            closest_taxa = "|".join(closest_taxa)
-
-            printline("Closest lineage: {} (score {})".format(closest_taxa, closest_score))
-            printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_genome["score"]))
-
-            # Define the folder path of the closest taxonomy under the database
-            closest_taxadir = os.path.join(db_dir, closest_taxa.replace("|", os.sep))
-
-            # Load the set of reference genomes that belongs to the closest species
-            references_filepath = os.path.join(closest_taxadir, "references.txt")
-            references = list()
-            if os.path.exists(references_filepath):
-                references = [ref.strip() for ref in open(references_filepath).readlines() if ref.strip()]
-
-            # Also load the set of MAGs that belongs to the closest species
-            mags_filepath = os.path.join(closest_taxadir, "mags.txt")
-            mags = list()
-            if os.path.exists(mags_filepath):
-                mags = [mag.strip() for mag in open(mags_filepath).readlines() if mag.strip()]
-
-            # Check whether the input genome must be discarded
-            skip_genome = False
-            if dereplicate and closest_genome["score"]*100.0 >= similarity:
-                printline("Dereplicating genome")
-                if input_type == "MAGs":
-                    # In case the input genome is a MAG
-                    if closest_genome["taxonomy"] in references:
-                        # In case the closest genome is a reference genome
-                        skip_genome = True
-                        # Print the reason why the current genome is excluded
-                        printline("Discarding genome\nInput genome is a MAG and the closest genome is a reference")
-                    elif closest_genome["taxonomy"] in mags:
-                        # In case the closest genome is a MAG
-                        skip_genome = True
-                        # Print the reason why the current genome is excluded
-                        printline("Discarding genome\nInput genome and the closest genome are both MAGs")
-                
-                elif input_type == "references":
-                    # In case the input genome is a reference genome
-                    if closest_genome["taxonomy"] in references:
-                        # In case the closest genome is a reference genome
-                        skip_genome = True
-                        # Print the reason why the current genome is excluded
-                        printline("Discarding genome\nInput genome and the closest genome are both reference genomes")
-            
-            # In case the input genome survived the dereplication with the closest genome in the database
-            if not skip_genome:
-                # Retrieve the minimum number of common kmers for the closest taxa
-                min_bound, _ = get_level_boundaries(boundaries, closest_taxa)
-                # Add uncertainty to the boundaries
-                min_bound -= int(min_bound*boundary_uncertainty/100.0)
-
-                if input_type == "MAGs":
-                    # In case the input genome is a MAG
-                    if closest_common_kmers >= min_bound:
-                        # Assign the current genome to the closest lineage
-                        target_genome = oa.path.join(closest_taxadir, "genomes", "{}.{}".format(genome_name, genome_ext))
-                        
-                        # The input genome is always uncompressed
-                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", target_genome], silence=True)
-                        target_genome = "{}.gz".format(target_genome)
-
-                        # Add the current genome to the list of MAGs
-                        with open(mags_filepath, "a+") as file:
-                            file.write("{}\n".format(genome_name))
-                        
-                        # Also add its CheckM statistics if available
-                        if genome_name in checkm_data:
-                            checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                            checkm_exists = os.path.exists(checkm_filepath)
-                            with open(checkm_filepath, "a+") as checkm_file:
-                                if not checkm_exists:
-                                    checkm_file.write("{}\n".format(checkm_header))
-                                checkm_file.write("{}\n".format(checkm_data[genome_name]))
-                        
-                        # Do not remove the index here because there could be other input genome
-                        # with the same closest taxonomic label
-                        rebuild.append(closest_taxa)
-
-                        printline("{} has been characterised as {}".format(genome_name, closest_taxa))
-                
-                    else:
-                        # Mark the input genome as unassigned
-                        # The CheckM statistics for this genome will be reported after the assignment
-                        unassigned.append(genome_path)
-
-                        printline("{} is still unassigned".format(genome_name))
-                
-                elif input_type == "references":
-                    # In case the input genome is a reference genome
-                    # Retrieve the taxonomic label from the input mapping file
-                    taxalabel = taxonomies[genome_name]
-
-                    if closest_common_kmers >= min_bound:
-                        # Check whether the closest taxonomy contains any reference genome
-                        how_many_references = 0
-                        if os.path.exists(os.path.join(closest_taxadir, "references.txt")):
-                            with open(os.path.join(closest_taxadir, "references.txt")) as file:
-                                for line in file:
-                                    line = line.strip()
-                                    if line:
-                                        how_many_references += 1
-                        
-                        if how_many_references == 0:
-                            # If the closest genome belongs to a new cluster with no reference genomes
-                            # Assign the current reference genome to the new cluster and rename its lineage with the taxonomic label of the reference genome
-                            # Do not change lineage here because there could be more than one reference genome assigned to the same unknown cluster
-                            # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
-                            if closest_taxadir not in to_known_taxa:
-                                to_known_taxa[closest_taxadir] = list()
-                            to_known_taxa[closest_taxadir].append(genome_name)
-
-                            printline("{} has been characterised as {}".format(genome_name, closest_taxa))
-
-                        elif how_many_references >= 1:
-                            # If the closest genome belongs to a cluster with at least one reference genome
-                            if taxalabel != closest_taxa:
-                                # If the taxonomic labels of the current reference genome and that one of the closest genomedo not match
-                                # Report the inconsistency
-                                printline("Inconsistency found:\nInput genome: {}\nClosest lineage: {}".format(taxalabel, closest_taxa))
-                            
-                            # Assign the current genome to the closest lineage
-                            target_genome = oa.path.join(closest_taxadir, "genomes", "{}.{}".format(genome_name, genome_ext))
-                            
-                            # The input genome is always uncompressed
-                            # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                            run(["gzip", target_genome], silence=True)
-                            target_genome = "{}.gz".format(target_genome)
-
-                            # Add the current genome to the list of reference genomes
-                            with open(references_filepath, "a+") as file:
-                                file.write("{}\n".format(genome_name))
-
-                            # Do not remove the index here because there could be other input genome
-                            # with the same closest taxonomic label
-                            rebuild.append(closest_taxa)
-
-                            printline("{} has been characterised as {}".format(genome_name, closest_taxa))
-                        
-                        # Also add its CheckM statistics if available
-                        if genome_name in checkm_data:
-                            checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                            checkm_exists = os.path.exists(checkm_filepath)
-                            with open(checkm_filepath, "a+") as checkm_file:
-                                if not checkm_exists:
-                                    checkm_file.write("{}\n".format(checkm_header))
-                                checkm_file.write("{}\n".format(checkm_data[genome_name]))
-                    
-                    else:
-                        # If nothing is closed enough to the current genome and its taxonomic label does not exist in the database
-                        # Create a new branch with the new taxonomy for the current genome
-                        taxdir = os.path.join(db_dir, taxalabel.replace("|", os.sep))
-                        os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
-
-                        # Assign the current genome to the closest lineage
-                        target_genome = oa.path.join(taxdir, "genomes", "{}.{}".format(genome_name, genome_ext))
-                        
-                        # The input genome is always uncompressed
-                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", target_genome], silence=True)
-                        target_genome = "{}.gz".format(target_genome)
-
-                        # Add the current genome to the list of reference genomes
-                        with open(os.path.join(taxdir, "references.txt"), "a+") as file:
-                            file.write("{}\n".format(genome_name))
-                        
-                        # Do not remove the index here because there could be other input genome
-                        # with the same closest taxonomic label
-                        rebuild.append(closest_taxa)
-
-                        printline("{} has been characterised as {}".format(genome_name, closest_taxa))
-
-                        # Also add its CheckM statistics if available
-                        if genome_name in checkm_data:
-                            checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                            checkm_exists = os.path.exists(checkm_filepath)
-                            with open(checkm_filepath, "a+") as checkm_file:
-                                if not checkm_exists:
-                                    checkm_file.write("{}\n".format(checkm_header))
-                                checkm_file.write("{}\n".format(checkm_data[genome_name]))
-
-        # Remove the uncompressed version of the input genome in the temporary folder
-        if os.path.exists(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])):
-            os.unlink(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0]))
+            # Merge partial results
+            for tx in partial_to_known_taxa:
+                if tx not in to_known_taxa:
+                    to_known_taxa[tax] = list()
+                to_known_taxa[tax].extend(partial_to_known_taxa[tx])
+            rebuild.extend(partial_rebuild)
+            partial_unassigned.extend(partial_unassigned)
+    
+    # Close the progress bar
+    pbar.close()
 
     # In case a reference has been assigned to an unknown cluster
     # Update the cluster taxonomy by applying a majority voting on the reference genomes taxa
