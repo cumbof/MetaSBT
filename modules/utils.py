@@ -468,8 +468,8 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
                 if not line.startswith("#"):
                     line_split = line.split("\t")
                     boundaries[line_split[0]] = {
-                        "min": int(line_split[1]),
-                        "max": int(line_split[2])
+                        "min": int(line_split[3]),
+                        "max": int(line_split[4])
                     }
 
     # Keep track of the min and max common kmers
