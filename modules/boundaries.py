@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 16, 2022"
+__date__ = "Jun 21, 2022"
 
 import sys, os, time, errno, shutil
 import argparse as ap
@@ -117,7 +117,7 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
                         os.path.join(tmp_level_dir, "kmers_matrix.txt"))
         
         # Extract boundaries from the kmtricks kmers matrix
-        min_kmers, max_kmers = get_boundaries(os.path.join(tmp_level_dir, "kmers_matrix.txt"))
+        all_kmers, min_kmers, max_kmers = get_boundaries(os.path.join(tmp_level_dir, "kmers_matrix.txt"))
 
         # Get the full lineage from the level folder path
         lineage = list()
@@ -131,7 +131,8 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
 
         # Dump results to the boundaries table
         with open(output, "a+") as table:
-            table.write("{}\t{}\t{}\n".format(lineage, min_kmers, max_kmers))
+            table.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(lineage, how_many, all_kmers, min_kmers, max_kmers, 
+                                                              round(min_kmers/all_kmers, 3), round(max_kmers/all_kmers, 3)))
 
 def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes: int=3, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
     """
@@ -159,7 +160,13 @@ def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes
         file.write("# --db-dir {}\n".format(db_dir))
         file.write("# --kingdom {}\n".format(kingdom))
         file.write("# --min-genomes {}\n".format(min_genomes))
-        file.write("# {}\t{}\t{}\n".format("Lineage", "Min kmers", "Max kmers"))
+        file.write("# {}\t{}\t{}\n".format("Lineage",       # Taxonomic label
+                                           "References",    # Number of reference genomes
+                                           "Kmers",         # Total number of kmers
+                                           "Min kmers",     # Minimum number of common kmers among the reference genomes
+                                           "Max kmers",     # Maximum number of common kmers among the reference genomes
+                                           "Min score",     # Percentage of min kmers on the total number of kmers
+                                           "Max score"))    # Percentage of max kmers on the total number of kmers
     
     # Iterate over the taxonomic levels from species up to the phylum
     for level in ["species", "genus", "family", "order", "class", "phylum"]:

@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 20, 2022"
+__date__ = "Jun 21, 2022"
 
 import sys, os, io, errno, logging, math, subprocess
 import numpy as np
@@ -425,8 +425,8 @@ def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
     # It does not contain any header line
     matrix = load_matrix(kmer_matrix_filepath)
 
-    # Search for the minimum and maximum number of common kmers among all the genomes
-    # in the kmers matrix
+    # Search for the minimum and maximum number of common kmers among all the genomes in the kmers matrix
+    kmers = 0
     minv = np.Inf
     maxv = 0
 
@@ -442,8 +442,10 @@ def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
                     maxv = common
                 if common < minv:
                     minv = common
+        # Also take track of the total number of kmers
+        kmers += 1
 
-    return minv, maxv
+    return kmers, minv, maxv
 
 def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, int]:
     """
