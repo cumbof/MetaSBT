@@ -96,7 +96,7 @@ RUN conda install -y entrez-direct howdesbt kmtricks
 
 # Download meta-index
 RUN mkdir -p /home/git && cd /home/git && \
-    git clone https://github.com/BlankenbergLab/meta-index && \
+    git clone https://github.com/cumbof/meta-index && \
     cd /home/git/meta-index && \
     chmod +x meta-index.py && \
     cd /home/git/meta-index/modules && \
