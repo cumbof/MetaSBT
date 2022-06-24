@@ -6,8 +6,8 @@ description: meta-index
 long_description: |
   A pipeline for automatically indexing genomes and accurately 
   characterizing metagenome-assembled genomes with sequence bloom trees.
-remote_repository_url: https://github.com/BlankenbergLab/meta-index
-homepage_url: https://github.com/BlankenbergLab/meta-index
+remote_repository_url: https://github.com/cumbof/meta-index
+homepage_url: https://github.com/cumbof/meta-index
 type: unrestricted
 auto_tool_repositories:
   name_template: "{{ tool_id }}"
