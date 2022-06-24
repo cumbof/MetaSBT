@@ -35,8 +35,8 @@ MODULES_DIR = os.path.join(SCRIPT_DIR, "modules")
 REQUIREMENTS = os.path.join(SCRIPT_DIR, "requirements.txt")
 
 # Define the software repository URLs
-REPOSITORY_URL = "https://github.com/BlankenbergLab/{}".format(TOOL_ID)
-RELEASES_API_URL = "https://api.github.com/repos/BlankenbergLab/{}/releases/latest".format(TOOL_ID)
+REPOSITORY_URL = "https://github.com/cumbof/{}".format(TOOL_ID)
+RELEASES_API_URL = "https://api.github.com/repos/cumbof/{}/releases/latest".format(TOOL_ID)
 
 def read_params():
     p = ap.ArgumentParser(prog=TOOL_ID,
@@ -280,7 +280,7 @@ def main() -> None:
                 println("Thanks for using meta-index!\n")
                 print_citations()
                 println("Remember to star the meta-index repository on GitHub to stay updated on its development and new features:")
-                println("https://github.com/BlankenbergLab/meta-index\n")
+                println("https://github.com/cumbof/meta-index\n")
             else:
                 raise Exception("Unrecognised module")
 
