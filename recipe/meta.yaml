@@ -6,7 +6,7 @@ package:
   version: {{ version }}
 
 source:
-  url: https://github.com/BlankenbergLab/{{ name }}/archive/{{ version }}.tar.gz
+  url: https://github.com/cumbof/{{ name }}/archive/{{ version }}.tar.gz
   sha256: 40cdff712af03e782dfcbfa9ac03aaf19a005add1d8e8cbc35054bc78b78a03f
 
 build:
