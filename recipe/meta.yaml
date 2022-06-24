@@ -38,7 +38,7 @@ test:
     - meta-index --version
 
 about:
-  home: https://github.com/BlankenbergLab/meta-index
+  home: https://github.com/cumbof/meta-index
   license: MIT
   license_family: MIT
   license_file: LICENSE
@@ -49,4 +49,4 @@ about:
 
 extra:
   recipe-maintainers:
-    - fabio-cumbo
+    - cumbof
