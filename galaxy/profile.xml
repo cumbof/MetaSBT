@@ -5,7 +5,7 @@
     <!-- Tool developer -->
     <creator>
         <person givenName="Fabio" familyName="Cumbo" 
-                url="https://fabio-cumbo.github.io/" 
+                url="https://cumbof.github.io/" 
                 email="fabio.cumbo@gmail.com" />
     </creator>
 
@@ -69,6 +69,6 @@ closest genome in the database and its accuracy score.
 
 Please visit the official GitHub repository_ for other information about `meta-index`.
 
-.. _repository: https://github.com/BlankenbergLab/meta-index
+.. _repository: https://github.com/cumbof/meta-index
     ]]></help>
 </tool>
