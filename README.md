@@ -3,16 +3,16 @@ A pipeline for automatically indexing microbial genomes and accurately character
 
 ## Contents
 
-- [Installing `meta-index`](https://github.com/BlankenbergLab/meta-index#installing-meta-index)
-- [Building a database](https://github.com/BlankenbergLab/meta-index#building-a-database)
-- [Defining boundaries](https://github.com/BlankenbergLab/meta-index#defining-boundaries)
-- [Updating the database](https://github.com/BlankenbergLab/meta-index#updating-the-database)
-- [Building the database report](https://github.com/BlankenbergLab/meta-index#building-the-database-report)
-- [Profiling genomes](https://github.com/BlankenbergLab/meta-index#profiling-genomes)
-- [Unlocking unknown species profiling with `kraken2`](https://github.com/BlankenbergLab/meta-index#unlocking-unknown-species-profiling-with-kraken2)
-- [Integrating `meta-index` in Galaxy](https://github.com/BlankenbergLab/meta-index#integrating-meta-index-in-galaxy)
-- [Credits](https://github.com/BlankenbergLab/meta-index#credits)
-- [Contributing](https://github.com/BlankenbergLab/meta-index#support)
+- [Installing `meta-index`](https://github.com/cumbof/meta-index#installing-meta-index)
+- [Building a database](https://github.com/cumbof/meta-index#building-a-database)
+- [Defining boundaries](https://github.com/cumbof/meta-index#defining-boundaries)
+- [Updating the database](https://github.com/cumbof/meta-index#updating-the-database)
+- [Building the database report](https://github.com/cumbof/meta-index#building-the-database-report)
+- [Profiling genomes](https://github.com/cumbof/meta-index#profiling-genomes)
+- [Unlocking unknown species profiling with `kraken2`](https://github.com/cumbof/meta-index#unlocking-unknown-species-profiling-with-kraken2)
+- [Integrating `meta-index` in Galaxy](https://github.com/cumbof/meta-index#integrating-meta-index-in-galaxy)
+- [Credits](https://github.com/cumbof/meta-index#credits)
+- [Contributing](https://github.com/cumbof/meta-index#support)
 
 ## Installing `meta-index`
 
@@ -35,7 +35,7 @@ The `meta-index` pipeline is also available by simply cloning this repository an
 ```bash
 # Clone the meta-index repository
 mkdir -p ~/git && cd ~/git
-git clone https://github.com/BlankenbergLab/meta-index.git
+git clone https://github.com/cumbof/meta-index.git
 
 # Make the scripts executable
 chmod -R +x meta-index/*.py
@@ -332,6 +332,6 @@ Please, (i) be sure that there are no existing issues/PR concerning the same bug
 
 ## Support
 
-If you need support, please open an [Issue](https://github.com/BlankenbergLab/meta-index/issues) or a new [Discussion](https://github.com/BlankenbergLab/meta-index/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
+If you need support, please open an [Issue](https://github.com/cumbof/meta-index/issues) or a new [Discussion](https://github.com/cumbof/meta-index/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
 
-Copyright © 2022 [Fabio Cumbo](https://github.com/fabio-cumbo), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/BlankenbergLab/meta-index/blob/main/LICENSE) for additional details.
+Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/cumbof/meta-index/blob/main/LICENSE) for additional details.
