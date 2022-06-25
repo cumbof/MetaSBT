@@ -162,14 +162,14 @@ meta-index index --db-dir ~/myindex \
 
 ## Defining boundaries
 
-The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `kmtricks` to build a kmers table for each of the taxonomic levels in the database with information about the presence/absence of a kmer in genomes that belong to a particular lineage. It finally build a new table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. These boundaries are then used by the `update` module in order to establish whether a new MAG must be assigned to the closest cluster identified by the `profile` module.
+The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `kmtricks` to build a kmers table for each of the taxonomic levels in the database with information about the presence/absence of a kmer in genomes that belong to a particular lineage. It finally build a new table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. These boundaries are then used by the `update` module in order to establish whether a new genome must be assigned to the closest cluster identified by the `profile` module.
 
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 ```bash
 meta-index boundaries --db-dir ~/myindex \
                       --kingdom Bacteria \
                       --min-genomes 50 \
-                      --output ~/boundaries.txt \
+                      --output ~/boundaries.tsv \
                       --tmp-dir ~/tmp \
                       --nproc 4 \
                       --cleanup \
@@ -194,11 +194,44 @@ Please note that the `boundaries` module considers clusters with reference genom
 | `--verbose`              | `False` |           | Print results on screen |
 | `--version`              |         |           | Print current module version and exit |
 
+## Profiling genomes
+
+The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
+```bash
+meta-index profile --input-file ~/mymag.fna \
+                   --input-id mymag \
+                   --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
+                   --threshold 0.7 \
+                   --expand \
+                   --stop-at family \
+                   --output-dir ~/profiles \
+                   --output-prefix mymag \
+                   --verbose
+```
+
+Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
+
+**Available options:**
+
+| Option                   | Default | Mandatory | Description  |
+|:-------------------------|:--------|:---------:|:-------------|
+| `--expand`               | `False` |           | Expand the input query on all the taxonomic levels |
+| `--input-file`           |         | ⚑         | Path to the input query |
+| `--input-id`             |         |           | Unique identifier of the input query |
+| `--log`                  |         |           | Path to the log file |
+| `--output-dir`           |         | ⚑         | Output folders with queries results |
+| `--output-prefix`        |         |           | Prefix of the output files with query matches |
+| `--stop-at`              |         |           | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
+| `--threshold`            | `0.0`   |           | Fraction of query kmers that must be present in a leaf to be considered a match |
+| `--tree`                 |         | ⚑         | This is the tree definition file |
+| `--verbose`              | `False` |           | Print results on screen |
+| `--version`              |         |           | Print current module version and exit |
+
 ## Updating the database
 
 This module can be used to add new reference genomes and metagenome-assembled genomes (MAGs) to the database generated with the `index` module. 
 
-In case of new MAGs, it first try to profile them by comparing the input genomes with those present in the database. An input genome is assigned to the closest genome in the database if their set of kmers result similar enough. In case the profiler will not be able to characterize the input MAGs, the `update` subroutine will exploit `kmtricks` to build a kmer matrix for the set of input genomes and automatically group them according to the taxonomic level specific boundaries identified with the `boundaries` utility, and it finally generate new clusters of potentially novel and yet-to-be-named species.
+In case of new MAGs, it first try to profile them by comparing the input genomes with those present in the database. An input genome is assigned to the closest genome in the database if their set of kmers result similar enough. In case the profiler will not be able to characterize the input genome, the `update` subroutine will exploit `kmtricks` to build a kmer matrix for the set of input genomes and automatically group them according to the taxonomy-specific boundaries identified with the `boundaries` utility, and it finally generate new clusters of potentially novel and yet-to-be-named species.
 
 In case of new reference genomes from isolate sequencing, the `update` module simply add the new genomes to the corresponding species by rebuilding the species trees and all the trees at the lower taxonomic levels (please note that the taxonomic labels of the input reference genomes are known). If the taxonomy of an input reference genome is not in the database, the module will compare the input genome with all the cluster of species with no references before generating a new branch in the index database. If the input genome results very close to a cluster of unknown genomes, its taxonomic label will be inherited by all the genomes in the unknown cluster.
 
@@ -206,6 +239,7 @@ The `update` module can be launched with the following command:
 ```bash
 meta-index update --input-list ~/mygenomes.txt \
                   --taxa ~/taxonomies.tsv \
+                  --boundaries ~/boundaries.tsv \
                   --db-dir ~/myindex \
                   --tmp-dir ~/tmp \
                   --dereplicate \
@@ -239,7 +273,7 @@ sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 
 | Option                   | Default | Mandatory | Description  |
 |:-------------------------|:--------|:---------:|:-------------|
-| `--boundaries`           |         | ⚑         | Path to the output table produced by the `boundaries` module. It is required in case of MAGs as input genomes only |
+| `--boundaries`           |         | ⚑         | Path to the output table produced by the `boundaries` module |
 | `--boundary-uncertainty` | `0.0`   |           | Define the percentage of kmers to enlarge and reduce boundaries |
 | `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
 | `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
@@ -276,39 +310,6 @@ The output file is a table that will contain the number of MAGs and reference ge
 | `--db-dir`               | ⚑         | Database folder path |
 | `--output-file`          | ⚑         | Path to the output table |
 | `--version`              |           | Print current module version and exit |
-
-## Profiling genomes
-
-The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
-```bash
-meta-index profile --input-file ~/mymag.fna \
-                   --input-id mymag \
-                   --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
-                   --threshold 0.7 \
-                   --expand \
-                   --stop-at family \
-                   --output-dir ~/profiles \
-                   --output-prefix mymag \
-                   --verbose
-```
-
-Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
-
-**Available options:**
-
-| Option                   | Default | Mandatory | Description  |
-|:-------------------------|:--------|:---------:|:-------------|
-| `--expand`               | `False` |           | Expand the input query on all the taxonomic levels |
-| `--input-file`           |         | ⚑         | Path to the input query |
-| `--input-id`             |         |           | Unique identifier of the input query |
-| `--log`                  |         |           | Path to the log file |
-| `--output-dir`           |         | ⚑         | Output folders with queries results |
-| `--output-prefix`        |         |           | Prefix of the output files with query matches |
-| `--stop-at`              |         |           | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
-| `--threshold`            | `0.0`   |           | Fraction of query kmers that must be present in a leaf to be considered a match |
-| `--tree`                 |         | ⚑         | This is the tree definition file |
-| `--verbose`              | `False` |           | Print results on screen |
-| `--version`              |         |           | Print current module version and exit |
 
 ## Unlocking unknown species profiling with `kraken2`
 
