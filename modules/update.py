@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 21, 2022"
+__date__ = "Jun 24, 2022"
 
 import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
@@ -42,8 +42,7 @@ def read_params():
     p.add_argument( "--boundaries",
                     type = os.path.abspath,
                     required = True,
-                    help = ("Path to the output table produced by the boundaries module. "
-                            "It is required in case of MAGs as input genomes only") )
+                    help = "Path to the output table produced by the boundaries module")
     p.add_argument( "--boundary-uncertainty",
                     type = number(float, minv=0.0, maxv=100.0),
                     default = 0.0,
