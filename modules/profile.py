@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 20, 2022"
+__date__ = "Jun 24, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -132,7 +132,7 @@ def profile(input_file: str, input_id: str, tree: str, threshold: float=0.0, exp
 
         # Run HowDeSBT
         with open(output_file, "w+") as file:
-            run(["howdesbt", "query", "--sort", "--tree", tree, "--threshold", threshold],
+            run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold],
                 stdout=file, stderr=file)
 
         if os.path.exists(output_file):
