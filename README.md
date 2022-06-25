@@ -1,5 +1,5 @@
 # meta-index
-A pipeline for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
+A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
 
 ## Contents
 
