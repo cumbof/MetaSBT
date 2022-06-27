@@ -167,7 +167,6 @@ The `boundaries` module is crucial for the definition of taxonomy-specific bound
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 ```bash
 meta-index boundaries --db-dir ~/myindex \
-                      --kingdom Bacteria \
                       --min-genomes 50 \
                       --output ~/boundaries.tsv \
                       --tmp-dir ~/tmp \
@@ -185,7 +184,6 @@ Please note that the `boundaries` module considers clusters with reference genom
 | `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
 | `--db-dir`               |         | ⚑         | Database directory with the taxonomically organised sequence bloom trees |
 | `--help`                 |         |           | Print the list of arguments and exit |
-| `--kingdom`              |         | ⚑         | Consider genomes whose lineage belongs to a specific kingdom |
 | `--log`                  |         |           | Path to the log file |
 | `--min-genomes`          | `3`     |           | Consider clusters with at least this number of genomes |
 | `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
