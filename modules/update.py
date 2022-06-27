@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 24, 2022"
+__date__ = "Jun 27, 2022"
 
 import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
@@ -860,7 +860,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                     os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
                 
                 # Rebuild the index with HowDeSBT
-                howdesbt(tax_dir, kmer_len, filter_size, nproc)
+                howdesbt(tax_dir, kmer_len=kmer_len, filter_size=filter_size, nproc=nproc, flat_structure=False)
     
     else:
         printline("No lineages have been updated")
