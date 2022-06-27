@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 21, 2022"
+__date__ = "Jun 27, 2022"
 
 import sys, os, io, errno, logging, math, subprocess
 import numpy as np
@@ -515,7 +515,7 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
 
     return minv, maxv
 
-def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: int=1) -> None:
+def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: int=1, flat_structure: bool=False) -> None:
     """
     Run HowDeSBT on a specific taxonomic level
 
@@ -523,6 +523,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
     :param kmer_len:        Length of the kmers
     :param filter_size:     Size of the bloom filters
     :param nproc:           Make it parallel
+    :param flat_structure:  Genomes are not taxonomically organized
     """
 
     # Check whether the input folder is a valid path
@@ -553,7 +554,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
         # Take track of how many genomes under the specific taxonomic levels
         how_many = 0
 
-        if os.path.basename(level_dir).startswith("s__"):
+        if os.path.basename(level_dir).startswith("s__") or flat_structure:
             # Search for all the genomes under the current taxonomic level
             genomes_folder = os.path.join(level_dir, "genomes")
             if os.path.exists(genomes_folder):
