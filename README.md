@@ -218,6 +218,7 @@ Please note that in the example above we explicitly set the `--stop-at` argument
 | `--expand`               | `False` |           | Expand the input query on all the taxonomic levels |
 | `--input-file`           |         | ⚑         | Path to the input query |
 | `--input-id`             |         |           | Unique identifier of the input query |
+| `--input-type`           |         | ⚑         | Accepted input types are genomes or files with one nucleotide sequence per line. In case of genomes, if they contain multiple sequences, results are merged together |
 | `--log`                  |         |           | Path to the log file |
 | `--output-dir`           |         | ⚑         | Output folders with queries results |
 | `--output-prefix`        |         |           | Prefix of the output files with query matches |
