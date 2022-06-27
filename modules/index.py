@@ -85,8 +85,8 @@ def read_params():
                     action = "store_true",
                     default = False,
                     dest = "flat_structure",
-                    help = ("Do not taxonomically organize genomes. "
-                            "This will lead to the creation of a single sequnce bloom tree") )
+                    help = ("Organize genomes without any taxonomic organization. "
+                            "This will lead to the creation of a single sequence bloom tree") )
     p.add_argument( "--increase-filter-size",
                     type = number(float, minv=0.0, maxv=100.0),
                     default = 0.0,
