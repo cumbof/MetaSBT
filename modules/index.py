@@ -8,7 +8,7 @@ __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
 __date__ = "Jun 27, 2022"
 
-import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm
+import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib
 import argparse as ap
 import multiprocessing as mp
 from pathlib import Path
@@ -94,11 +94,15 @@ def read_params():
                     help = ("Increase the estimated filter size by the specified percentage. "
                             "This is used in conjunction with the --estimate_filter_size argument only. "
                             "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes") )
+    p.add_argument( "--input-list",
+                    type = os.path.abspath,
+                    dest = "input_list",
+                    help = ("Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. "
+                            "Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz)") )
     p.add_argument( "--kingdom",
                     type = str,
-                    required = True,
                     choices = ["Archaea", "Bacteria", "Eukaryota", "Viruses"],
-                    help = "Consider genomes whose lineage belongs to a specific kingdom" )
+                    help = "Consider genomes whose lineage belongs to a specific kingdom if --input-list is not provided" )
     p.add_argument( "--kmer-len",
                     type = number(int, minv=6),
                     required = True,
@@ -369,6 +373,229 @@ def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
     
     return ncbitax2lin_table
 
+def quality_control(genomes: list, tax_id: str, tmp_dir: str, completeness: float=0.0, contamination: float=100.0, 
+                    nproc: int=1, pplacer_threads: int=1) -> List[str]:
+    """
+    Quality-control genomes with CheckM
+
+    :param genomes:             List of genome file paths
+    :param tax_id:              NCBI tax ID
+    :param tmp_dir:             Path to the temporary folder
+    :param completeness:        Completeness threshold
+    :param contamination:       Contamination threshold
+    :param nproc:               Make CheckM parallel
+    :param pplacer_threads:     Max number of threads for pplacer
+    :return:                    List of genome file paths for genomes that passed the quality-control
+    """
+
+    # Define the CheckM temporary folder
+    checkm_tmp_dir = os.path.join(tmp_dir, "checkm", tax_id)
+    os.makedirs(checkm_tmp_dir, exist_ok=True)
+    # Run CheckM on the current set of genomes
+    checkm_tables = checkm(genomes, checkm_tmp_dir, file_extension="fna.gz", 
+                                                    nproc=nproc, 
+                                                    pplacer_threads=pplacer_threads)
+    # Filter genomes according to the input --completeness and --contamination thresholds
+    genome_ids = filter_checkm_tables(checkm_tables, completeness=completeness, contamination=contamination)
+    
+    return [os.path.join(tmp_genomes_dir, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids], checkm_tables
+
+def dereplicate(genomes: list, tax_id: str, tmp_dir: str, nproc: int=1, similarity: float=100.0) -> List[str]:
+    """
+    Dereplicate genomes
+
+    :param genomes:         List of genome file paths
+    :param tax_id:          NCBI tax ID
+    :param tmp_dir:         Path to the temporary folder
+    :param nproc:           Make kmtricks parallel
+    :param similarity:      Similarity threshold
+    :return:                List of genome file paths for genomes that passed the dereplication
+    """
+
+    # Define the kmtricks temporary folder
+    kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks", tax_id)
+    os.makedirs(kmtricks_tmp_dir, exist_ok=True)
+
+    # Create a fof file with the list of genomes
+    genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
+    ordered_genome_names = list()
+    with open(genomes_fof_filepath, "w+") as genomes_fof:
+        for genome_path in genomes:
+            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
+            if genome_path.endswith(".gz"):
+                genome_name = os.path.splitext(genome_name)[0]
+            genomes_fof.write("{} : {}\n".format(genome_name, genome_path))
+            ordered_genome_names.append(genome_name)
+
+    # Run kmtricks to produce the kmer matrix
+    output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
+    kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, nproc, output_table)
+
+    # Add the header line to the kmer matrix
+    with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
+        file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
+        with open(output_table) as file2:
+            for line in file2:
+                line = line.strip()
+                if line:
+                    file1.write("{}\n".format(line))
+    
+    # Get rid of the matrix withour header line
+    os.unlink(output_table)
+    shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
+
+    # Filter genomes according to their percentage of common kmers defined with --similarity
+    filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", tax_id, "filtered.txt")
+    filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
+    
+    # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
+    with open(filtered_genomes_filepath) as filtered_genomes:
+        for l in filtered_genomes:
+            l = l.strip()
+            if l:
+                gpath = os.path.join(tmp_genomes_dir, "{}.fna.gz".format(l))
+                if gpath in genomes:
+                    genomes.remove(gpath)
+    
+    return genomes
+    
+def organize_data(genomes: list, db_dir: str, tax_label: str, tax_id: str, metadata: str=None, 
+                  checkm_tables: list=None, flat_structure: bool=False) -> List[str]:
+    """
+    Organize genome files
+
+    :param genomes:         List with path to the genome files
+    :param db_dir:          Path to the database folder
+    :param tax_label:       Full taxonomic label
+    :param tax_id:          NCBI tax ID
+    :param metadata:        Path to the metadata table file
+    :param checkm_tables:   List with paths to the CheckM output tables
+    :param flat_structure:  Organize genomes in the same folder without any taxonomic organization
+    :return:                List with genome file paths
+    """
+
+    genomes_paths = list()
+
+    # In case at least one genome survived both the quality control and dereplication steps
+    # Define the taxonomy folder in database
+    tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
+    genomes_dir = os.path.join(tax_dir, "genomes")
+    os.makedirs(genomes_dir, exist_ok=True)
+
+    references_path = "references.txt" if not flat_structure else "references_{}.txt".format(tax_id)
+    with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
+        # Move the processed genomes to the taxonomy folder
+        for genome_path in genomes:
+            shutil.move(genome_path, genomes_dir)
+            
+            # Also take track of the genome names in the references.txt file
+            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
+            if genome_path.endswith(".gz"):
+                genome_name = os.path.splitext(genome_name)[0]
+            refsfile.write("{}\n".format(genome_name))
+
+            # Add the genome to the full list of genomes in database
+            genomes_paths.append(os.path.join(genomes_dir, os.path.basename(genome_path)))
+    
+    # Move the metadata table to the taxonomy folder
+    if metadata:
+        if os.path.exists(metadata):
+            shutil.move(metadata, tax_dir)
+    
+    if checkm_tables:
+        # Also merge the CheckM output tables and move the result to the taxonomy folder
+        checkm_path = "checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id)
+        with open(os.path.join(tax_dir, checkm_path), "w+") as table:
+            header = True
+            for table_path in checkm_tables:
+                with open(table_path) as partial_table:
+                    line_count = 0
+                    for l in partial_table:
+                        l = l.strip()
+                        if l:
+                            if line_count == 0:
+                                if header:
+                                    table.write("{}\n".format(l))
+                                    header = False
+                            else:
+                                table.write("{}\n".format(l))
+                            line_count += 1
+    
+    return genomes_paths
+
+def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str, tmp_dir: str, nproc: int=1, pplacer_threads: int=1, 
+                          completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0,
+                          flat_structure: bool=False, logger: Logger=None, verbose: bool=False) -> List[str]:
+    """
+    Process a provided list of input genomes
+    Organize, quality-control, and dereplicate genomes
+
+    :param genomes_list:        List of input genome file paths
+    :param taxonomic_label:     Taxonomic label of the input genomes
+    :param db_dir:              Path to the database root folder
+    :param tmp_dir:             Path to the temporary folder
+    :param nproc:               Make the process parallel when possible
+    :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
+    :param completeness:        Threshold on the CheckM completeness
+    :param contamination:       Threshold on the CheckM contamination
+    :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
+    :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
+    :param flat_structure:      Do not taxonomically organize genomes
+    :param logger:              Logger object
+    :param verbose:             Print messages on screen
+    :return:                    The list of paths to the genome files
+    """
+
+    # Define a partial println function to avoid specifying logger and verbose
+    # every time the println function is invoked
+    printline = partial(println, logger=logger, verbose=verbose)
+
+    if verbose:
+        printline("Processing {}".format(taxonomic_label))
+
+    # Create a temporary folder to store genomes
+    tax_id = hashlib.md5(taxonomic_label.encode("utf-8")).hexdigest()
+    tmp_genomes_dir = os.path.join(tmp_dir, "genomes", tax_id)
+    os.makedirs(tmp_genomes_dir, exist_ok=True)
+
+    # Iterate over the list of input genome file paths
+    genomes = list()
+    for genome_path in genomes_list:
+        # Symlink input genomes into the temporary folder
+        os.symlink(genome_path, tmp_genomes_dir)
+        genomes.append(os.path.join(tmo_genomes_dir, os.path.basename(genome_path)))
+
+    # Take track of the paths to the CheckM output tables
+    checkm_tables = list()
+
+    # Quality control
+    if completeness > 0.0 or contamination < 100.0:
+        before_qc = len(genomes)
+        genomes, checkm_tables = quality_control(genomes, tax_id, tmp_dir, completeness=completeness, contamination=contamination, 
+                                                 nproc=nproc, pplacer_threads=pplacer_threads)
+        
+        if before_qc > len(genomes) and verbose:
+            printline("Quality control: excluding {}/{} genomes".format(before_qc-len(genomes), before_qc))
+    
+    # Dereplication
+    if len(genomes) > 1 and dereplicate:
+        before_dereplication = len(genomes)
+        dereplicate(genomes, tax_id, tmp_dir, nproc=nproc, similarity=similarity)
+        
+        if before_dereplication > len(genomes) and verbose:
+            printline("Dereplication: excluding {}/{} genomes".format(before_dereplication-len(genomes), before_dereplication))
+    
+    # Check whether no genomes survived the quality control and the dereplication steps
+    if not genomes:
+        if verbose:
+            printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
+        return genomes
+
+    # Organize genome files
+    genomes_paths = organize_data(genomes, db_dir, tax_label, tax_id, metadata=metadata, checkm_tables=checkm_tables, flat_structure=False)
+
+    return genomes_paths
+
 def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, limit_genomes: float=numpy.Inf, 
                    max_genomes: float=numpy.Inf, min_genomes: float=1.0, nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, 
                    contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, flat_structure: bool=False,
@@ -431,74 +658,20 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
             printline("Retrieved {}/{} genomes".format(len(genomes), genomes_counter))
 
         # Take track of the paths to the CheckM output tables
-        checkm_tables = []
+        checkm_tables = list()
 
         # Quality control
         if genomes and (completeness > 0.0 or contamination < 100.0):
-            # Define the CheckM temporary folder
-            checkm_tmp_dir = os.path.join(tmp_dir, "checkm", tax_id)
-            os.makedirs(checkm_tmp_dir, exist_ok=True)
-            # Run CheckM on the current set of genomes
-            checkm_tables = checkm(genomes, checkm_tmp_dir, file_extension="fna.gz", 
-                                                            nproc=nproc, 
-                                                            pplacer_threads=pplacer_threads)
-            # Filter genomes according to the input --completeness and --contamination thresholds
-            genome_ids = filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0)
-            
             before_qc = len(genomes)
-            genomes = [os.path.join(tmp_genomes_dir, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids]
-
+            genomes, checkm_tables = quality_control(genomes, tax_id, tmp_dir, completeness=completeness, contamination=contamination, 
+                                                     nproc=nproc, pplacer_threads=pplacer_threads)
             if before_qc > len(genomes) and verbose:
                 printline("Quality control: excluding {}/{} genomes".format(before_qc-len(genomes), before_qc))
 
         # Dereplication
         if len(genomes) > 1 and dereplicate:
-            # Define the kmtricks temporary folder
-            kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks", tax_id)
-            os.makedirs(kmtricks_tmp_dir, exist_ok=True)
-
-            # Create a fof file with the list of genomes
-            genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
-            ordered_genome_names = list()
-            with open(genomes_fof_filepath, "w+") as genomes_fof:
-                for genome_path in genomes:
-                    genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-                    if genome_path.endswith(".gz"):
-                        genome_name = os.path.splitext(genome_name)[0]
-                    genomes_fof.write("{} : {}\n".format(genome_name, genome_path))
-                    ordered_genome_names.append(genome_name)
-
-            # Run kmtricks to produce the kmer matrix
-            output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-            kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, nproc, output_table)
-
-            # Add the header line to the kmer matrix
-            with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-                file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
-                with open(output_table) as file2:
-                    for line in file2:
-                        line = line.strip()
-                        if line:
-                            file1.write("{}\n".format(line))
-            
-            # Get rid of the matrix withour header line
-            os.unlink(output_table)
-            shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
-
-            # Filter genomes according to their percentage of common kmers defined with --similarity
-            filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", tax_id, "filtered.txt")
-            filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
-            
             before_dereplication = len(genomes)
-
-            # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
-            with open(filtered_genomes_filepath) as filtered_genomes:
-                for l in filtered_genomes:
-                    l = l.strip()
-                    if l:
-                        gpath = os.path.join(tmp_genomes_dir,"{}.fna.gz".format(l))
-                        if gpath in genomes:
-                            genomes.remove(gpath)
+            dereplicate(genomes, tax_id, tmp_dir, nproc=nproc, similarity=similarity)
             
             if before_dereplication > len(genomes) and verbose:
                 printline("Dereplication: excluding {}/{} genomes".format(before_dereplication-len(genomes), before_dereplication))
@@ -509,49 +682,8 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
                 printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
             return genomes
 
-        # In case at least one genome survived both the quality control and dereplication steps
-        # Define the taxonomy folder in database
-        tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
-        genomes_dir = os.path.join(tax_dir, "genomes")
-        os.makedirs(genomes_dir, exist_ok=True)
-
-        references_path = "references.txt" if not flat_structure else "references_{}.txt".format(tax_id)
-        with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
-            # Move the processed genomes to the taxonomy folder
-            for genome_path in genomes:
-                shutil.move(genome_path, genomes_dir)
-                
-                # Also take track of the genome names in the references.txt file
-                genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-                if genome_path.endswith(".gz"):
-                    genome_name = os.path.splitext(genome_name)[0]
-                refsfile.write("{}\n".format(genome_name))
-
-                # Add the genome to the full list of genomes in database
-                genomes_paths.append(os.path.join(genomes_dir, os.path.basename(genome_path)))
-        
-        # Move the metadata table to the taxonomy folder
-        if os.path.exists(metadata):
-            shutil.move(metadata, tax_dir)
-        
-        if checkm_tables:
-            # Also merge the CheckM output tables and move the result to the taxonomy folder
-            checkm_path = "checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id)
-            with open(os.path.join(tax_dir, checkm_path), "w+") as table:
-                header = True
-                for table_path in checkm_tables:
-                    with open(table_path) as partial_table:
-                        line_count = 0
-                        for l in partial_table:
-                            l = l.strip()
-                            if l:
-                                if line_count == 0:
-                                    if header:
-                                        table.write("{}\n".format(l))
-                                        header = False
-                                else:
-                                    table.write("{}\n".format(l))
-                                line_count += 1
+        # Organize genome files
+        genomes_paths = organize_data(genomes, db_dir, tax_label, tax_id, metadata=metadata, checkm_tables=checkm_tables, flat_structure=False)
     
     # Return the list of paths to the genome files
     return genomes_paths
@@ -607,10 +739,10 @@ def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, limit_genomes: flo
     # Return the list of paths to the genome files
     return genomes, os.path.join(out_dir, "metadata.tsv")
 
-def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, flat_structure: bool=False, limit_genomes: float=numpy.Inf,
-          max_genomes: float=numpy.Inf, min_genomes: float=1.0, estimate_filter_size: bool=False, increase_filter_size: float=0.0, 
-          completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, 
-          verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
+def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, flat_structure: bool=False, 
+          limit_genomes: float=numpy.Inf, max_genomes: float=numpy.Inf, min_genomes: float=1.0, estimate_filter_size: bool=False, 
+          increase_filter_size: float=0.0, completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, 
+          similarity: float=100.0, logger: Logger=None, verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Build the database baseline
 
@@ -640,46 +772,80 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
     # every time the println function is invoked
     printline = partial(println, logger=logger, verbose=verbose)
 
-    # Download the NCBI taxdump
-    printline("Downloading taxonomy dump from NCBI")
-    # Recover already processed nodes.dmp and names.dmp
-    nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
-    names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
-    if not os.path.exists(nodes_dmp) or not os.path.exists(names_dmp):
-        nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
+    if input_list:
+        # Load the set of input genomes
+        taxonomy2genomes = dict()
+        with open(input_list) as file:
+            for line in file:
+                line = line.strip()
+                if line:
+                    if not line.startswith("#"):
+                        line_split = line.split("\t")
 
-    # Run ncbitax2lin to extract lineages
-    printline("Exporting lineages")
-    ncbitax2lin_table = os.path.join(tmp_dir, "ncbi_lineages.csv.gz")
-    if not os.path.exists(ncbitax2lin_table):
-        ncbitax2lin_table = ncbitax2lin(nodes_dmp, names_dmp, tmp_dir)
+                        taxonomy = "NA"
+                        if len(line_split) == 2:
+                            tax_split = line_split[1].split("|")
+                            if len(tax_split) != 7:
+                                # Taxonomic labels must have 7 levels
+                                raise Exception("Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(line_split[1]))
+                            taxonomy = line_split[1]
+                        
+                        genome_path = line_split[0]
+                        if not genome_path.endswith(".fna.gz"):
+                            # Check whether input genomes have a valid file extension
+                            raise Exception("Invalid input genome extension!\n{}".format(line_split[0]))
 
-    # Build a mapping between tax IDs and full taxonomic labels
-    # Take track of the taxonomic labels to remove duplicates
-    # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
-    printline("Building species tax ID to full taxonomy mapping")
-    dump_exists = os.path.exists(os.path.join(tmp_dir, "taxa.tsv"))
-    tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") if not dump_exists else None)
+                        if taxonomy not in taxonomy2genomes:
+                            taxonomy2genomes[taxonomy] = list()
+                        taxonomy2genomes[taxonomy].append(line_split[0])
+        
+        # Force flat structure in case of genomes with no taxonomic label
+        if "NA" in taxonomy2genomes:
+            flat_structure = True
+
+        # Build a partial function around process_input_genomes
+        process_partial = partial(process_input_genomes, db_dir=db_dir, tmp_dir=tmp_dir, nproc=nproc, pplacer_threads=pplacer_threads,
+                                                         completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity,
+                                                         flat_structure=flat_structure, logger=logger, verbose=False)
+        
+        # Initialise the progress bar
+        pbar = tqdm.tqdm(total=len(taxonomy2genomes), disable=(not verbose))
+
+    else:
+        # Download the NCBI taxdump
+        printline("Downloading taxonomy dump from NCBI")
+        # Recover already processed nodes.dmp and names.dmp
+        nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
+        names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
+        if not os.path.exists(nodes_dmp) or not os.path.exists(names_dmp):
+            nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
+
+        # Run ncbitax2lin to extract lineages
+        printline("Exporting lineages")
+        ncbitax2lin_table = os.path.join(tmp_dir, "ncbi_lineages.csv.gz")
+        if not os.path.exists(ncbitax2lin_table):
+            ncbitax2lin_table = ncbitax2lin(nodes_dmp, names_dmp, tmp_dir)
+
+        # Build a mapping between tax IDs and full taxonomic labels
+        # Take track of the taxonomic labels to remove duplicates
+        # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
+        printline("Building species tax ID to full taxonomy mapping")
+        dump_exists = os.path.exists(os.path.join(tmp_dir, "taxa.tsv"))
+        tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") if not dump_exists else None)
+
+        # Build a partial function around process_tax_id
+        process_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, limit_genomes=limit_genomes, 
+                                                  max_genomes=max_genomes, min_genomes=min_genomes, nproc=nproc, pplacer_threads=pplacer_threads, 
+                                                  completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
+                                                  flat_structure=flat_structure, logger=logger, verbose=False)
+
+        # Initialise the progress bar
+        pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
 
     # Take track of all the genomes paths
     genomes_paths = list()
-    
-    printline("Retrieving genomes from NCBI GenBank")
-    if completeness > 0.0 or contamination < 100.0:
-        printline("Enabling quality control with the following thresholds: completeness={}, contamination={}"
-                  .format(completeness, contamination))
-    if dereplicate:
-        printline("Enabling the dereplication of the input genomes with the following threshold: similarity={}"
-                  .format(similarity))
 
-    # Build a partial function around process_tax_id
-    process_tax_id_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, limit_genomes=limit_genomes, 
-                                                     max_genomes=max_genomes, min_genomes=min_genomes, nproc=nproc, pplacer_threads=pplacer_threads, 
-                                                     completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
-                                                     flat_structure=flat_structure, logger=logger, verbose=False)
-
-    # Initialise the progress bar
-    pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
+    printline("Processing genomes")
 
     with mp.Pool(processes=parallel) as pool:
         def update_bar(*args):
@@ -687,9 +853,15 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
             pbar.update()
             return
         
-        # Process the NCBI tax IDs
-        jobs = [pool.apply_async(process_tax_id_partial, args=(tax_id, tax_labels[pos], ), callback=update_bar) 
-                    for pos, tax_id in enumerate(tax_ids)]
+        if input_list:
+            # Process input genomes
+            jobs = [pool.apply_async(process_partial, args=(taxonomy2genomes[taxonomy], taxonomy, ), callback=update_bar) 
+                        for taxonomy in taxonomy2genomes]
+
+        else:
+            # Process the NCBI tax IDs
+            jobs = [pool.apply_async(process_partial, args=(tax_id, tax_labels[pos], ), callback=update_bar) 
+                        for pos, tax_id in enumerate(tax_ids)]
 
         # Get results from jobs
         for job in jobs:
@@ -772,10 +944,14 @@ def main() -> None:
     # Initialise the logger
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
-    # Check whether the database folder exists
-    if it_exists(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), path_type="folder"):
-        raise Exception(("An indexed version of the {} kingdom already exists in the database!\n"
-                         "Please use the update module to add new genomes").format(args.kingdom))
+    if not args.input_list and not args.kingdom:
+        raise Exception("Please specify --input-list or a valid --kingdom")
+
+    if args.kingdom:
+        # Check whether the database folder exists
+        if it_exists(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), path_type="folder"):
+            raise Exception(("An indexed version of the {} kingdom already exists in the database!\n"
+                             "Please use the update module to add new genomes").format(args.kingdom))
     
     # Create the database folder
     os.makedirs(args.db_dir, exist_ok=True)
@@ -816,12 +992,11 @@ def main() -> None:
 
     t0 = time.time()
 
-    index(args.db_dir, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, flat_structure=args.flat_structure, 
-          limit_genomes=args.limit_genomes, max_genomes=args.max_genomes, min_genomes=args.min_genomes, 
-          estimate_filter_size=args.estimate_filter_size, increase_filter_size=args.increase_filter_size, 
-          completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
-          similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
-          pplacer_threads=args.pplacer_threads, parallel=args.parallel)
+    index(args.db_dir, args.input_list, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, 
+          flat_structure=args.flat_structure, limit_genomes=args.limit_genomes, max_genomes=args.max_genomes, min_genomes=args.min_genomes, 
+          estimate_filter_size=args.estimate_filter_size, increase_filter_size=args.increase_filter_size, completeness=args.completeness, 
+          contamination=args.contamination, dereplicate=args.dereplicate, similarity=args.similarity, logger=logger, verbose=args.verbose, 
+          nproc=args.nproc, pplacer_threads=args.pplacer_threads, parallel=args.parallel)
 
     if args.cleanup:
         # Remove the temporary folder
