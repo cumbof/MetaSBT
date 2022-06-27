@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+Define cluster-specific boundaries as the minimum and maximum number of common kmers among all the genomes under a specific cluster
+"""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
@@ -33,6 +36,12 @@ FILES_AND_FOLDERS = [
 ]
 
 def read_params():
+    """
+    Read and test input arguments
+
+    :return:    The ArgumentParser object
+    """
+
     p = ap.ArgumentParser(prog=TOOL_ID,
                           description="Define taxonomy-specific boundaries based on kmers for the definition of new clusters",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
@@ -47,8 +56,6 @@ def read_params():
                     help = "This is the database directory with the taxonomically organised sequence bloom trees" )
     p.add_argument( "--kingdom",
                     type = str,
-                    required = True,
-                    choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
                     help = "Consider genomes whose lineage belongs to a specific kingdom" )
     p.add_argument( "--log",
                     type = os.path.abspath,
@@ -136,16 +143,16 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
             table.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(lineage, how_many, all_kmers, min_kmers, max_kmers, 
                                                               round(min_kmers/all_kmers, 3), round(max_kmers/all_kmers, 3)))
 
-def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes: int=3, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
+def boundaries(db_dir: str, tmp_dir: str, output: str, min_genomes: int=3, kingdom: str=None, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
     """
     Define boundaries for each of the taxonomic levels in the database
     Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level
 
     :param db_dir:          Path to the database root folder
-    :param kingdom:         Retrieve genomes that belong to a specific kingdom
     :param tmp_dir:         Path to the temporary folder
     :param output:          Path to the output table file with boundaries
     :param min_genomes:     Consider clusters with at least this number of genomes
+    :param kingdom:         Retrieve genomes that belong to a specific kingdom
     :param logger:          Logger object
     :param verbose:         Print messages on screen
     :param nproc:           Make the process parallel when possible
@@ -160,7 +167,8 @@ def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes
         # Write header lines
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
         file.write("# --db-dir {}\n".format(db_dir))
-        file.write("# --kingdom {}\n".format(kingdom))
+        if kingdom:
+            file.write("# --kingdom {}\n".format(kingdom))
         file.write("# --min-genomes {}\n".format(min_genomes))
         file.write("# {}\t{}\t{}\n".format("Lineage",       # Taxonomic label
                                            "References",    # Number of reference genomes
@@ -170,18 +178,24 @@ def boundaries(db_dir: str, kingdom: str, tmp_dir: str, output: str, min_genomes
                                            "Min score",     # Percentage of min kmers on the total number of kmers
                                            "Max score"))    # Percentage of max kmers on the total number of kmers
     
+    target_dir = db_dir if not kingdom else os.path.join(db_dir, "k__{}".format(kingdom))
+    levels = ["species", "genus", "family", "order", "class", "phylum"]
+    if not kingdom:
+        levels.append("kingdom")
+
     # Iterate over the taxonomic levels from species up to the phylum
-    for level in ["species", "genus", "family", "order", "class", "phylum"]:
+    for level in levels:
         printline("Defining {} boundaries".format(level))
-        for level_dir in Path(os.path.join(db_dir, "k__{}".format(kingdom))).glob("**/{}__*".format(level[0])):
+        for level_dir in Path(target_dir).glob("**/{}__*".format(level[0])):
             if os.path.isdir(str(level_dir)):
                 # Define boundaries for the current taxonomic level
                 define_boundaries(str(level_dir), level, tmp_dir, output, 
                                   min_genomes=min_genomes, nproc=nproc)
     
-    # Also define boundaries for the specified kingdom
-    define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, 
-                      min_genomes=min_genomes, nproc=nproc)
+    if kingdom:
+        # Also define boundaries for the specified kingdom
+        define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, 
+                          min_genomes=min_genomes, nproc=nproc)
 
     # Report the path to the output boundaries table file
     printline("Output table: {}".format(output))
@@ -194,8 +208,9 @@ def main() -> None:
     logger = init_logger(filepath=args.log, verbose=args.verbose)
 
     # Check whether the database folder exists
-    if not it_exists(args.db_dir, path_type="folder"):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
+    target_dir = args.db_dir if not args.kingdom else os.path.join(db_dir, "k__{}".format(kingdom))
+    if not it_exists(target_dir, path_type="folder"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
     
     # Check whether the output boundaries table alrady exists
     if it_exists(args.output, path_type="file"):
@@ -207,7 +222,7 @@ def main() -> None:
 
     t0 = time.time()
 
-    boundaries(args.db_dir, args.kingdom, args.tmp_dir, args.output, min_genomes=args.min_genomes, 
+    boundaries(args.db_dir, args.tmp_dir, args.output, kingdom=args.kingdom, min_genomes=args.min_genomes, 
                logger=logger, verbose=args.verbose, nproc=args.nproc)
 
     if args.cleanup:
