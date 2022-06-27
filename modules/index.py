@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+"""
+Build a database with a set of genomes indexed with HowDeSBT. 
+Genomes are provided as inputs or automatically downloaded from NCBI GenBank
+"""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 17, 2022"
+__date__ = "Jun 27, 2022"
 
 import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm
 import argparse as ap
@@ -12,6 +16,8 @@ from functools import partial
 from logging import Logger
 from typing import List, Tuple
 
+# Local modules are not available when the main controller
+# tries to load them for accessing their variables
 try:
     # Load utility functions
     from utils import checkm, download, filter_checkm_tables, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
@@ -35,6 +41,12 @@ FILES_AND_FOLDERS = [
 TAXDUMP_URL = "ftp://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
 def read_params():
+    """
+    Read and test input arguments
+
+    :return:    The ArgumentParser object
+    """
+
     p = ap.ArgumentParser(prog=TOOL_ID,
                           description=("Retrieve complete reference genomes from the NCBI GenBank and build a "
                                        "Sequence Bloom Tree for each taxonomic level"),
@@ -69,6 +81,12 @@ def read_params():
                     type = number(int, minv=10000),
                     dest = "filter_size",
                     help = "This is the size of the bloom filters" )
+    p.add_argument( "--flat-structure",
+                    action = "store_true",
+                    default = False,
+                    dest = "flat_structure",
+                    help = ("Do not taxonomically organize genomes. "
+                            "This will lead to the creation of a single sequnce bloom tree") )
     p.add_argument( "--increase-filter-size",
                     type = number(float, minv=0.0, maxv=100.0),
                     default = 0.0,
@@ -79,7 +97,7 @@ def read_params():
     p.add_argument( "--kingdom",
                     type = str,
                     required = True,
-                    choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
+                    choices = ["Archaea", "Bacteria", "Eukaryota", "Viruses"],
                     help = "Consider genomes whose lineage belongs to a specific kingdom" )
     p.add_argument( "--kmer-len",
                     type = number(int, minv=6),
@@ -353,7 +371,8 @@ def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
 
 def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, limit_genomes: float=numpy.Inf, 
                    max_genomes: float=numpy.Inf, min_genomes: float=1.0, nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, 
-                   contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, verbose: bool=False) -> List[str]:
+                   contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, flat_structure: bool=False,
+                   logger: Logger=None, verbose: bool=False) -> List[str]:
     """
     Process a specific NCBI tax ID
     Download, quality-control, and dereplicate genomes
@@ -372,6 +391,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
     :param contamination:       Threshold on the CheckM contamination
     :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
     :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
+    :param flat_structure:      Do not taxonomically organize genomes
     :param logger:              Logger object
     :param verbose:             Print messages on screen
     :return:                    The list of paths to the genome files
@@ -491,11 +511,12 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
 
         # In case at least one genome survived both the quality control and dereplication steps
         # Define the taxonomy folder in database
-        tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep))
+        tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
         genomes_dir = os.path.join(tax_dir, "genomes")
         os.makedirs(genomes_dir, exist_ok=True)
 
-        with open(os.path.join(tax_dir, "references.txt"), "w+") as refsfile:
+        references_path = "references.txt" if not flat_structure else "references_{}.txt".format(tax_id)
+        with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
             # Move the processed genomes to the taxonomy folder
             for genome_path in genomes:
                 shutil.move(genome_path, genomes_dir)
@@ -515,7 +536,8 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
         
         if checkm_tables:
             # Also merge the CheckM output tables and move the result to the taxonomy folder
-            with open(os.path.join(tax_dir, "checkm.tsv"), "w+") as table:
+            checkm_path = "checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id)
+            with open(os.path.join(tax_dir, checkm_path), "w+") as table:
                 header = True
                 for table_path in checkm_tables:
                     with open(table_path) as partial_table:
@@ -585,7 +607,7 @@ def retrieve_genomes(tax_id: str, kingdom: str, out_dir: str, limit_genomes: flo
     # Return the list of paths to the genome files
     return genomes, os.path.join(out_dir, "metadata.tsv")
 
-def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, limit_genomes: float=numpy.Inf,
+def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: int, flat_structure: bool=False, limit_genomes: float=numpy.Inf,
           max_genomes: float=numpy.Inf, min_genomes: float=1.0, estimate_filter_size: bool=False, increase_filter_size: float=0.0, 
           completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, logger: Logger=None, 
           verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
@@ -597,6 +619,7 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
     :param tmp_dir:                 Path to the temporary folder
     :param kmer_len:                Length of the kmers
     :param filter_size:             Size of the bloom filters
+    :param flat_structure:          Do not taxonomically organize genomes
     :param limit_genomes:           Limit the number of genomes per species
     :param max_genomes:             Consider species with this number of genomes at most
     :param min_genomes:             Consider species with a minimum number of genomes
@@ -653,7 +676,7 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
     process_tax_id_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, limit_genomes=limit_genomes, 
                                                      max_genomes=max_genomes, min_genomes=min_genomes, nproc=nproc, pplacer_threads=pplacer_threads, 
                                                      completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
-                                                     logger=logger, verbose=False)
+                                                     flat_structure=flat_structure, logger=logger, verbose=False)
 
     # Initialise the progress bar
     pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
@@ -703,35 +726,38 @@ def index(db_dir: str, kingdom: str, tmp_dir: str, kmer_len: int, filter_size: i
         # Retrieve the current working directory
         current_folder = os. getcwd()
 
-        printline("Indexing all the taxonomic levels")
+        printline("Indexing genomes")
 
         # Define a partial function around the howdesbt wrapper
-        howdesbt_partial = partial(howdesbt, kmer_len=kmer_len, filter_size=filter_size, nproc=nproc)
+        howdesbt_partial = partial(howdesbt, kmer_len=kmer_len, filter_size=filter_size, 
+                                             nproc=nproc, flat_structure=flat_structure)
 
-        # Iterate over all the taxonomic levels from the species up to the kingdom
-        for level in ["species", "genus", "family", "order", "class", "phylum", "kingdom"]:
-            printline("Running HowDeSBT at the {} level".format(level))
-            folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
-            
-            # Initialise the progress bar
-            pbar = tqdm.tqdm(total=len(folders), disable=(not verbose))
-
-            with mp.Pool(processes=parallel) as pool:
-                def update_bar(*args):
-                    # Update the progress bar
-                    pbar.update()
-                    return
+        if not flat_structure:
+            # Iterate over all the taxonomic levels from the species up to the kingdom
+            for level in ["species", "genus", "family", "order", "class", "phylum", "kingdom"]:
+                printline("Running HowDeSBT at the {} level".format(level))
+                folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
                 
-                # Process the NCBI tax IDs
-                jobs = [pool.apply_async(howdesbt_partial, args=(level_dir, ), callback=update_bar) 
-                            for level_dir in folders]
-            
-            # Close the progress bar
-            pbar.close()
+                # Initialise the progress bar
+                pbar = tqdm.tqdm(total=len(folders), disable=(not verbose))
+
+                with mp.Pool(processes=parallel) as pool:
+                    def update_bar(*args):
+                        # Update the progress bar
+                        pbar.update()
+                        return
+                    
+                    # Process the NCBI tax IDs
+                    jobs = [pool.apply_async(howdesbt_partial, args=(level_dir, ), callback=update_bar) 
+                                for level_dir in folders]
+                
+                # Close the progress bar
+                pbar.close()
 
         # Also run HowDeSBT on the database folder to build 
         # the bloom filter representation of the kingdom
-        printline("Building the database root bloom filter with HowDeSBT")
+        if not flat_structure:
+            printline("Building the database root bloom filter with HowDeSBT")
         howdesbt_partial(db_dir)
 
         # The howdesbt function automatically set the current working directory to 
@@ -790,10 +816,11 @@ def main() -> None:
 
     t0 = time.time()
 
-    index(args.db_dir, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, limit_genomes=args.limit_genomes,
-          max_genomes=args.max_genomes, min_genomes=args.min_genomes, estimate_filter_size=args.estimate_filter_size, 
-          increase_filter_size=args.increase_filter_size, completeness=args.completeness, contamination=args.contamination, 
-          dereplicate=args.dereplicate, similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
+    index(args.db_dir, args.kingdom, args.tmp_dir, args.kmer_len, args.filter_size, flat_structure=args.flat_structure, 
+          limit_genomes=args.limit_genomes, max_genomes=args.max_genomes, min_genomes=args.min_genomes, 
+          estimate_filter_size=args.estimate_filter_size, increase_filter_size=args.increase_filter_size, 
+          completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
+          similarity=args.similarity, logger=logger, verbose=args.verbose, nproc=args.nproc, 
           pplacer_threads=args.pplacer_threads, parallel=args.parallel)
 
     if args.cleanup:
