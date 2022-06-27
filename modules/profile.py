@@ -63,7 +63,7 @@ def read_params():
                     required = True,
                     dest = "input_type",
                     choices = ["genome", "list"],
-                    help = ("Accepted input types are genomes or files with one nucleotide sequence per line. "
+                    help = ("Accepted input types are genomes and files with one nucleotide sequence per line. "
                             "In case of genomes, if they contain multiple sequences, results are merged together") )
     p.add_argument( "--log",
                     type = os.path.abspath,
