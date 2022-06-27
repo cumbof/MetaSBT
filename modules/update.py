@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+Update a specific database with a new set of reference genomes or metagenome-assembled genomes
+"""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
@@ -38,6 +41,12 @@ FILES_AND_FOLDERS = [
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 def read_params():
+    """
+    Read and test input arguments
+
+    :return:    The ArgumentParser object
+    """
+    
     p = ap.ArgumentParser(prog=TOOL_ID,
                           description="Update a database with new genomes",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
