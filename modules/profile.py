@@ -2,16 +2,18 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 24, 2022"
+__date__ = "Jun 27, 2022"
 
 import sys, os, time, errno
 import argparse as ap
 from functools import partial
 from logging import Logger
 
+# Local modules are not available when the main controller
+# tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import init_logger, it_exists, println, run
+    from utils import init_logger, it_exists, number, println, run
 except:
     pass
 
@@ -46,6 +48,13 @@ def read_params():
                     type = str,
                     dest = "input_id",
                     help = "Unique identifier of the input query" )
+    p.add_argument( "--input-type",
+                    type = str,
+                    required = True,
+                    dest = "input_type",
+                    choices = ["genome", "list"],
+                    help = ("Accepted input types are genomes or files with one nucleotide sequence per line. "
+                            "In case of genomes, if they contain multiple sequences, results are merged together") )
     p.add_argument( "--log",
                     type = os.path.abspath,
                     help = "Path to the log file" )
@@ -61,11 +70,12 @@ def read_params():
     p.add_argument( "--stop-at",
                     type = str,
                     dest = "stop_at",
+                    choices = ["phylum", "class", "order", "family", "genus"],
                     help = ("Stop expanding queries at a specific taxonomic level. "
                             "Please note that this argument works in conjunction with --expand only. "
                             "Available values: phylum, class, order, family, genus") )
     p.add_argument( "--threshold", 
-                    type = float,
+                    type = number(float, minv=0.0, maxv=1.0),
                     default = 0.0,
                     help = ("Fraction of query kmers that must be present in a leaf to be considered a match. "
                             "This must be between 0.0 and 1.0") )
@@ -84,13 +94,43 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def profile(input_file: str, input_id: str, tree: str, threshold: float=0.0, expand: bool=False, 
-            stop_at: bool=None, output_dir: str=None, output_prefix: str=None, logger: Logger=None, verbose: bool=False) -> None:
+def profile_list(input_file: str, input_id: str, tree: str, threshold: float=0.0,
+                 output_dir: str=None, output_prefix: str=None, logger: Logger=None, verbose: bool=False) -> None:
     """
-    Query the input sequence against a specific tree
-    Also expand the query to the lower taxonomic levels if requested
+    Query the list of sequences against a specific tree
 
     :param input_file:      Path to the input file with query sequences
+    :param input_id:        Unique identifier of the input file
+    :param tree:            Path to the tree definition file
+    :param threhsold:       Query threshold
+    :param output_dir:      Path to the output folder
+    :param output_prefix:   Prefix of the output files with profiles
+    :param logger:          Logger object
+    :param verbose:         Print messages on screen as alternative to the logger
+    """
+
+    # Define a partial println function to avoid specifying logger and verbose
+    # every time the println function is invoked
+    printline = partial(println, logger=logger, verbose=verbose)
+
+    printline("Input file: {}".format(input_file))
+    printline("Input ID: {}".format(input_id))
+
+    # Define the output file path
+    output_file = os.path.join(output_dir, "{}__matches.txt".format(output_prefix))
+
+    # Run HowDeSBT
+    with open(output_file, "w+") as file:
+        run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold],
+            stdout=file, stderr=file)
+
+def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0.0, expand: bool=False, 
+                   stop_at: bool=None, output_dir: str=None, output_prefix: str=None, logger: Logger=None, verbose: bool=False) -> None:
+    """
+    Query the input genome against a specific tree
+    Also expand the query to the lower taxonomic levels if requested
+
+    :param input_file:      Path to the input file with query genome
     :param input_id:        Unique identifier of the input file
     :param tree:            Path to the tree definition file
     :param threhsold:       Query threshold
@@ -276,27 +316,27 @@ def main() -> None:
         # Use the input_id
         args.output_prefix = args.input_id
 
-    # In case of --stop_at
-    if args.stop_at:
-        if not args.expand:
-            # Raise an exception in case --expand is not provided
-            raise Exception("The --stop_at argument must me used in conjunction with --expand only")
-        else:
-            if args.stop_at not in ["phylum", "class", "order", "family", "genus"]:
-                # Raise an exception in case of unrecognized --stop_at value
-                raise Exception("Unrecognized --stop_at value!")
-    
-    # Check whether the threshold is lower than or equals to 1.0 and greater than or equals to 0.0
-    if not 0.0 <= args.threshold <= 1.0:
-        raise Exception("The threshold must be in the interval [0.0, 1.0]")
-    
     t0 = time.time()
 
-    profile(args.input_file, args.input_id,                                 # Input file and ID
-            args.tree, threshold=args.threshold,                            # Input tree and query threshold
-            expand=args.expand, stop_at=args.stop_at,                       # Expand the query and stop at a specific taxonomic level
-            output_dir=args.output_dir, output_prefix=args.output_prefix,   # Output folder and ID
-            logger=logger, verbose=args.verbose)                            # Print messages
+    if args.input_type == "list":
+        # In case the input file contains a list of sequences
+        profile_list(args.input_file, args.input_id,                                 # Input file and ID
+                     args.tree, threshold=args.threshold,                            # Input tree and query threshold
+                     output_dir=args.output_dir, output_prefix=args.output_prefix,   # Output folder and ID
+                     logger=logger, verbose=args.verbose)                            # Print messages
+    
+    elif args.input_type == "genome":
+        # In case of input genome
+
+        if args.stop_at and not args.expand:
+            # Raise an exception in case --expand is not provided
+            raise Exception("The --stop-at argument must me used in conjunction with --expand only")
+        
+        profile_genome(args.input_file, args.input_id,                                 # Input file and ID
+                       args.tree, threshold=args.threshold,                            # Input tree and query threshold
+                       expand=args.expand, stop_at=args.stop_at,                       # Expand the query and stop at a specific taxonomic level
+                       output_dir=args.output_dir, output_prefix=args.output_prefix,   # Output folder and ID
+                       logger=logger, verbose=args.verbose)                            # Print messages
 
     t1 = time.time()
     println("Total elapsed time {}s".format(int(t1 - t0)), 
