@@ -199,6 +199,7 @@ The `profile` module allows to characterize an input genome according to the clo
 ```bash
 meta-index profile --input-file ~/mymag.fna \
                    --input-id mymag \
+                   --input-type genome \
                    --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
                    --threshold 0.7 \
                    --expand \
