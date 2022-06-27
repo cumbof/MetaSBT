@@ -98,18 +98,6 @@ source ~/.bash_profile
 
 Please note that `meta-index` is available for Linux and macOS only.
 
-### Warning (for macOS users)
-
-Unfortunately, the CheckM conda package is still not fully compatible with macOS because of its software dependency `pplacer`. For this reason, macOS users are strongly encouraged to build a Docker container by running the following command from the `meta-index` root directory in which the Dockerfile is located:
-```bash
-docker build . -t meta-index
-```
-
-Once the container is built, you can finally open an interactive shell on the Ubuntu based container already configured to run `meta-index`:
-```bash
-docker run -it meta-index
-```
-
 ## Building a database
 
 The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `kmtricks` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed with `howdesbt` by building new sequence bloom trees considering only the root nodes of the upper taxonomic levels.
@@ -133,7 +121,11 @@ meta-index index --db-dir ~/myindex \
                  --verbose
 ```
 
-**Available options:**
+In case you would like to create a database from a specific set of genomes available on your file system, you may use the `--input-list` instead of the `--kingdom` option. It should point to a table file with the list of file paths to the input genomes on the first column and an optional second column with the full taxonomic labels of the input genomes in a tab-separated values format.
+
+You may also want to get rid of the taxonomic organization of genomes by specifying the `--flat-structure` option that will consider all the input genomes together for the generation of a single sequence bloom tree.
+
+#### Available options
 
 | Option                   | Default | Mandatory | Description  |
 |:-------------------------|:--------|:---------:|:-------------|
@@ -144,9 +136,11 @@ meta-index index --db-dir ~/myindex \
 | `--dereplicate`          | `False` |           | Dereplicate input genomes |
 | `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically override the `--filter-size` option |
 | `--filter-size`          |         | ⚑         | Bloom filter size |
+| `--flat-structure`       |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
 | `--help`                 |         |           | Print the list of arguments and exit |
 | `--increase-filter-size` | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
-| `--kingdom`              |         | ⚑         | Consider genomes whose lineage belongs to a specific kingdom |
+| `--input-list`           |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
+| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom |
 | `--kmer-len`             |         | ⚑         | This is the length of the kmers used for building bloom filters |
 | `--limit-genomes`        | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
 | `--log`                  |         |           | Path to the log file |
@@ -159,6 +153,10 @@ meta-index index --db-dir ~/myindex \
 | `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
 | `--verbose`              | `False` |           | Print results on screen |
 | `--version`              |         |           | Print current module version and exit |
+
+#### Warning
+
+Please note that the `--flat-structure` option is not compatible with the `update` module for updating the database with new genomes. Thus, in case you will need to update the sequence bloom tree, there are no other options than building the database from scratch with the new set of genomes.
 
 ## Defining boundaries
 
@@ -177,7 +175,7 @@ meta-index boundaries --db-dir ~/myindex \
 
 Please note that the `boundaries` module considers clusters with reference genomes only. These clusters can be considered for establishing boundaries depending on a minimum number of reference genomes that can be set with the `--min-genomes` argument.
 
-**Available options:**
+#### Available options
 
 | Option                   | Default | Mandatory | Description  |
 |:-------------------------|:--------|:---------:|:-------------|
@@ -211,7 +209,7 @@ meta-index profile --input-file ~/mymag.fna \
 
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
 
-**Available options:**
+#### Available options
 
 | Option                   | Default | Mandatory | Description  |
 |:-------------------------|:--------|:---------:|:-------------|
@@ -270,7 +268,7 @@ sh ./scripts/uniform_inputs.sh ~/mygenomes fasta fna
 sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 ```
 
-**Available options:**
+#### Available options
 
 | Option                   | Default | Mandatory | Description  |
 |:-------------------------|:--------|:---------:|:-------------|
@@ -304,7 +302,7 @@ meta-index report --db-dir ~/myindex \
 
 The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness, contamination, and strain heterogeneity percentages for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
 
-**Available options:**
+#### Available options
 
 | Option                   | Mandatory | Description  |
 |:-------------------------|:---------:|:-------------|
