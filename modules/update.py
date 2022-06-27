@@ -12,6 +12,8 @@ from collections import Counter
 from logging import Logger
 from typing import Tuple
 
+# Local modules are not available when the main controller
+# tries to load them for accessing their variables
 try:
     # Load utility functions
     from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run

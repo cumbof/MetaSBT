@@ -10,6 +10,8 @@ from pathlib import Path
 from functools import partial
 from logging import Logger
 
+# Local modules are not available when the main controller
+# tries to load them for accessing their variables
 try:
     # Load utility functions
     from utils import get_boundaries, init_logger, it_exists, kmtricks_matrix, number, println

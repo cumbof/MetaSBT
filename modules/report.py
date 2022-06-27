@@ -8,6 +8,8 @@ import sys, os, time, errno
 import argparse as ap
 from pathlib import Path
 
+# Local modules are not available when the main controller
+# tries to load them for accessing their variables
 try:
     # Load utility functions
     from utils import it_exists
