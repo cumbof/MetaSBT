@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+Create the report table for a specific database
+"""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
@@ -29,6 +32,12 @@ FILES_AND_FOLDERS = [
 ]
 
 def read_params():
+    """
+    Read and test input arguments
+
+    :return:    The ArgumentParser object
+    """
+    
     p = ap.ArgumentParser(prog=TOOL_ID,
                           description="Build the database report table",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)

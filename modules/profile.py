@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+Query a specific sequence bloom tree with an input genome or file with a list of sequences, one per line. 
+In case of input genomes, results on single sequences are merged together
+"""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
@@ -32,6 +36,12 @@ FILES_AND_FOLDERS = [
 ]
 
 def read_params():
+    """
+    Read and test input arguments
+
+    :return:    The ArgumentParser object
+    """
+    
     p = ap.ArgumentParser(prog=TOOL_ID,
                           description="Query the sequence bloom trees at all the 7 taxonomic levels",
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
