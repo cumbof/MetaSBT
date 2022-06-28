@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 27, 2022"
+__date__ = "Jun 28, 2022"
 
 import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
@@ -19,7 +19,7 @@ from typing import Tuple
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
+    from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, load_manifest, number, println, run
 except:
     pass
 
@@ -225,7 +225,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
     profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".join(genome_name))
 
     # Check whether the profile exists
-    if os.path.exists(profile_path):
+    if it_exists(profile_path, path_type="file"):
         # Load the profile
         profile_data = dict()
         with open(profile_path) as profile:
@@ -264,13 +264,13 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
         # Load the set of reference genomes that belongs to the closest species
         references_filepath = os.path.join(closest_taxadir, "references.txt")
         references = list()
-        if os.path.exists(references_filepath):
+        if it_exists(references_filepath, path_type="file"):
             references = [ref.strip() for ref in open(references_filepath).readlines() if ref.strip()]
 
         # Also load the set of MAGs that belongs to the closest species
         mags_filepath = os.path.join(closest_taxadir, "mags.txt")
         mags = list()
-        if os.path.exists(mags_filepath):
+        if it_exists(mags_filepath, path_type="file"):
             mags = [mag.strip() for mag in open(mags_filepath).readlines() if mag.strip()]
 
         # Check whether the input genome must be discarded
@@ -323,7 +323,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = os.path.exists(checkm_filepath)
+                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
@@ -350,7 +350,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                 if closest_common_kmers >= min_bound:
                     # Check whether the closest taxonomy contains any reference genome
                     how_many_references = 0
-                    if os.path.exists(references_filepath):
+                    if it_exists(references_filepath, path_type="file"):
                         how_many_references = sum([1 for ref in open(references_filepath).readlines() if ref.strip()])
                     
                     if how_many_references == 0:
@@ -392,7 +392,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = os.path.exists(checkm_filepath)
+                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
@@ -426,14 +426,14 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = os.path.exists(checkm_filepath)
+                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
                             checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
     # Remove the uncompressed version of the input genome in the temporary folder
-    if os.path.exists(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])):
+    if it_exists(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0]), path_type="file"):
         os.unlink(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0]))
 
     return to_known_taxa, rebuild, unassigned
@@ -473,29 +473,25 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     printline = partial(println, logger=logger, verbose=verbose)
 
     # Check whether the selected kingdom exists in the database
-    if not os.path.exists(os.path.join(db_dir, "k__{}".format(kingdom))):
+    if not it_exists(os.path.join(db_dir, "k__{}".format(kingdom)), path_type="folder")
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), os.path.join(db_dir, "k__{}".format(kingdom)))
 
     # Check whether the manifest file exists in the database
-    manifest_filepath = os.path.join(db_dir, "manifest.txt")
-    if not os.path.exists(manifest_filepath):
+    manifest_filepath = os.path.join(db_dir, "k__{}".format(kingdom), "manifest.txt")
+    if not it_exists(manifest_filepath, path_type="file")
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
 
     # Retrieve both the kmer length and the filter size from the manifest file
-    kmer_len = 0
-    filter_size = 0
-    with open(manifest_filepath) as manifest:
-        for line in manifest:
-            line = line.strip()
-            if line:
-                line_split = line.split(" ")
-                if line_split[0] == "--kmer-len":
-                    kmer_len = int(line_split[1])
-                elif line_split[0] == "--filter-size":
-                    filter_size = int(line_split[1])
-
-    # Check whether the kmer length and the filter size have been successfully retrieved
-    if kmer_len == 0 or filter_size == 0:
+    manifest = load_manifest(manifest_filepath)
+    
+    try:
+        kmer_len = manifest["kmer_len"]
+        filter_size = manifest["filter_size"]
+    
+        # Check whether the kmer length and the filter size have been successfully retrieved
+        if kmer_len == 0 or filter_size == 0:
+            raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
+    except:
         raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
     
     # Load the list of genome paths
@@ -734,7 +730,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
                     # Remove the old bloom filter root node
                     bloom_filter_node = os.path.join(new_levels_subpath, "{}.bf".format(unknown_levels[i]))
-                    if os.path.exists(bloom_filter_node):
+                    if it_exists(bloom_filter_node, path_type="file")
                         os.unlink(bloom_filter_node)
             
             # Add the new renamed cluster to the rebuild list of taxa
@@ -748,7 +744,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         # Otherwise, run kmtricks
         kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks")
         output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-        if not os.path.exists(output_table):
+        if not it_exists(output_table, path_type="file")
             # Create a fof file with the list of unassigned genomes
             genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
             ordered_genome_names = list()
@@ -819,7 +815,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                 # Also report the CheckM statistics of the genomes in the new clusters
                 if genome_name in checkm_data:
                     checkm_filepath = os.path.join(tax_dir, "checkm.tsv")
-                    checkm_exists = os.path.exists(checkm_filepath)
+                    checkm_exists = it_exists(checkm_filepath, path_type="file")
                     with open(checkm_filepath, "a+") as checkm_file:
                         if not checkm_exists:
                             checkm_file.write("{}\n".format(checkm_header))
@@ -852,11 +848,11 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                 tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
                 
                 # Remove the old index if it exists
-                if os.path.exists(os.path.join(tax_dir, "index")):
+                if it_exists(os.path.join(tax_dir, "index"), path_type="file")
                     shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
                 
                 # Also remove the copy of the root node if it exists
-                if os.path.exists(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir)))):
+                if it_exists(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))), path_type="file")
                     os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
                 
                 # Rebuild the index with HowDeSBT

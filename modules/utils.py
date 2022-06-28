@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 27, 2022"
+__date__ = "Jun 28, 2022"
 
 import sys, os, io, errno, logging, math, subprocess
 import numpy as np
@@ -92,7 +92,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
     """
 
     # Check whether the output file already exists
-    if os.path.exists(outpath):
+    if it_exists(outpath, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
     # Touch the output file
     # This is required in order to avoid raising an exception while checking for the input parameters
@@ -102,7 +102,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
     # Check whether the input parameters exists on file system
     for param in locals().values():
         # In this case, parameter values are always file and folder paths
-        if not os.path.exists(param):
+        if not it_exists(param, path_type="file"):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), param)
     
     # Retrieve the list of input genomes
@@ -167,7 +167,7 @@ def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepa
             # Retrieve the genome profile
             profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genomes[i]))
             # Check whether the profile exists
-            if os.path.exists(profile):
+            if it_exists(profile, path_type="file"):
                 # Load levels and scores
                 level2score = dict()
                 with open(profile) as file:
@@ -315,7 +315,7 @@ def download(url: str, folder: str) -> str:
     """
 
     # Check whether the destination folder path exists
-    if not os.path.exists(folder):
+    if not it_exists(folder, path_type="folder"):
         os.makedirs(folder, exist_ok=True)
 
     # Download file from URL to the destination folder
@@ -339,7 +339,7 @@ def filter_checkm_tables(checkm_tables: List[str], completeness: float=0.0, cont
 
     # Iterate over the CheckM output tables
     for filepath in checkm_tables:
-        if os.path.exists(filepath):
+        if it_exists(filepath, path_type="file"):
             with open(filepath) as table:
                 line_count = 0
                 for l in table:
@@ -367,7 +367,7 @@ def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float=10
     """
     
     # Check whether the output file already exists
-    if os.path.exists(outpath):
+    if it_exists(outpath, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
 
     # Retrieve the list of input genomes
@@ -527,24 +527,24 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
     """
 
     # Check whether the input folder is a valid path
-    if os.path.exists(level_dir) and os.path.isdir(level_dir):
+    if it_exists(level_dir, path_type="folder"):
         # Extract the level name from the level folder path
         level_name = os.path.basename(level_dir)
 
         # Define the index folder
         index_dir = os.path.join(level_dir, "index")
-        if os.path.exists(index_dir):
+        if it_exists(index_dir, path_type="folder"):
             # Remove old index folder if any
             shutil.rmtree(index_dir, ignore_errors=True)
         
         # Define the path to the file with the list of genome under the current taxonomic level
         level_list = os.path.join(level_dir, "{}.txt".format(level_name))
-        if os.path.exists(level_list):
+        if it_exists(level_list, path_type="file"):
             os.unlink(level_list)
         
         # Define the path to the bloom filter representation of the current taxonomic level
         level_filter = os.path.join(level_dir, "{}.bf".format(level_name))
-        if os.path.exists(level_filter):
+        if it_exists(level_filter, path_type="file"):
             os.unlink(level_filter)
 
         # Define the log file
@@ -557,7 +557,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
         if os.path.basename(level_dir).startswith("s__") or flat_structure:
             # Search for all the genomes under the current taxonomic level
             genomes_folder = os.path.join(level_dir, "genomes")
-            if os.path.exists(genomes_folder):
+            if it_exists(genomes_folder, path_type="folder"):
                 # Create the filters folder
                 filters_dir = os.path.join(os.path.dirname(genomes_folder), "filters")
                 os.makedirs(filters_dir, exist_ok=True)
@@ -569,7 +569,8 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                     if str(genome_path).endswith(".gz"):
                         genome_name = os.path.splitext(genome_name)[0]
                     
-                    if not os.path.exists(os.path.join(filters_dir, "{}.bf".format(genome_name))):
+                    bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
+                    if not it_exists(bf_filepath, path_type="file"):
                         # Uncompress the current genome
                         genome_file = os.path.join(genomes_folder, "{}.fna".format(genome_name))
                         with open(genome_file, "w+") as file:
@@ -582,7 +583,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                                                    "--hashes=1",
                                                    "--seed=0,0",
                                                    genome_file,
-                                                   "--out={}".format(os.path.join(filters_dir, "{}.bf".format(genome_name))),
+                                                   "--out={}".format(bf_filepath),
                                                    "--threads={}".format(nproc)],
                             stdout=howdesbt_log, stderr=howdesbt_log)
                         
@@ -594,15 +595,16 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                     
                     # Take track of the current bloom filter file path
                     with open(level_list, "a+") as file:
-                        file.write("{}\n".format(os.path.join(filters_dir, "{}.bf".format(genome_name))))
+                        file.write("{}\n".format(bf_filepath))
         else:
             # Find all the other taxonomic levels
             # Define the new list of bloom filters
             for level in os.listdir(level_dir):
                 if os.path.isdir(os.path.join(level_dir, level)):
-                    if os.path.exists(os.path.join(level_dir, level, "{}.bf".format(level))):
+                    bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
+                    if it_exists(bf_filepath, path_type="file"):
                         with open(level_list, "a+") as file:
-                            file.write("{}\n".format(os.path.join(level_dir, level, "{}.bf".format(level))))
+                            file.write("{}\n".format(bf_filepath))
                         
                         # Increment the genomes counter
                         how_many += 1
@@ -660,22 +662,23 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                 for line in file:
                     line = line.strip()
                     if line:
-                        if not os.path.exists(os.path.join(level_dir, "{}.bf".format(level_name))):
-                            shutil.copy(line, os.path.join(level_dir, "{}.bf".format(level_name)))
+                        bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
+                        if not it_exists(bf_filepath, path_type="file"):
+                            shutil.copy(line, bf_filepath)
                         else:
                             # Merge the bloom filter files applying the OR logic operator
                             run(["howdesbt", "bfoperate", line,
-                                                          os.path.join(level_dir, "{}.bf".format(level_name)),
+                                                          bf_filepath,
                                                           "--or",
                                                           "--out={}".format(os.path.join(level_dir, "merged.bf"))],
                                 stdout=howdesbt_log, stderr=howdesbt_log)
                             
                             # Remove the old lovel bloom filter
-                            os.unlink(os.path.join(level_dir, "{}.bf".format(level_name)))
+                            os.unlink(bf_filepath)
 
                             # Rename the resulting file
                             shutil.move(os.path.join(level_dir, "merged.bf"), 
-                                        os.path.join(level_dir, "{}.bf".format(level_name)))
+                                        bf_filepath)
         
         else:
             # With only one bloom filter it does not make sense to cluster genomes
@@ -706,27 +709,6 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
 
     else:
         raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
-
-def it_exists(path: str, path_type: str="file") -> bool:
-    """
-    Check whether a file or folder exists on the file system
-
-    :param path:        File or folder path
-    :param path_type:   Type of the input path (file, folder)
-    :return:            Always return True if the input path exists
-                        Otherwise, raise an exception
-    """
-
-    if isinstance(path, str):
-        if path_type.strip().lower() == "file":
-            if os.path.isfile(path):
-                return True
-        
-        elif path_type.strip().lower() == "folder":
-            if os.path.isdir(path):
-                return True
-    
-    return False
 
 def init_logger(filepath: str=None, toolid: str=None, verbose: bool=True) -> Logger:
     """
@@ -782,7 +764,7 @@ def init_logger(filepath: str=None, toolid: str=None, verbose: bool=True) -> Log
     if filepath:
         # Check whether its folder exists
         log_dir = os.path.dirname(args.log)
-        if not os.path.exists(log_dir):
+        if not it_exists(log_dir, path_type="file"):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), log_dir)
 
         # Update the log file path in the config dictionary
@@ -826,6 +808,27 @@ def init_logger(filepath: str=None, toolid: str=None, verbose: bool=True) -> Log
     # In case no file path and verbose have been specified
     return None
 
+def it_exists(path: str, path_type: str="file") -> bool:
+    """
+    Check whether a file or folder exists on the file system
+
+    :param path:        File or folder path
+    :param path_type:   Type of the input path (file, folder)
+    :return:            Always return True if the input path exists
+                        Otherwise, raise an exception
+    """
+
+    if isinstance(path, str):
+        if path_type.strip().lower() == "file":
+            if os.path.isfile(path):
+                return True
+        
+        elif path_type.strip().lower() == "folder":
+            if os.path.isdir(path):
+                return True
+    
+    return False
+
 def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: str) -> None:
     """
     Run kmtricks for building the kmers matrix
@@ -863,6 +866,31 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: st
     # Close the log file handler
     kmtricks_log.close()
 
+def load_manifest(manifest_filepath: str) -> dict:
+    """
+    Load the manifest file
+
+    :param manifest_filepath:   Path to the manifest file
+    :return:                    Dictionary with manifest data
+    """
+
+    if not it_exists(manifest_filepath, path_type="file"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
+
+    manifest = dict()
+
+    with open(manifest_filepath) as manifest:
+        for line in manifest:
+            line = line.strip()
+            if line:
+                line_split = line.split(" ")
+                if line_split[0] == "--kmer-len":
+                    manifest["kmer_len"] = int(line_split[1])
+                elif line_split[0] == "--filter-size":
+                    manifest["filter_size"] = int(line_split[1])
+    
+    return manifest
+
 def load_matrix(kmer_matrix_filepath: str, skiprows: int=0) -> np.ndarray:
     """
     Load a kmtricks kmers matrix into a numpy ndarray with a row for each genome
@@ -874,7 +902,7 @@ def load_matrix(kmer_matrix_filepath: str, skiprows: int=0) -> np.ndarray:
     """
 
     # Check whether the input file exists
-    if not os.path.exists(kmer_matrix_filepath):
+    if not it_exists(kmer_matrix_filepath, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), kmer_matrix_filepath)
 
     # Retrieve the number of genomes as the number of columns in the matrix

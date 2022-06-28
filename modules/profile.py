@@ -6,7 +6,7 @@ In case of input genomes, results on single sequences are merged together
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 27, 2022"
+__date__ = "Jun 28, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -167,7 +167,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     closest_genome_total_kmers = 0
     closest_genome_score = 0.0
 
-    while os.path.exists(tree):
+    while it_exists(tree, path_type="file"):
         # Retrieve the taxonomic level name from the tree file path
         id_dir = os.path.dirname(tree)
         level_dir = os.path.dirname(id_dir)
@@ -182,10 +182,10 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
 
         # Run HowDeSBT
         with open(output_file, "w+") as file:
-            run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold],
+            run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold, input_file],
                 stdout=file, stderr=file)
 
-        if os.path.exists(output_file):
+        if it_exists(output_file, path_type="file"):
             # Take track of common and total kmers
             matches_kmers = dict()
             
@@ -245,7 +245,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     # Define the output profile path
     output_profile = os.path.join(output_dir, "{}__profiles.txt".format(output_prefix))
     
-    if not os.path.exists(output_profile):
+    if not it_exists(output_profile, path_type="file"):
         # Write the header lines in case the output profile does not exist
         with open(output_profile, "w+") as output:
             output.write("# Tree: {}\n".format(tree))

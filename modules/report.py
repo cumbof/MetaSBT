@@ -5,7 +5,7 @@ Create the report table for a specific database
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 16, 2022"
+__date__ = "Jun 28, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -96,7 +96,7 @@ def report(db_dir: str, output_file: str) -> None:
                 references_list = list()
 
                 # In case the mags.txt file exists in the current species folder
-                if os.path.exists(os.path.join(str(species_dir), "mags.txt")):
+                if it_exists(os.path.join(str(species_dir), "mags.txt"), path_type="file"):
                     with open(os.path.join(str(species_dir), "mags.txt")) as file:
                         for line in file:
                             line = line.strip()
@@ -104,7 +104,7 @@ def report(db_dir: str, output_file: str) -> None:
                                 mags_list.append(line)
                 
                 # Do the same with the genomes.txt file
-                if os.path.exists(os.path.join(str(species_dir), "references.txt")):
+                if it_exists(os.path.join(str(species_dir), "references.txt"), path_type="file"):
                     with open(os.path.join(str(species_dir), "references.txt")) as file:
                         for line in file:
                             line = line.strip()
@@ -116,7 +116,7 @@ def report(db_dir: str, output_file: str) -> None:
                 qc_stats = dict()
 
                 # Also load the CheckM table
-                if os.path.exists(os.path.join(str(species_dir), "checkm.tsv")):
+                if it_exists(os.path.join(str(species_dir), "checkm.tsv"), path_type="file"):
                     with open(os.path.join(str(species_dir), "checkm.tsv")) as file:
                         for line in file:
                             line = line.strip()

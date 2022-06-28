@@ -215,7 +215,7 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     taxdump = download(taxdump_url, folder_path)
     
     # Raise an exception in case the taxdump.tar.gz file does not exist
-    if not os.path.exists(taxdump):
+    if not it_exists(taxdump, path_type="file"):
         raise Exception("Unable to retrieve data from remote location\n{}".format(taxdump_url))
 
     # Create the taxdump folder in the temporary directory
@@ -368,7 +368,7 @@ def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
         silence=True)
 
     # Raise an exception in case the ncbi_lineages.csv.gz file does not exist
-    if not os.path.exists(ncbitax2lin_table):
+    if not it_exists(ncbitax2lin_table, path_type="file"):
         raise Exception("An error has occurred while running ncbitax2lin")
     
     return ncbitax2lin_table
@@ -499,7 +499,7 @@ def organize_data(genomes: list, db_dir: str, tax_label: str, tax_id: str, metad
     
     # Move the metadata table to the taxonomy folder
     if metadata:
-        if os.path.exists(metadata):
+        if it_exists(metadata, path_type="file"):
             shutil.move(metadata, tax_dir)
     
     if checkm_tables:
@@ -817,20 +817,20 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         # Recover already processed nodes.dmp and names.dmp
         nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
         names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
-        if not os.path.exists(nodes_dmp) or not os.path.exists(names_dmp):
+        if not it_exists(nodes_dmp, path_type="file") or not it_exists(names_dmp, path_type="file")
             nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
 
         # Run ncbitax2lin to extract lineages
         printline("Exporting lineages")
         ncbitax2lin_table = os.path.join(tmp_dir, "ncbi_lineages.csv.gz")
-        if not os.path.exists(ncbitax2lin_table):
+        if not it_exists(ncbitax2lin_table, path_type="file"):
             ncbitax2lin_table = ncbitax2lin(nodes_dmp, names_dmp, tmp_dir)
 
         # Build a mapping between tax IDs and full taxonomic labels
         # Take track of the taxonomic labels to remove duplicates
         # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
         printline("Building species tax ID to full taxonomy mapping")
-        dump_exists = os.path.exists(os.path.join(tmp_dir, "taxa.tsv"))
+        dump_exists = it_exists(os.path.join(tmp_dir, "taxa.tsv"), path_type="file")
         tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") if not dump_exists else None)
 
         # Build a partial function around process_tax_id
@@ -876,7 +876,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         genomes_counter = 0
         with open(os.path.join(tmp_dir, "genomes.txt"), "w+") as genomesfile:
             for path in genomes_paths:
-                if os.path.exists(path):
+                if it_exists(path, path_type="file"):
                     genomesfile.write("{}\n".format(path))
                     genomes_counter += 1
         
@@ -891,7 +891,8 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
             increment = int(math.ceil(filter_size*increase_filter_size/100.0))
             filter_size += increment
 
-            with open(os.path.join(db_dir, "manifest.txt"), "a+") as manifest:
+            manifest_filepath = os.path.join(db_dir, "manifest.txt") if flat_structure else os.path.join(db_dir, "k__{}".format(kingdom), "manifest.txt")
+            with open(manifest_filepath, "a+") as manifest:
                 manifest.write("--filter-size {}\n".format(filter_size))
     
     if genomes_paths and filter_size and kmer_len:
@@ -965,8 +966,8 @@ def main() -> None:
                              "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard"))
 
     # Define the database manifest file
-    manifest_filepath = os.path.join(db_dir, "manifest.txt")
-    if os.path.exists(manifest_filepath):
+    manifest_filepath = os.path.join(args.db_dir, "manifest.txt") if args.flat_structure else os.path.join(args.db_dir, "k__{}".format(args.kingdom), "manifest.txt")
+    if it_exists(manifest_filepath, path_type="file"):
         # Load and compare kmer-len and filter-size
         with open(manifest_filepath) as manifest:
             for line in manifest:
