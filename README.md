@@ -220,7 +220,6 @@ Please note that in the example above we explicitly set the `--stop-at` argument
 | `--output-dir`           |         | ⚑         | Output folders with queries results |
 | `--output-prefix`        |         |           | Prefix of the output files with query matches |
 | `--stop-at`              |         |           | Stop expanding queries at a specific taxonomic level. Please note that this argument works in conjunction with --expand only |
-| `--strain`               | `False` |           | Check whether the input genome and the closest genome in the database have the same strain |
 | `--threshold`            | `0.0`   |           | Fraction of query kmers that must be present in a leaf to be considered a match |
 | `--tree`                 |         | ⚑         | This is the tree definition file |
 | `--verbose`              | `False` |           | Print results on screen |
