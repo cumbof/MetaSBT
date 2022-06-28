@@ -11,7 +11,8 @@ A scalable framework for automatically indexing microbial genomes and accurately
 - [Building the database report](https://github.com/cumbof/meta-index#building-the-database-report)
 - [Unlocking unknown species profiling with `kraken2`](https://github.com/cumbof/meta-index#unlocking-unknown-species-profiling-with-kraken2)
 - [Credits](https://github.com/cumbof/meta-index#credits)
-- [Contributing](https://github.com/cumbof/meta-index#support)
+- [Contributing](https://github.com/cumbof/meta-index#contributing)
+- [Support](https://github.com/cumbof/meta-index#support)
 
 ## Installing `meta-index`
 
