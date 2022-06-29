@@ -318,12 +318,7 @@ TBA
 
 Please credit our work in your manuscript by citing:
 
-_Manuscript in preparation_
-
-```
-Fabio Cumbo and Daniel Blankenberg, 
-"Microbial strain characterization and subtyping of metagenome-assembled genomes with sequence bloom trees"
-```
+> Fabio Cumbo and Daniel Blankenberg, "Microbial strain characterization and subtyping of metagenome-assembled genomes with sequence bloom trees" _manuscript in preparation_ (2022)
 
 ## Contributing
 
