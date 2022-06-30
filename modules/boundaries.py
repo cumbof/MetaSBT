@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 21, 2022"
+__date__ = "Jun 30, 2022"
 
 import sys, os, time, errno, shutil
 import argparse as ap
@@ -205,7 +205,7 @@ def main() -> None:
     args = read_params()
 
     # Initialise the logger
-    logger = init_logger(filepath=args.log, verbose=args.verbose)
+    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the database folder exists
     target_dir = args.db_dir if not args.kingdom else os.path.join(db_dir, "k__{}".format(kingdom))
