@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 28, 2022"
+__date__ = "Jul 4, 2022"
 
 import sys, os, io, errno, logging, math, subprocess
 import numpy as np
@@ -570,7 +570,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                         genome_name = os.path.splitext(genome_name)[0]
                     
                     bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
-                    if not it_exists(bf_filepath, path_type="file"):
+                    if not it_exists(bf_filepath, path_type="file") and not it_exists("{}.gz".format(bf_filepath), path_type="file"):
                         # Uncompress the current genome
                         genome_file = os.path.join(genomes_folder, "{}.fna".format(genome_name))
                         with open(genome_file, "w+") as file:
@@ -590,8 +590,17 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                         # Get rid of the uncompressed genome file
                         os.unlink(genome_file)
 
+                        # Compress the bloom filter file
+                        with open("{}.gz".format(bf_filepath), "w+") as file:
+                            run(["gzip", "-c", bf_filepath], stdout=file, stderr=file)
+
                         # Increment the genomes counter
                         how_many += 1
+                    
+                    elif it_exists("{}.gz".format(bf_filepath), path_type="file"):
+                        # Uncompress the bloom filter file
+                        with open(bf_filepath, "w+") as file:
+                            run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
                     
                     # Take track of the current bloom filter file path
                     with open(level_list, "a+") as file:
@@ -656,29 +665,15 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
             shutil.move(os.path.join(index_dir, "index.full.detbrief.sbt"), 
                         os.path.join(index_dir, "index.detbrief.sbt"))
             
+            # Build the bloom filter representation of the current taxonomic level
+            bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
+
             # Merge all the leaves together by applying the OR logic operator on the bloom filter files
             # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-            with open(level_list) as file:
-                for line in file:
-                    line = line.strip()
-                    if line:
-                        bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
-                        if not it_exists(bf_filepath, path_type="file"):
-                            shutil.copy(line, bf_filepath)
-                        else:
-                            # Merge the bloom filter files applying the OR logic operator
-                            run(["howdesbt", "bfoperate", line,
-                                                          bf_filepath,
-                                                          "--or",
-                                                          "--out={}".format(os.path.join(level_dir, "merged.bf"))],
-                                stdout=howdesbt_log, stderr=howdesbt_log)
-                            
-                            # Remove the old lovel bloom filter
-                            os.unlink(bf_filepath)
-
-                            # Rename the resulting file
-                            shutil.move(os.path.join(level_dir, "merged.bf"), 
-                                        bf_filepath)
+            run(["howdesbt", "bfoperate", "--list={}".format(level_list),
+                                          "--or",
+                                          "--out={}".format(bf_filepath)],
+                stdout=howdesbt_log, stderr=howdesbt_log)
         
         else:
             # With only one bloom filter it does not make sense to cluster genomes
@@ -703,6 +698,13 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                         os.unlink(os.path.join(index_dir, "union.sbt"))
 
                         break
+        
+        # In case of species level or flat structure
+        # Remove the uncompressed version of the bloom filter files
+        if os.path.basename(level_dir).startswith("s__") or flat_structure:
+            bf_filepaths = [bf for bf in open(level_list).readlines() if bf.strip()]
+            for bf in bf_filepaths:
+                os.unlink(bf)
         
         # Close the log file handler
         howdesbt_log.close()
