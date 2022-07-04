@@ -78,7 +78,7 @@ def checkm(genomes_paths: List[str], tmp_dir: str, file_extension: str="fna.gz",
     return output_tables
 
 def cluster(kmer_matrix_filepath: str, boundaries_filepath: str, manifest_filepath: str, profiles_dir: str, outpath: str,
-            unknown_label: str="MI") -> str:
+            unknown_label: str="MSBT") -> str:
     """
     Define new clusters with the unassigned MAGs
 

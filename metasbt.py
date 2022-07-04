@@ -2,12 +2,12 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 16, 2022"
+__date__ = "Jul 4, 2022"
 
 import sys
 
 # Define the tool name
-TOOL_ID = "meta-index"
+TOOL_ID = "MetaSBT"
 
 # Control current Python version
 # It requires Python 3 or higher
@@ -158,7 +158,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, 
             howdesbt = True
         if stop_unavailable and available == "--":
             raise Exception("The external software dependency \"{}\" is not available on this system.\n"
-                            "Please run \"{} --resolve_dependencies\" to verify the availability of all the required dependencies".format(dependency, TOOL_ID))
+                            "Please run \"{} --resolve_dependencies\" to verify the availability of all the required dependencies".format(dependency, TOOL_ID.lower()))
 
     if howdesbt:
         # Check whether the advanced bfoperate command is available with the current HowDeSBT installation
@@ -203,7 +203,7 @@ def main() -> None:
         args, unknown = read_params()
 
         # Always print the current version
-        println("{} v{} ({})\n".format(TOOL_ID, __version__, __date__))
+        println("{} v{} ({})\n".format(TOOL_ID.lower(), __version__, __date__))
 
         if args.check_updates:
             # Check for software updates
@@ -277,10 +277,10 @@ def main() -> None:
 
             if module_found:
                 # Print citations and credits
-                println("Thanks for using meta-index!\n")
+                println("Thanks for using {}!\n".format(TOOL_ID))
                 print_citations()
-                println("Remember to star the meta-index repository on GitHub to stay updated on its development and new features:")
-                println("https://github.com/cumbof/meta-index\n")
+                println("Remember to star the MetaSBT repository on GitHub to stay updated on its development and new features:")
+                println("https://github.com/cumbof/{}\n".format(TOOL_ID))
             else:
                 raise Exception("Unrecognised module")
 

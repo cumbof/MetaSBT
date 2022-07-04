@@ -1,4 +1,4 @@
-{% set name = "meta-index" %}
+{% set name = "MetaSBT" %}
 {% set version = "0.1.0" %}
 
 package:
@@ -13,7 +13,7 @@ build:
   number: 0
   skip: True  # [py<38 or not linux]
   entry_points:
-    - meta-index=meta-index.main
+    - metasbt=metasbt.main
   script: {{ PYTHON }} -m pip install . -vv
 
 requirements:
@@ -35,16 +35,16 @@ requirements:
 
 test:
   commands:
-    - meta-index --version
+    - metasbt --version
 
 about:
-  home: https://github.com/cumbof/meta-index
+  home: https://github.com/cumbof/MetaSBT
   license: MIT
   license_family: MIT
   license_file: LICENSE
-  summary: meta-index pipeline
+  summary: MetaSBT framework
   description: |
-   A pipeline for automatically indexing microbial genomes and accurately 
+   A scalable framework for automatically indexing microbial genomes and accurately 
    characterizing metagenome-assembled genomes with sequence bloom trees
 
 extra:

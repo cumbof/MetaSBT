@@ -1,27 +1,27 @@
-# meta-index
+# MetaSBT
 A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with sequence bloom trees
 
 ## Contents
 
-- [Installing `meta-index`](https://github.com/cumbof/meta-index#installing-meta-index)
-- [Building a database](https://github.com/cumbof/meta-index#building-a-database)
-- [Defining boundaries](https://github.com/cumbof/meta-index#defining-boundaries)
-- [Profiling genomes](https://github.com/cumbof/meta-index#profiling-genomes)
-- [Updating the database](https://github.com/cumbof/meta-index#updating-the-database)
-- [Building the database report](https://github.com/cumbof/meta-index#building-the-database-report)
-- [Contributing](https://github.com/cumbof/meta-index#contributing)
-- [Support](https://github.com/cumbof/meta-index#support)
+- [Installing `MetaSBT`](https://github.com/cumbof/metasbt#installing-metasbt)
+- [Building a database](https://github.com/cumbof/metasbt#building-a-database)
+- [Defining boundaries](https://github.com/cumbof/metasbt#defining-boundaries)
+- [Profiling genomes](https://github.com/cumbof/metasbt#profiling-genomes)
+- [Updating the database](https://github.com/cumbof/metasbt#updating-the-database)
+- [Building the database report](https://github.com/cumbof/metasbt#building-the-database-report)
+- [Contributing](https://github.com/cumbof/metasbt#contributing)
+- [Support](https://github.com/cumbof/metasbt#support)
 
-## Installing `meta-index`
+## Installing `MetaSBT`
 
 The pipeline is available as a Python3 package that can be install with the following command:
 ```bash
-pip install meta-index
+pip install metasbt
 ```
 
 It is also available as a `conda` package:
 ```bash
-conda install -c bioconda meta-index
+conda install -c bioconda metasbt
 ```
 
 You may need to add the `bioconda` channel first by running:
@@ -29,17 +29,17 @@ You may need to add the `bioconda` channel first by running:
 conda config --add channels bioconda
 ```
 
-The `meta-index` pipeline is also available by simply cloning this repository and making all the scripts executables:
+The `MetaSBT` pipeline is also available by simply cloning this repository and making all the scripts executables:
 ```bash
-# Clone the meta-index repository
+# Clone the MetaSBT repository
 mkdir -p ~/git && cd ~/git
-git clone https://github.com/cumbof/meta-index.git
+git clone https://github.com/cumbof/MetaSBT.git
 
 # Make the scripts executable
-chmod -R +x meta-index/*.py
+chmod -R +x MetaSBT/*.py
 
-# Add meta-index to the PATH env variable
-PATH=$PATH:~/git/meta-index
+# Add MetaSBT to the PATH env variable
+PATH=$PATH:~/git/MetaSBT
 ```
 
 Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
@@ -55,7 +55,7 @@ In this last case, remember to check that the following dependencies are install
 - [python](http://www.python.org/) (version >=3.7)
 - [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
 
-Please note that `meta-index` makes use of some advanced `howdesbt` sub-commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
+Please note that `MetaSBT` makes use of some advanced `howdesbt` sub-commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
 
 For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
 
@@ -64,29 +64,29 @@ First, you need to download the last available database from the following repos
 checkm data setRoot <checkm_data_dir>
 ```
 
-Once everything is installed, `meta-index` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
+Once everything is installed, `MetaSBT` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
 ```bash
-meta-index --version
+metasbt --version
 ```
 
 You can check whether all the dependencies listed above are available on your system by running the following command:
 ```bash
-meta-index --resolve-dependencies
+metasbt --resolve-dependencies
 ```
 
 You can also access the complete list of available arguments by specifying the `--help` option:
 ```bash
-meta-index --help
+metasbt --help
 ```
 
-Please note that the same option is also available for all the `meta-index` modules (e.g.: `meta-index profile --help` will print the list of arguments available for the `profile` module). The list of available modules is available by typing:
+Please note that the same option is also available for all the `MetaSBT` modules (e.g.: `metasbt profile --help` will print the list of arguments available for the `profile` module). The list of available modules is available by typing:
 ```bash
-meta-index --modules
+metasbt --modules
 ```
 
-We strongly suggest to permanently add the `meta-index` folder to the PATH environment variable by adding the following line to your `~/.profile` or `~/.bash_profile` (if `bash` is your default shell):
+We strongly suggest to permanently add the `MetaSBT` folder to the PATH environment variable by adding the following line to your `~/.profile` or `~/.bash_profile` (if `bash` is your default shell):
 ```bash
-echo "PATH=$PATH:~/git/meta-index" >> ~/.bash_profile
+echo "PATH=$PATH:~/git/MetaSBT" >> ~/.bash_profile
 ```
 
 You may finally need to reload your profile to make these changes effective:
@@ -94,7 +94,7 @@ You may finally need to reload your profile to make these changes effective:
 source ~/.bash_profile
 ```
 
-Please note that `meta-index` is available for Linux and macOS only.
+Please note that `MetaSBT` is available for Linux and macOS only.
 
 ## Building a database
 
@@ -102,21 +102,21 @@ The `index` subroutine allows to automatically retrieve genomes from isolate seq
 
 The following command will trigger the generation of the database with all the available bacterial genomes from isolate sequencing in NCBI GenBank:
 ```bash
-meta-index index --db-dir ~/myindex \
-                 --kmer-len 31 \
-                 --estimate-filter-size \
-                 --increase-filter-size 5.0 \
-                 --kingdom Bacteria \
-                 --dereplicate \
-                 --similarity 100.0 \
-                 --completeness 50.0 \
-                 --contamination 5.0 \
-                 --parallel 4 \
-                 --nproc 2 \
-                 --pplacer-threads 2 \
-                 --tmp-dir ~/tmp \
-                 --cleanup \
-                 --verbose
+metasbt index --db-dir ~/myindex \
+              --kmer-len 31 \
+              --estimate-filter-size \
+              --increase-filter-size 5.0 \
+              --kingdom Bacteria \
+              --dereplicate \
+              --similarity 100.0 \
+              --completeness 50.0 \
+              --contamination 5.0 \
+              --parallel 4 \
+              --nproc 2 \
+              --pplacer-threads 2 \
+              --tmp-dir ~/tmp \
+              --cleanup \
+              --verbose
 ```
 
 In case you would like to create a database from a specific set of genomes available on your file system, you may use the `--input-list` instead of the `--kingdom` option. It should point to a table file with the list of file paths to the input genomes on the first column and an optional second column with the full taxonomic labels of the input genomes in a tab-separated values format.
@@ -162,13 +162,13 @@ The `boundaries` module is crucial for the definition of taxonomy-specific bound
 
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 ```bash
-meta-index boundaries --db-dir ~/myindex \
-                      --min-genomes 50 \
-                      --output ~/boundaries.tsv \
-                      --tmp-dir ~/tmp \
-                      --nproc 4 \
-                      --cleanup \
-                      --verbose
+metasbt boundaries --db-dir ~/myindex \
+                   --min-genomes 50 \
+                   --output ~/boundaries.tsv \
+                   --tmp-dir ~/tmp \
+                   --nproc 4 \
+                   --cleanup \
+                   --verbose
 ```
 
 Please note that the `boundaries` module considers clusters with reference genomes only. These clusters can be considered for establishing boundaries depending on a minimum number of reference genomes that can be set with the `--min-genomes` argument.
@@ -193,16 +193,16 @@ Please note that the `boundaries` module considers clusters with reference genom
 
 The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
 ```bash
-meta-index profile --input-file ~/mymag.fna \
-                   --input-id mymag \
-                   --input-type genome \
-                   --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
-                   --threshold 0.7 \
-                   --expand \
-                   --stop-at family \
-                   --output-dir ~/profiles \
-                   --output-prefix mymag \
-                   --verbose
+metasbt profile --input-file ~/mymag.fna \
+                --input-id mymag \
+                --input-type genome \
+                --tree ~/myindex/k__Bacteria/index.detbrief.sbt \
+                --threshold 0.7 \
+                --expand \
+                --stop-at family \
+                --output-dir ~/profiles \
+                --output-prefix mymag \
+                --verbose
 ```
 
 Please note that in the example above we explicitly set the `--stop-at` argument to `family`. This argument works in conjunction with the `--expand` option only, and it will prevent epanding the query to all the taxonomic levels lower than the specified one. Also note that the `--expand` argument expands the input query up to the species level by default, by also reporting the closest genome, without the need to use the `--stop-at` argument.
@@ -234,25 +234,25 @@ In case of new reference genomes from isolate sequencing, the `update` module si
 
 The `update` module can be launched with the following command:
 ```bash
-meta-index update --input-list ~/mygenomes.txt \
-                  --taxa ~/taxonomies.tsv \
-                  --boundaries ~/boundaries.tsv \
-                  --db-dir ~/myindex \
-                  --tmp-dir ~/tmp \
-                  --dereplicate \
-                  --similarity 100.0 \
-                  --completeness 50.0 \
-                  --contamination 5.0 \
-                  --type references \
-                  --extension fna.gz \
-                  --parallel 4 \
-                  --nproc 2 \
-                  --pplacer-threads 2 \
-                  --cleanup \
-                  --verbose
+metasbt update --input-list ~/mygenomes.txt \
+               --taxa ~/taxonomies.tsv \
+               --boundaries ~/boundaries.tsv \
+               --db-dir ~/myindex \
+               --tmp-dir ~/tmp \
+               --dereplicate \
+               --similarity 100.0 \
+               --completeness 50.0 \
+               --contamination 5.0 \
+               --type references \
+               --extension fna.gz \
+               --parallel 4 \
+               --nproc 2 \
+               --pplacer-threads 2 \
+               --cleanup \
+               --verbose
 ```
 
-Please note that `meta-index` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by running the `uniform_inputs.sh` script under the `scripts` folder of this repository:
+Please note that `MetaSBT` requires that all your input genomes have the same format and extension before running the pipeline. You can easily uniform your genome files extension by running the `uniform_inputs.sh` script under the `scripts` folder of this repository:
 ```bash
 sh ./scripts/uniform_inputs.sh ~/mygenomes fa fna
 ```
@@ -294,8 +294,8 @@ sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 
 Once the database is built and updated with new MAGs and reference genomes, you can easily extract relevant information about all the species in your database by running the following command:
 ```bash
-meta-index report --db-dir ~/myindex \
-                  --output-file ~/report.tsv
+metasbt report --db-dir ~/myindex \
+               --output-file ~/report.tsv
 ```
 
 The output file is a table that will contain the number of MAGs and reference genomes, in addition to the mean completeness, contamination, and strain heterogeneity percentages for each lineage in the database. Please note that lineages with no reference genomes correspond to newly defined clusters and potentially new and still-to-be-named species.
@@ -316,6 +316,6 @@ Please, (i) be sure that there are no existing issues/PR concerning the same bug
 
 ## Support
 
-If you need support, please open an [Issue](https://github.com/cumbof/meta-index/issues) or a new [Discussion](https://github.com/cumbof/meta-index/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
+If you need support, please open an [Issue](https://github.com/cumbof/MetaSBT/issues) or a new [Discussion](https://github.com/cumbof/MetaSBT/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
 
-Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/cumbof/meta-index/blob/main/LICENSE) for additional details.
+Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/cumbof/MetaSBT/blob/main/LICENSE) for additional details.
