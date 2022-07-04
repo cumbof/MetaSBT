@@ -9,8 +9,6 @@ A scalable framework for automatically indexing microbial genomes and accurately
 - [Profiling genomes](https://github.com/cumbof/meta-index#profiling-genomes)
 - [Updating the database](https://github.com/cumbof/meta-index#updating-the-database)
 - [Building the database report](https://github.com/cumbof/meta-index#building-the-database-report)
-- [Unlocking unknown species profiling with `kraken2`](https://github.com/cumbof/meta-index#unlocking-unknown-species-profiling-with-kraken2)
-- [Credits](https://github.com/cumbof/meta-index#credits)
 - [Contributing](https://github.com/cumbof/meta-index#contributing)
 - [Support](https://github.com/cumbof/meta-index#support)
 
@@ -309,16 +307,6 @@ The output file is a table that will contain the number of MAGs and reference ge
 | `--db-dir`               | ⚑         | Database folder path |
 | `--output-file`          | ⚑         | Path to the output table |
 | `--version`              |           | Print current module version and exit |
-
-## Unlocking unknown species profiling with `kraken2`
-
-TBA
-
-## Credits
-
-Please credit our work in your manuscript by citing:
-
-> Fabio Cumbo and Daniel Blankenberg, "Microbial strain characterization and subtyping of metagenome-assembled genomes with sequence bloom trees" _manuscript in preparation_ (2022)
 
 ## Contributing
 
