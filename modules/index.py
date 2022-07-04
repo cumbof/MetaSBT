@@ -817,7 +817,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         # Recover already processed nodes.dmp and names.dmp
         nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
         names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
-        if not it_exists(nodes_dmp, path_type="file") or not it_exists(names_dmp, path_type="file")
+        if not it_exists(nodes_dmp, path_type="file") or not it_exists(names_dmp, path_type="file"):
             nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
 
         # Run ncbitax2lin to extract lineages

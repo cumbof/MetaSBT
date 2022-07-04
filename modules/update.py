@@ -323,7 +323,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
+                        checkm_exists = it_exists(checkm_filepath, path_type="file")
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
@@ -392,7 +392,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
+                        checkm_exists = it_exists(checkm_filepath, path_type="file")
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
@@ -426,7 +426,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        checkm_exists = it_exists(checkm_filepath, path_type="file"):
+                        checkm_exists = it_exists(checkm_filepath, path_type="file")
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not checkm_exists:
                                 checkm_file.write("{}\n".format(checkm_header))
@@ -473,12 +473,12 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     printline = partial(println, logger=logger, verbose=verbose)
 
     # Check whether the selected kingdom exists in the database
-    if not it_exists(os.path.join(db_dir, "k__{}".format(kingdom)), path_type="folder")
+    if not it_exists(os.path.join(db_dir, "k__{}".format(kingdom)), path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), os.path.join(db_dir, "k__{}".format(kingdom)))
 
     # Check whether the manifest file exists in the database
     manifest_filepath = os.path.join(db_dir, "k__{}".format(kingdom), "manifest.txt")
-    if not it_exists(manifest_filepath, path_type="file")
+    if not it_exists(manifest_filepath, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
 
     # Retrieve both the kmer length and the filter size from the manifest file
@@ -730,7 +730,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
                     # Remove the old bloom filter root node
                     bloom_filter_node = os.path.join(new_levels_subpath, "{}.bf".format(unknown_levels[i]))
-                    if it_exists(bloom_filter_node, path_type="file")
+                    if it_exists(bloom_filter_node, path_type="file"):
                         os.unlink(bloom_filter_node)
             
             # Add the new renamed cluster to the rebuild list of taxa
@@ -744,7 +744,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         # Otherwise, run kmtricks
         kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks")
         output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-        if not it_exists(output_table, path_type="file")
+        if not it_exists(output_table, path_type="file"):
             # Create a fof file with the list of unassigned genomes
             genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
             ordered_genome_names = list()
@@ -848,11 +848,11 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                 tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
                 
                 # Remove the old index if it exists
-                if it_exists(os.path.join(tax_dir, "index"), path_type="file")
+                if it_exists(os.path.join(tax_dir, "index"), path_type="file"):
                     shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
                 
                 # Also remove the copy of the root node if it exists
-                if it_exists(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))), path_type="file")
+                if it_exists(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))), path_type="file"):
                     os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
                 
                 # Rebuild the index with HowDeSBT
