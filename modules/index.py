@@ -6,9 +6,9 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 27, 2022"
+__date__ = "Jul 4, 2022"
 
-import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib
+import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib, math
 import argparse as ap
 import multiprocessing as mp
 from pathlib import Path
@@ -228,13 +228,14 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     
     return os.path.join(taxdump_dir, "nodes.dmp"), os.path.join(taxdump_dir, "names.dmp")
 
-def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, nproc: int=1) -> int:
+def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int=1) -> int:
     """
     Estimate the bloom filter size with ntCard
 
     :param genomes_filepath:    Path to the file with the list of paths to the genome files
     :param kmer_len:            Length of the kmers
     :param prefix:              Prefix of the output histogram file
+    :param tmp_dir:             Path to the temporary folder
     :param nproc:               Make it parallel
     :return:                    The estimated bloom filter size
     """
@@ -482,7 +483,7 @@ def organize_data(genomes: list, db_dir: str, tax_label: str, tax_id: str, metad
     genomes_dir = os.path.join(tax_dir, "genomes")
     os.makedirs(genomes_dir, exist_ok=True)
 
-    references_path = "references.txt" if not flat_structure else "references_{}.txt".format(tax_id)
+    references_path = "references.txt" if not flat_structure else "genomes_{}.txt".format(tax_id)
     with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
         # Move the processed genomes to the taxonomy folder
         for genome_path in genomes:
@@ -562,8 +563,8 @@ def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str,
     genomes = list()
     for genome_path in genomes_list:
         # Symlink input genomes into the temporary folder
-        os.symlink(genome_path, tmp_genomes_dir)
-        genomes.append(os.path.join(tmo_genomes_dir, os.path.basename(genome_path)))
+        os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
+        genomes.append(os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
 
     # Take track of the paths to the CheckM output tables
     checkm_tables = list()
@@ -592,7 +593,7 @@ def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str,
         return genomes
 
     # Organize genome files
-    genomes_paths = organize_data(genomes, db_dir, tax_label, tax_id, metadata=metadata, checkm_tables=checkm_tables, flat_structure=False)
+    genomes_paths = organize_data(genomes, db_dir, taxonomic_label, tax_id, metadata=None, checkm_tables=checkm_tables, flat_structure=flat_structure)
 
     return genomes_paths
 
@@ -683,7 +684,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
             return genomes
 
         # Organize genome files
-        genomes_paths = organize_data(genomes, db_dir, tax_label, tax_id, metadata=metadata, checkm_tables=checkm_tables, flat_structure=False)
+        genomes_paths = organize_data(genomes, db_dir, tax_label, tax_id, metadata=metadata, checkm_tables=checkm_tables, flat_structure=flat_structure)
     
     # Return the list of paths to the genome files
     return genomes_paths
@@ -808,6 +809,8 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
                                                          completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity,
                                                          flat_structure=flat_structure, logger=logger, verbose=False)
         
+        printline("Processing genomes")
+
         # Initialise the progress bar
         pbar = tqdm.tqdm(total=len(taxonomy2genomes), disable=(not verbose))
 
@@ -839,13 +842,13 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
                                                   completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
                                                   flat_structure=flat_structure, logger=logger, verbose=False)
 
+        printline("Processing genomes")
+
         # Initialise the progress bar
         pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
 
     # Take track of all the genomes paths
     genomes_paths = list()
-
-    printline("Processing genomes")
 
     with mp.Pool(processes=parallel) as pool:
         def update_bar(*args):
@@ -885,7 +888,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
 
             # Estimate the bloom filter size
             filter_size = estimate_bf_size(os.path.join(tmp_dir, "genomes.txt"), kmer_len, 
-                                           os.path.join(tmp_dir, "genomes"), nproc=nproc)
+                                           os.path.join(tmp_dir, "genomes"), tmp_dir, nproc=nproc)
 
             # Increment the estimated bloom filter size
             increment = int(math.ceil(filter_size*increase_filter_size/100.0))
@@ -923,6 +926,9 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
                     # Process the NCBI tax IDs
                     jobs = [pool.apply_async(howdesbt_partial, args=(level_dir, ), callback=update_bar) 
                                 for level_dir in folders]
+                    
+                    for job in jobs:
+                        job.get()
                 
                 # Close the progress bar
                 pbar.close()
@@ -932,6 +938,19 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         if not flat_structure:
             printline("Building the database root bloom filter with HowDeSBT")
         howdesbt_partial(db_dir)
+
+        if flat_structure:
+            # Merge all the genomes_*.txt into a single file
+            gen = Path(db_dir).glob("genomes_*.txt")
+            with open(os.path.join(db_dir, "genomes.txt"), "w+") as genomes_file:
+                for filepath in gen:
+                    with open(str(filepath)) as file:
+                        for line in file:
+                            line = line.strip()
+                            genomes_file.write("{}\n".format(line))
+                    
+                    # Get rid of the partial genomes file
+                    os.unlink(str(filepath))
 
         # The howdesbt function automatically set the current working directory to 
         # the index folder of the taxonomic labels
@@ -965,6 +984,25 @@ def main() -> None:
             raise Exception(("Please specify a bloom filter size with the --filter-size option or "
                              "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard"))
 
+    kingdoms = list()
+    if not args.flat_structure and not args.kingdom:
+        # In this case --input-list must be specified
+        # Build as many manifest file as the number of kingdoms in the input list of taxonomic labels
+        try:
+            kingdoms = list(set([line.strip().split("\t")[1].split("|")[0].split("__")[-1] for line in open(args.input_list).readlines() if line.strip()]))
+        except:
+            raise Exception("Input file is not correctly formatted: {}".format(args.input_list))
+    
+    # We can process a single kingdom per run
+    if len(kingdoms) > 1:
+        raise Exception("The {} module cannot process more than 1 kingdom per run!".format(TOOL_ID))
+    
+    if not args.kingdom and len(kingdoms):
+        args.kingdom = kingdoms[0]
+    
+    # Create the kingdom directory
+    os.makedirs(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), exist_ok=True)
+
     # Define the database manifest file
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt") if args.flat_structure else os.path.join(args.db_dir, "k__{}".format(args.kingdom), "manifest.txt")
     if it_exists(manifest_filepath, path_type="file"):
@@ -983,9 +1021,9 @@ def main() -> None:
                                 raise Exception("The bloom filter size is not compatible with the specified database")
     else:
         with open(manifest_filepath, "w+") as manifest:
-            manifest.write("--kmer-len {}\n".format(kmer_len))
+            manifest.write("--kmer-len {}\n".format(args.kmer_len))
             if args.filter_size:
-                manifest.write("--filter-size {}\n".format(filter_size))
+                manifest.write("--filter-size {}\n".format(args.filter_size))
 
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
