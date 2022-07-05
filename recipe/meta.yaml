@@ -13,7 +13,7 @@ build:
   number: 0
   skip: True  # [py<38 or not linux]
   entry_points:
-    - metasbt=metasbt.main
+    - metasbt=metasbt.metasbt:main
   script: {{ PYTHON }} -m pip install . -vv
 
 requirements:
@@ -34,18 +34,23 @@ requirements:
     - wget >=1.21.3
 
 test:
+  imports:
+    - metasbt
   commands:
+    - pip check
     - metasbt --version
+  requires:
+    - pip
 
 about:
   home: https://github.com/cumbof/MetaSBT
   license: MIT
   license_family: MIT
   license_file: LICENSE
-  summary: MetaSBT framework
+  summary: Microbial genomes characterization with Sequence Bloom Trees
   description: |
    A scalable framework for automatically indexing microbial genomes and accurately 
-   characterizing metagenome-assembled genomes with sequence bloom trees
+   characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 extra:
   recipe-maintainers:
