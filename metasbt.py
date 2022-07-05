@@ -112,7 +112,7 @@ def print_citations() -> None:
     Print citations and exit
     """
     
-    println("If you are using this software for your research, please credit us in your manuscript by citing:\n")
+    println("If you are using {} for your research, please credit us in your manuscript by citing:\n".format(TOOL_ID))
     println("TBA\n")
 
 def print_license() -> None:
