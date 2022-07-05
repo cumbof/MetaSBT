@@ -46,7 +46,7 @@ Please note that cloning this repository requires [Git](https://git-scm.com/) to
 
 In this last case, remember to check that the following dependencies are installed and available on your system:
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)
-- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.02)
+- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.07)
 - [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
 - [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
