@@ -111,17 +111,7 @@ howdesbt_wrapper () {
 
         # Merge all the leaves together by applying the OR logical operator on the bloom filter files
         # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-        while read BFPATH; do
-            if [[ ! -f ${LEVEL_DIR}/${LEVEL_NAME}.bf ]]; then
-                cp $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf
-            else
-                # Merge bloom filter files applying the OR logical operator
-                howdesbt bfoperate $BFPATH ${LEVEL_DIR}/${LEVEL_NAME}.bf --or --out=${LEVEL_DIR}/merged.bf \
-                    >> ${LEVEL_DIR}/howdesbt.log 2>&1
-                # Rename the resulting file
-                mv ${LEVEL_DIR}/merged.bf ${LEVEL_DIR}/${LEVEL_NAME}.bf
-            fi
-        done < ${LEVEL_DIR}/${LEVEL_NAME}.txt
+        howdesbt bfoperate --list=${LEVEL_DIR}/${LEVEL_NAME}.txt --or --out=${LEVEL_DIR}/${LEVEL_NAME}.bf >> ${LEVEL_DIR}/howdesbt.log 2>&1
     else
         # With only one bloom filter, it does not make sense to build an index with howdesbt
         BFPATH=$(head -n1 "${LEVEL_DIR}/${LEVEL_NAME}.txt")
