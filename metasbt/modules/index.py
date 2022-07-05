@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 4, 2022"
+__date__ = "Jul 5, 2022"
 
 import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib, math
 import argparse as ap
@@ -32,9 +32,10 @@ DEPENDENCIES = ["checkm", "howdesbt", "kmtricks", "ncbi-genome-download", "ncbit
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
-    "--db-dir",   # Database folder path
-    "--log",      # Path to the log file
-    "--tmp-dir"   # Temporary folder path
+    "--db-dir",     # Database folder path
+    "--input-list", # File with a list of paths to the input genomes
+    "--log",        # Path to the log file
+    "--tmp-dir"     # Temporary folder path
 ]
 
 # Define the url to the NCBI taxdump

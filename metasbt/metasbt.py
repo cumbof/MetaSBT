@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 4, 2022"
+__date__ = "Jul 5, 2022"
 
 import sys
 
@@ -20,19 +20,19 @@ import argparse as ap
 from pathlib import Path
 from shutil import which
 from typing import List
-from modules.utils import println, run
+from metasbt.modules.utils import println, run
 
 # Define the software root directory
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-
-# Define the license file path
-LICENSE = os.path.join(SCRIPT_DIR, "LICENSE")
 
 # Define the modules folder
 MODULES_DIR = os.path.join(SCRIPT_DIR, "modules")
 
 # Define the paths to the file with Python requirements
 REQUIREMENTS = os.path.join(SCRIPT_DIR, "requirements.txt")
+
+# Define the license URL
+LICENSE = "https://raw.githubusercontent.com/cumbof/MetaSBT/main/LICENSE"
 
 # Define the software repository URLs
 REPOSITORY_URL = "https://github.com/cumbof/{}".format(TOOL_ID)
@@ -101,7 +101,7 @@ def get_modules(dirpath: str) -> List[str]:
     for module_path in gen:
         module_id = os.path.splitext(os.path.basename(str(module_path)))[0]
         # Manually exclude the utilities
-        if module_id != "utils":
+        if module_id != "utils" and module_id != "__init__":
             # Take track of the available modules
             modules_list.append(module_id)
     
@@ -120,11 +120,12 @@ def print_license() -> None:
     Print the software license and exit
     """
 
-    if not os.path.exists(LICENSE):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), LICENSE)
-
-    with open(LICENSE, "r") as file:
-        println(file.read())
+    response = requests.get(LICENSE)
+    if response.status_code == 200:
+        # Print the license content
+        println("{}\n".format(response.text))
+    else:
+        println("Unable to retrieve the license from the following URL:\n{}\n\nPlease try again")
 
 def print_modules() -> None:
     """
@@ -228,7 +229,7 @@ def main() -> None:
             # Load the list of module-specific dependencies
             dependencies = list()
             for module_id in modules_list:
-                module = importlib.import_module("modules.{}".format(module_id))
+                module = importlib.import_module("metasbt.modules.{}".format(module_id))
                 dependencies.extend(module.DEPENDENCIES)
 
             # Resolve external software dependencies and Python requirements
@@ -248,7 +249,7 @@ def main() -> None:
                     cmd_line = [sys.executable, os.path.join(MODULES_DIR, "{}.py".format(unknown_arg))]
                     
                     # Import the external module
-                    module = importlib.import_module("modules.{}".format(unknown_arg))
+                    module = importlib.import_module("metasbt.modules.{}".format(unknown_arg))
 
                     # Resolve external software dependencies
                     resolve_dependencies(module.DEPENDENCIES, stop_unavailable=True, verbose=False)
