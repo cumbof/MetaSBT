@@ -2,7 +2,7 @@ __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
 __date__ = "Jul 4, 2022"
 
-import sys, os, io, errno, logging, math, subprocess
+import sys, os, io, errno, logging, math, subprocess, shutil
 import numpy as np
 from pathlib import Path
 from logging import Logger
@@ -702,7 +702,7 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
         # In case of species level or flat structure
         # Remove the uncompressed version of the bloom filter files
         if os.path.basename(level_dir).startswith("s__") or flat_structure:
-            bf_filepaths = [bf for bf in open(level_list).readlines() if bf.strip()]
+            bf_filepaths = [bf.strip() for bf in open(level_list).readlines() if bf.strip()]
             for bf in bf_filepaths:
                 os.unlink(bf)
         
@@ -765,8 +765,8 @@ def init_logger(filepath: str=None, toolid: str=None, verbose: bool=True) -> Log
     # In case of log file
     if filepath:
         # Check whether its folder exists
-        log_dir = os.path.dirname(args.log)
-        if not it_exists(log_dir, path_type="file"):
+        log_dir = os.path.dirname(filepath)
+        if not it_exists(log_dir, path_type="folder"):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), log_dir)
 
         # Update the log file path in the config dictionary
@@ -1000,7 +1000,7 @@ def run(cmdline: List[str], stdout: io.TextIOWrapper=sys.stdout, stderr: io.Text
             if extended_error:
                 # Extend the error message
                 error_message += ("If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
-                                  "We would be happy to answer your questions and help you troubleshoot any kind of issues with our framework.\n")
+                                  "We would be happy to answer your questions and help you troubleshoot any kind of issue with our framework.\n")
 
             raise Exception(error_message)
 
