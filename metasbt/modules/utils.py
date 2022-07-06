@@ -819,12 +819,14 @@ def it_exists(path: str, path_type: str="file") -> bool:
     
     return False
 
-def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: str) -> None:
+def kmtricks_matrix(genomes_fof: str, run_dir: str, kmer_len: int, filter_size: int, nproc: int, output_table: str) -> None:
     """
     Run kmtricks for building the kmers matrix
 
     :param genomes_fof:     Path to the fof file with the list of genomes
     :param run_dir:         Path to the working directory
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
     :param nproc:           Make it parallel
     :param output_table:    Path to the output kmer matrix file
     """
@@ -835,13 +837,16 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, nproc: int, output_table: st
     kmtricks_log = open(kmtricks_log_filepath, "w+")
 
     # Run kmtricks for building the kmers matrix
-    run(["kmtricks", "pipeline", "--file", genomes_fof,
-                                 "--run-dir", os.path.join(run_dir, "matrix"),
-                                 "--mode", "kmer:count:bin",
-                                 "--hard-min", "1",
-                                 "--cpr",
-                                 "--threads", str(nproc)],
-        stdout=kmtricks_log, stderr=kmtricks_log)
+    cmd = ["kmtricks", "pipeline", "--file", genomes_fof,
+                                   "--run-dir", os.path.join(run_dir, "matrix"),
+                                   "--kmer-size", int(kmer_len),
+                                   "--mode", "kmer:count:bin",
+                                   "--hard-min", "1",
+                                   "--cpr",
+                                   "--threads", str(nproc)]
+    if filter_size:
+        cmd.extend(["--bloom-size", int(filter_size)])
+    run(cmd, stdout=kmtricks_log, stderr=kmtricks_log)
 
     # Aggregate partitions into a single kmer matrix
     run(["kmtricks", "aggregate", "--run-dir", os.path.join(run_dir, "matrix"),

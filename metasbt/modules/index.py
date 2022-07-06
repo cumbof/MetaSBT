@@ -402,13 +402,15 @@ def quality_control(genomes: list, tax_id: str, tmp_dir: str, completeness: floa
     
     return [os.path.join(tmp_genomes_dir, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids], checkm_tables
 
-def dereplicate(genomes: list, tax_id: str, tmp_dir: str, nproc: int=1, similarity: float=100.0) -> List[str]:
+def dereplicate(genomes: list, tax_id: str, tmp_dir: str, kmer_len: int, filter_size: int, nproc: int=1, similarity: float=100.0) -> List[str]:
     """
     Dereplicate genomes
 
     :param genomes:         List of genome file paths
     :param tax_id:          NCBI tax ID
     :param tmp_dir:         Path to the temporary folder
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
     :param nproc:           Make kmtricks parallel
     :param similarity:      Similarity threshold
     :return:                List of genome file paths for genomes that passed the dereplication
@@ -431,7 +433,7 @@ def dereplicate(genomes: list, tax_id: str, tmp_dir: str, nproc: int=1, similari
 
     # Run kmtricks to produce the kmer matrix
     output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-    kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, nproc, output_table)
+    kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, kmer_len, filter_size, nproc, output_table)
 
     # Add the header line to the kmer matrix
     with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
@@ -525,7 +527,7 @@ def organize_data(genomes: list, db_dir: str, tax_label: str, tax_id: str, metad
     
     return genomes_paths
 
-def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str, tmp_dir: str, nproc: int=1, pplacer_threads: int=1, 
+def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str, tmp_dir: str, kmer_len: int, nproc: int=1, pplacer_threads: int=1, 
                           completeness: float=0.0, contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0,
                           flat_structure: bool=False, logger: Logger=None, verbose: bool=False) -> List[str]:
     """
@@ -536,6 +538,7 @@ def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str,
     :param taxonomic_label:     Taxonomic label of the input genomes
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
+    :param kmer_len:        Length of the kmers
     :param nproc:               Make the process parallel when possible
     :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
     :param completeness:        Threshold on the CheckM completeness
@@ -582,7 +585,7 @@ def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str,
     # Dereplication
     if len(genomes) > 1 and dereplicate:
         before_dereplication = len(genomes)
-        dereplicate(genomes, tax_id, tmp_dir, nproc=nproc, similarity=similarity)
+        dereplicate(genomes, tax_id, tmp_dir, kmer_len, None, nproc=nproc, similarity=similarity)
         
         if before_dereplication > len(genomes) and verbose:
             printline("Dereplication: excluding {}/{} genomes".format(before_dereplication-len(genomes), before_dereplication))
@@ -598,7 +601,7 @@ def process_input_genomes(genomes_list: list, taxonomic_label: str, db_dir: str,
 
     return genomes_paths
 
-def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, limit_genomes: float=numpy.Inf, 
+def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_dir: str, kmer_len: int, limit_genomes: float=numpy.Inf, 
                    max_genomes: float=numpy.Inf, min_genomes: float=1.0, nproc: int=1, pplacer_threads: int=1, completeness: float=0.0, 
                    contamination: float=100.0, dereplicate: bool=False, similarity: float=100.0, flat_structure: bool=False,
                    logger: Logger=None, verbose: bool=False) -> List[str]:
@@ -611,6 +614,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
     :param kingdom:             Retrieve genomes that belong to a specific kingdom
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
+    :param kmer_len:            Length of the kmers
     :param limit_genomes:       Limit the number of genomes per species
     :param max_genomes:         Consider species with this number of genomes at most
     :param min_genomes:         Consider species with a minimum number of genomes
@@ -673,7 +677,7 @@ def process_tax_id(tax_id: str, tax_label: str, kingdom: str, db_dir: str, tmp_d
         # Dereplication
         if len(genomes) > 1 and dereplicate:
             before_dereplication = len(genomes)
-            dereplicate(genomes, tax_id, tmp_dir, nproc=nproc, similarity=similarity)
+            dereplicate(genomes, tax_id, tmp_dir, kmer_len, None, nproc=nproc, similarity=similarity)
             
             if before_dereplication > len(genomes) and verbose:
                 printline("Dereplication: excluding {}/{} genomes".format(before_dereplication-len(genomes), before_dereplication))
@@ -806,7 +810,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
             flat_structure = True
 
         # Build a partial function around process_input_genomes
-        process_partial = partial(process_input_genomes, db_dir=db_dir, tmp_dir=tmp_dir, nproc=nproc, pplacer_threads=pplacer_threads,
+        process_partial = partial(process_input_genomes, db_dir=db_dir, tmp_dir=tmp_dir, kmer_len=kmer_len, nproc=nproc, pplacer_threads=pplacer_threads,
                                                          completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity,
                                                          flat_structure=flat_structure, logger=logger, verbose=False)
         
@@ -838,7 +842,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") if not dump_exists else None)
 
         # Build a partial function around process_tax_id
-        process_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, limit_genomes=limit_genomes, 
+        process_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, kmer_len=kmer_len, limit_genomes=limit_genomes, 
                                                   max_genomes=max_genomes, min_genomes=min_genomes, nproc=nproc, pplacer_threads=pplacer_threads, 
                                                   completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
                                                   flat_structure=flat_structure, logger=logger, verbose=False)

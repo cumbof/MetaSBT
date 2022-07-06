@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 30, 2022"
+__date__ = "Jul 5, 2022"
 
 import sys, os, time, errno, shutil
 import argparse as ap
@@ -89,7 +89,7 @@ def read_params():
                     help = "Print the current {} version and exit".format(TOOL_ID) )
     return p.parse_args()
 
-def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, min_genomes: int=3, nproc: int=1) -> None:
+def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, kmer_len: int, filter_size: int, min_genomes: int=3, nproc: int=1) -> None:
     """
     Compute boundaries for the specified taxonomic level
 
@@ -97,6 +97,8 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
     :param level_id:        ID of the taxonomic level
     :param tmp_dir:         Path to the temporary folder
     :param output:          Path to the output table file with boundaries
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
     :param min_genomes:     Consider clusters with at least this number of genomes
     :param nproc:           Make the process parallel when possible
     """
@@ -122,6 +124,8 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
         # Run kmtricks to build the kmers matrix
         kmtricks_matrix(os.path.join(tmp_level_dir, "genomes.fof"), 
                         tmp_level_dir, 
+                        kmer_len,
+                        filter_size,
                         nproc,
                         os.path.join(tmp_level_dir, "kmers_matrix.txt"))
         
@@ -143,7 +147,8 @@ def define_boundaries(level_dir: str, level_id: str, tmp_dir: str, output: str, 
             table.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(lineage, how_many, all_kmers, min_kmers, max_kmers, 
                                                               round(min_kmers/all_kmers, 3), round(max_kmers/all_kmers, 3)))
 
-def boundaries(db_dir: str, tmp_dir: str, output: str, min_genomes: int=3, kingdom: str=None, logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
+def boundaries(db_dir: str, tmp_dir: str, output: str, kmer_len: int, filter_size: int, min_genomes: int=3, kingdom: str=None, 
+               logger: Logger=None, verbose: bool=False, nproc: int=1) -> None:
     """
     Define boundaries for each of the taxonomic levels in the database
     Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level
@@ -151,6 +156,8 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, min_genomes: int=3, kingd
     :param db_dir:          Path to the database root folder
     :param tmp_dir:         Path to the temporary folder
     :param output:          Path to the output table file with boundaries
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
     :param min_genomes:     Consider clusters with at least this number of genomes
     :param kingdom:         Retrieve genomes that belong to a specific kingdom
     :param logger:          Logger object
@@ -189,12 +196,12 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, min_genomes: int=3, kingd
         for level_dir in Path(target_dir).glob("**/{}__*".format(level[0])):
             if os.path.isdir(str(level_dir)):
                 # Define boundaries for the current taxonomic level
-                define_boundaries(str(level_dir), level, tmp_dir, output, 
+                define_boundaries(str(level_dir), level, tmp_dir, output, kmer_len, filter_size,
                                   min_genomes=min_genomes, nproc=nproc)
     
     if kingdom:
         # Also define boundaries for the specified kingdom
-        define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, 
+        define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, kmer_len, filter_size,
                           min_genomes=min_genomes, nproc=nproc)
 
     # Report the path to the output boundaries table file
@@ -212,6 +219,24 @@ def main() -> None:
     if not it_exists(target_dir, path_type="folder"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
     
+    # Check whether the manifest file exists
+    manifest_filepath = os.path.join(args.db_dir, "manifest.txt") if not args.kingdom else os.path.join(args.db_dir, "k__{}".format(args.kingdom), "manifest.txt")
+    if not it_exists(manifest_filepath, path_type="file"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
+
+    # Load the kmer length and bloom filter size from the manifest file
+    kmer_len = 0
+    filter_size = 0
+    with open(manifest_filepath) as manifest:
+        for line in manifest:
+            line = line.strip()
+            if line:
+                line_split = line.split(" ")
+                if line_split[0] == "--kmer-len":
+                    kmer_len = int(line_split[1])
+                elif line_split[0] == "--filter-size":
+                    filter_size = int(line_split[1])
+    
     # Check whether the output boundaries table alrady exists
     if it_exists(args.output, path_type="file"):
         raise Exception("The output boundaries table already exists")
@@ -222,8 +247,8 @@ def main() -> None:
 
     t0 = time.time()
 
-    boundaries(args.db_dir, args.tmp_dir, args.output, kingdom=args.kingdom, min_genomes=args.min_genomes, 
-               logger=logger, verbose=args.verbose, nproc=args.nproc)
+    boundaries(args.db_dir, args.tmp_dir, args.output, kmer_len, filter_size, 
+               kingdom=args.kingdom, min_genomes=args.min_genomes, logger=logger, verbose=args.verbose, nproc=args.nproc)
 
     if args.cleanup:
         # Remove the temporary folder
