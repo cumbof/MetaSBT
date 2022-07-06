@@ -497,8 +497,8 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
                 min_bounds.append(taxonomic_boundaries[tax]["min"])
                 max_bounds.append(taxonomic_boundaries[tax]["max"])
             
-            minv = sum(min_bounds[tax])/len(min_bounds[tax])
-            maxv = sum(max_bounds[tax])/len(max_bounds[tax])
+            minv = sum(min_bounds)/len(min_bounds)
+            maxv = sum(max_bounds)/len(max_bounds)
         
         else:
             # Split the taxonomic label into levels
@@ -509,7 +509,7 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
                 break
 
             # Redefine the taxonomic label
-            taxonomy = taxonomic_levels[:-1]
+            taxonomy = "|".join(taxonomic_levels[:-1])
 
             # Retry
             retry = True
