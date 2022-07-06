@@ -899,7 +899,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
             increment = int(math.ceil(filter_size*increase_filter_size/100.0))
             filter_size += increment
 
-            manifest_filepath = os.path.join(db_dir, "manifest.txt") if flat_structure else os.path.join(db_dir, "k__{}".format(kingdom), "manifest.txt")
+            manifest_filepath = os.path.join(db_dir, "manifest.txt")
             with open(manifest_filepath, "a+") as manifest:
                 manifest.write("--filter-size {}\n".format(filter_size))
     
@@ -1010,7 +1010,7 @@ def main() -> None:
         os.makedirs(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), exist_ok=True)
 
     # Define the database manifest file
-    manifest_filepath = os.path.join(args.db_dir, "manifest.txt") if args.flat_structure else os.path.join(args.db_dir, "k__{}".format(args.kingdom), "manifest.txt")
+    manifest_filepath = os.path.join(args.db_dir, "manifest.txt")
     if it_exists(manifest_filepath, path_type="file"):
         # Load and compare kmer-len and filter-size
         with open(manifest_filepath) as manifest:
