@@ -1,6 +1,6 @@
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 4, 2022"
+__date__ = "Jul 6, 2022"
 
 import sys, os, io, errno, logging, math, subprocess, shutil
 import numpy as np
@@ -443,7 +443,8 @@ def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int]:
                 if common < minv:
                     minv = common
         # Also take track of the total number of kmers
-        kmers += 1
+        if kmers == 0:
+            kmers = len(row1)
 
     return kmers, minv, maxv
 
@@ -831,6 +832,10 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, kmer_len: int, filter_size: 
     :param output_table:    Path to the output kmer matrix file
     """
 
+    # Check whether the run folder exists
+    if not it_exists(run_dir, path_type="folder"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), run_dir)
+
     # Initialise the kmtricks log
     # Both stdout and stderr will be redirected here
     kmtricks_log_filepath = os.path.join(run_dir, "kmtricks.log")
@@ -839,13 +844,13 @@ def kmtricks_matrix(genomes_fof: str, run_dir: str, kmer_len: int, filter_size: 
     # Run kmtricks for building the kmers matrix
     cmd = ["kmtricks", "pipeline", "--file", genomes_fof,
                                    "--run-dir", os.path.join(run_dir, "matrix"),
-                                   "--kmer-size", int(kmer_len),
+                                   "--kmer-size", str(kmer_len),
                                    "--mode", "kmer:count:bin",
                                    "--hard-min", "1",
                                    "--cpr",
                                    "--threads", str(nproc)]
     if filter_size:
-        cmd.extend(["--bloom-size", int(filter_size)])
+        cmd.extend(["--bloom-size", str(filter_size)])
     run(cmd, stdout=kmtricks_log, stderr=kmtricks_log)
 
     # Aggregate partitions into a single kmer matrix
@@ -874,8 +879,8 @@ def load_manifest(manifest_filepath: str) -> dict:
 
     manifest = dict()
 
-    with open(manifest_filepath) as manifest:
-        for line in manifest:
+    with open(manifest_filepath) as file:
+        for line in file:
             line = line.strip()
             if line:
                 line_split = line.split(" ")
