@@ -218,19 +218,19 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, flat_structure: bool=Fals
                                                            "Min score",     # Percentage of min kmers on the total number of kmers/clusters
                                                            "Max score"))    # Percentage of max kmers on the total number of kmers/clusters
     
+    # Check whether the manifest file exists
+    manifest_filepath = os.path.join(db_dir, "manifest.txt")
+    if not it_exists(manifest_filepath, path_type="file"):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
+    
+    # Load the manifest file
+    manifest = load_manifest(manifest_filepath)
+    if "kmer_len" not in manifest or "filter_size" not in manifest:
+        raise Exception("Manifest file does not contain --kmer-len and --filter-size information: {}".format(manifest_filepath))
+
     # Check whether the genomes folder exists under the database root directory
     if flat_structure:
         # This means that the database has been build with the --flat-structure option
-        # Check whether the manifest file exists
-        manifest_filepath = os.path.join(db_dir, "manifest.txt")
-        if not it_exists(manifest_filepath, path_type="file"):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
-        
-        # Load the manifest file
-        manifest = load_manifest(manifest_filepath)
-        if "kmer_len" not in manifest or "filter_size" not in manifest:
-            raise Exception("Manifest file does not contain --kmer-len and --filter-size information: {}".format(manifest_filepath))
-
         printline("Defining boundaries")
 
         # Treat the database as the species level
@@ -244,60 +244,19 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, flat_structure: bool=Fals
         if not kingdom:
             levels.append("kingdom")
 
-        kingdom_manifest = dict()
         # Iterate over the taxonomic levels
         for level in levels:
             printline("Defining {} boundaries".format(level))
             for level_dir in Path(target_dir).glob("**/{}__*".format(level[0])):
                 if os.path.isdir(str(level_dir)):
-                    # Search for the manifest file under the kingdom level
-                    if kingdom:
-                        if "k__{}".format(kingdom) not in kingdom_manifest:
-                            manifest_filepath = os.path.join(target_dir, "manifest.txt")
-                            if not it_exists(manifest_filepath, path_type="file"):
-                                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
-                            
-                            # Load the manifest file
-                            manifest = load_manifest(manifest_filepath)
-                            if "kmer_len" not in manifest or "filter_size" not in manifest:
-                                raise Exception("Manifest file does not contain --kmer-len and --filter-size information: {}".format(manifest_filepath))
-                            
-                            kingdom_manifest["k__{}".format(kingdom)] = manifest
-
-                        level_kingdom = "k__{}".format(kingdom)
-
-                    else:
-                        level_split = str(level_dir).split(os.sep)
-                        level_kingdom = None
-                        for level_value in level_split:
-                            if level_value.startswith("k__"):
-                                level_kingdom = level_value
-                                break
-                        
-                        if level_kingdom:
-                            if level_kingdom not in kingdom_manifest:
-                                manifest_filepath = os.path.join(db_dir, level_kingdom, "manifest.txt")
-                                if not it_exists(manifest_filepath, path_type="file"):
-                                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
-
-                                # Load the manifest file
-                                manifest = load_manifest(manifest_filepath)
-                                if "kmer_len" not in manifest or "filter_size" not in manifest:
-                                    raise Exception("Manifest file does not contain --kmer-len and --filter-size information: {}".format(manifest_filepath))
-                                
-                                kingdom_manifest[level_kingdom] = manifest
-
-                        else:
-                            continue
-
                     # Define boundaries for the current taxonomic level
-                    define_boundaries(str(level_dir), level, tmp_dir, output, kingdom_manifest[level_kingdom]["kmer_len"], 
-                                      kingdom_manifest[level_kingdom]["filter_size"], min_genomes=min_genomes, nproc=nproc)
+                    define_boundaries(str(level_dir), level, tmp_dir, output, manifest["kmer_len"], manifest["filter_size"]
+                                      min_genomes=min_genomes, nproc=nproc)
         
         if kingdom:
             # Also define boundaries for the specified kingdom
-            define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, kingdom_manifest["k__{}".format(kingdom)]["kmer_len"], 
-                              kingdom_manifest["k__{}".format(kingdom)]["filter_size"], min_genomes=min_genomes, nproc=nproc)
+            define_boundaries(os.path.join(db_dir, kingdom), "kingdom", tmp_dir, output, manifest["kmer_len"], manifest["filter_size"],
+                              min_genomes=min_genomes, nproc=nproc)
 
     # Report the path to the output boundaries table file
     printline("Output table: {}".format(output))
