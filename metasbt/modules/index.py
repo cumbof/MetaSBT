@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 5, 2022"
+__date__ = "Jul 6, 2022"
 
 import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib, math
 import argparse as ap
@@ -105,7 +105,7 @@ def read_params():
                     choices = ["Archaea", "Bacteria", "Eukaryota", "Viruses"],
                     help = "Consider genomes whose lineage belongs to a specific kingdom if --input-list is not provided" )
     p.add_argument( "--kmer-len",
-                    type = number(int, minv=6),
+                    type = number(int, minv=8),
                     required = True,
                     dest = "kmer_len",
                     help = "This is the length of the kmers used for building bloom filters" )
