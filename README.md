@@ -11,6 +11,7 @@ A scalable framework for automatically indexing microbial genomes and accurately
 - [Profiling genomes](https://github.com/cumbof/MetaSBT#profiling-genomes)
 - [Updating the database](https://github.com/cumbof/MetaSBT#updating-the-database)
 - [Building the database report](https://github.com/cumbof/MetaSBT#building-the-database-report)
+- [Credits](https://github.com/cumbof/MetaSBT#credits)
 - [Contributing](https://github.com/cumbof/MetaSBT#contributing)
 - [Support](https://github.com/cumbof/MetaSBT#support)
 
@@ -229,6 +230,8 @@ Please note that in the example above we explicitly set the `--stop-at` argument
 
 ## Updating the database
 
+> :warning: _This module is still under development. We strongly suggest to avoid mentioning results produced with this specific module in scientific manuscripts until a stable version will be released_
+
 This module can be used to add new reference genomes and metagenome-assembled genomes (MAGs) to the database generated with the `index` module. 
 
 In case of new MAGs, it first try to profile them by comparing the input genomes with those present in the database. An input genome is assigned to the closest genome in the database if their set of kmers result similar enough. In case the profiler will not be able to characterize the input genome, the `update` subroutine will exploit `kmtricks` to build a kmer matrix for the set of input genomes and automatically group them according to the taxonomy-specific boundaries identified with the `boundaries` utility, and it finally generate new clusters of potentially novel and yet-to-be-named species.
@@ -310,6 +313,12 @@ The output file is a table that will contain the number of MAGs and reference ge
 | `--db-dir`               | ⚑         | Database folder path |
 | `--output-file`          | ⚑         | Path to the output table |
 | `--version`              |           | Print current module version and exit |
+
+## Credits
+
+Please credit our work in your manuscript by citing:
+
+> _Manuscript in preparation_
 
 ## Contributing
 
