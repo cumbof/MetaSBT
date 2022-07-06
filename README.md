@@ -5,17 +5,24 @@ A scalable framework for automatically indexing microbial genomes and accurately
 
 ## Contents
 
-- [Installing `MetaSBT`](https://github.com/cumbof/MetaSBT#installing-metasbt)
-- [Building a database](https://github.com/cumbof/MetaSBT#building-a-database)
-- [Defining boundaries](https://github.com/cumbof/MetaSBT#defining-boundaries)
-- [Profiling genomes](https://github.com/cumbof/MetaSBT#profiling-genomes)
-- [Updating the database](https://github.com/cumbof/MetaSBT#updating-the-database)
-- [Building the database report](https://github.com/cumbof/MetaSBT#building-the-database-report)
+- [Getting started](https://github.com/cumbof/MetaSBT#getting-started)
+  - [Installing `MetaSBT`](https://github.com/cumbof/MetaSBT#installing-metasbt)
+  - [Dependencies](https://github.com/cumbof/MetaSBT#dependencies)
+- [Available features](https://github.com/cumbof/MetaSBT#available-features)
+  - [`index`: building a reference database](https://github.com/cumbof/MetaSBT#1-index-building-a-reference-database)
+  - [`boundaries`: defining clusters boundaries](https://github.com/cumbof/MetaSBT#2-boundaries-defining-clusters-boundaries)
+  - [`profile`: characterizing genomes and metagenome-assembled genomes](https://github.com/cumbof/MetaSBT#3-profile-characterizing-genomes-and-metagenome-assembled-genomes)
+  - [`update`: updating the database](https://github.com/cumbof/MetaSBT#4-update-updating-the-database)
+  - [`report`: building the database snapshot report](https://github.com/cumbof/MetaSBT#5-report-building-the-database-snapshot-report)
 - [Credits](https://github.com/cumbof/MetaSBT#credits)
 - [Contributing](https://github.com/cumbof/MetaSBT#contributing)
 - [Support](https://github.com/cumbof/MetaSBT#support)
 
-## Installing `MetaSBT`
+## Getting started
+
+`MetaSBT` is a Python3 framework built for the analysis and characterization of the microbial dark matter. It is available on the [Python Package Index](https://pypi.org/) as well as Conda on the Bioconda[^1] channel and relies on a set of external software dependencies described on the following sections.
+
+### Installing `MetaSBT`
 
 The pipeline is available as a Python3 package that can be install with the following command:
 ```bash
@@ -43,28 +50,6 @@ chmod -R +x MetaSBT/*.py
 
 # Add MetaSBT to the PATH env variable
 PATH=$PATH:~/git/MetaSBT
-```
-
-Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
-
-In this last case, remember to check that the following dependencies are installed and available on your system:
-- [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)
-- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.07)
-- [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)
-- [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
-- [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
-- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)
-- [pip](https://pip.pypa.io/) (version >=21.2.4)
-- [python](http://www.python.org/) (version >=3.7)
-- [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
-
-Please note that `MetaSBT` makes use of some advanced `howdesbt` sub-commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
-
-For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
-
-First, you need to download the last available database from the following repository [https://data.ace.uq.edu.au/public/CheckM_databases/](https://data.ace.uq.edu.au/public/CheckM_databases/), decompress it on a dedicated location, and finally inform CheckM about where its database is located by typing:
-```bash
-checkm data setRoot <checkm_data_dir>
 ```
 
 Once everything is installed, `MetaSBT` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
@@ -97,9 +82,39 @@ You may finally need to reload your profile to make these changes effective:
 source ~/.bash_profile
 ```
 
+### Dependencies
+
+Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
+
+In this last case, remember to check that the following dependencies are installed and available on your system:
+- [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)[^2]
+- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.07)[^3]
+- [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)[^4]
+- [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
+- [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
+- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^5]
+- [pip](https://pip.pypa.io/) (version >=21.2.4)
+- [python](http://www.python.org/) (version >=3.7)
+- [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
+
+Please note that `MetaSBT` makes use of some advanced `howdesbt` sub-commands that are not available by default when installing HowDeSBT. They must be enabled by compiling the software with the alternative version of the [Makefile](https://github.com/medvedevgroup/HowDeSBT/blob/master/Makefile_full) available in the root folder of the HowDeSBT repository on GitHub.
+
+For what concerns CheckM, we strongly suggest to install it through `pip` or `conda`, but it will require in any case a couple of extra steps to correctly link the software to its database. This must be necessarily executed manually as reported on the official [CheckM Wiki](https://github.com/Ecogenomics/CheckM/wiki/Installation).
+
+First, you need to download the last available database from the following repository [https://data.ace.uq.edu.au/public/CheckM_databases/](https://data.ace.uq.edu.au/public/CheckM_databases/), decompress it on a dedicated location, and finally inform CheckM about where its database is located by typing:
+```bash
+checkm data setRoot <checkm_data_dir>
+```
+
 Please note that `MetaSBT` is available for Linux and macOS only.
 
-## Building a database
+## Available features
+
+The `MetaSBT` framework provides a set of subroutines (here called modules) for (i) **building a taxonomically-organized database** of microbial genomes, (ii) **defining boundaries** for each of the clusters in the database at different taxonomic levels to explore and define the intra-cluster genetic diversity, (iii) **profiling genomes and metagenome-assembled genomes** by querying the database and reporting the closest lineage and reference genome, (iv) **updating a database with new reference genomes and metagenome-assembled genomes** by also defining new and yet-to-be-named clusters, (v) and finally **producing a report** of the current status of a database.
+
+It follows a detailed explanation of all the available modules.
+
+### 1. `index`: building a reference database
 
 The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `kmtricks` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed with `howdesbt` by building new sequence bloom trees considering only the root nodes of the upper taxonomic levels.
 
@@ -159,7 +174,7 @@ You may also want to get rid of the taxonomic organization of genomes by specify
 
 Please note that the `--flat-structure` option is not compatible with the `update` module for updating the database with new genomes. Thus, in case you will need to update the sequence bloom tree, there are no other options than building the database from scratch with the new set of genomes.
 
-## Defining boundaries
+### 2. `boundaries`: defining clusters boundaries
 
 The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `kmtricks` to build a kmers table for each of the taxonomic levels in the database with information about the presence/absence of a kmer in genomes that belong to a particular lineage. It finally build a new table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. These boundaries are then used by the `update` module in order to establish whether a new genome must be assigned to the closest cluster identified by the `profile` module.
 
@@ -193,7 +208,7 @@ Please note that the `boundaries` module considers clusters with reference genom
 | `--verbose`              | `False` |           | Print results on screen |
 | `--version`              |         |           | Print current module version and exit |
 
-## Profiling genomes
+### 3. `profile`: characterizing genomes and metagenome-assembled genomes
 
 The `profile` module allows to characterize an input genome according to the closest lineage in the database. It allows to process only one genome in input at a time:
 ```bash
@@ -228,7 +243,7 @@ Please note that in the example above we explicitly set the `--stop-at` argument
 | `--verbose`              | `False` |           | Print results on screen |
 | `--version`              |         |           | Print current module version and exit |
 
-## Updating the database
+### 4. `update`: updating the database
 
 > :warning: _This module is still under development. We strongly suggest to avoid mentioning results produced with this specific module in scientific manuscripts until a stable version will be released_
 
@@ -296,7 +311,7 @@ sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 | `--verbose`              | `False` |           | Print results on screen |
 | `--version`              |         |           | Print current module version and exit |
 
-## Building the database report
+### 5. `report`: building the database snapshot report
 
 Once the database is built and updated with new MAGs and reference genomes, you can easily extract relevant information about all the species in your database by running the following command:
 ```bash
@@ -331,3 +346,9 @@ Please, (i) be sure that there are no existing issues/PR concerning the same bug
 If you need support, please open an [Issue](https://github.com/cumbof/MetaSBT/issues) or a new [Discussion](https://github.com/cumbof/MetaSBT/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
 
 Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/cumbof/MetaSBT/blob/main/LICENSE) for additional details.
+
+[^1]: Grüning, Björn, et al. "[Bioconda: sustainable and comprehensive software distribution for the life sciences.](https://doi.org/10.1038/s41592-018-0046-7)" Nature methods 15.7 (2018): 475-476.
+[^2]: Parks, Donovan H., et al. "[CheckM: assessing the quality of microbial genomes recovered from isolates, single cells, and metagenomes.](https://doi.org/10.1101/gr.186072.114)" Genome research 25.7 (2015): 1043-1055.
+[^3]: Harris, Robert S., and Paul Medvedev. "[Improved representation of sequence bloom trees.](https://doi.org/10.1093/bioinformatics/btz662)" Bioinformatics 36.3 (2020): 721-727.
+[^4]: Lemane, Téo, et al. "[kmtricks: Efficient and flexible construction of Bloom filters for large sequencing data collections.](https://doi.org/10.1093/bioadv/vbac029)" Bioinformatics Advances (2022).
+[^5]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
