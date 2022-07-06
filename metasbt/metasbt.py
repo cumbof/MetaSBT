@@ -40,8 +40,8 @@ RELEASES_API_URL = "https://api.github.com/repos/cumbof/{}/releases/latest".form
 
 def read_params():
     p = ap.ArgumentParser(prog=TOOL_ID,
-                          description=("A pipeline for automatically indexing microbial genomes and accurately "
-                                       "characterizing metagenome-assembled genomes with sequence bloom trees"),
+                          description=("A scalable framework for automatically indexing microbial genomes and accurately "
+                                       "characterizing metagenome-assembled genomes with Sequence Bloom Trees"),
                           formatter_class=ap.ArgumentDefaultsHelpFormatter)
     p.add_argument( "--check-updates",
                     action = "store_true",
