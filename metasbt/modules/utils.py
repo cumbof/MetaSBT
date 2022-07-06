@@ -634,37 +634,49 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                                         "--keepallnodes"],
                 stdout=howdesbt_log, stderr=howdesbt_log)
 
-            # Build all the bloom filter files
-            run(["howdesbt", "build", "--howde",
-                                      "--tree={}".format(os.path.join(index_dir, "union.sbt")),
-                                      "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt"))],
-                stdout=howdesbt_log, stderr=howdesbt_log)
-            
-            # Remove the union.sbt file
-            os.unlink(os.path.join(index_dir, "union.sbt"))
+        else:
+            # With only one bloom filter it does not make sense to cluster genomes
+            bf_filepath = [line.strip() for line in open(level_list).readlines() if line.strip()][0]
 
-            # Fix node paths in the final index.detbrief.sbt file
-            with open(os.path.join(index_dir, "index.full.detbrief.sbt"), "w+") as file1:
-                with open(os.path.join(index_dir, "index.detbrief.sbt")) as file2:
-                    for line in file2:
-                        line = line.strip()
-                        if line:
-                            # Define the depth of the node in the tree
-                            stars = line.count("*")
-                            # Remove the stars to retrieve the node name
-                            node_name = line[stars:]
-                            # Define the absolute path to the node bloom filter file
-                            node_path = os.path.join(index_dir, node_name)
-                            # Define the new node in the tree
-                            file1.write("{}{}\n".format("*"*stars, node_path))
-            
-            # Get rid of the old tree
-            os.unlink(os.path.join(index_dir, "index.detbrief.sbt"))
+            # There is only one line which refers to the only bloom filter file
+            shutil.copy(bf_filepath, os.path.join(level_dir, "{}.bf".format(level_name)))
 
-            # Rename the new tree
-            shutil.move(os.path.join(index_dir, "index.full.detbrief.sbt"), 
-                        os.path.join(index_dir, "index.detbrief.sbt"))
+            # Manually define the union.sbt file with the single node
+            with open(os.path.join(index_dir, "union.sbt"), "w+") as union:
+                union.write("{}\n".format(bf_filepath))
             
+        # Build all the bloom filter files
+        run(["howdesbt", "build", "--howde",
+                                  "--tree={}".format(os.path.join(index_dir, "union.sbt")),
+                                  "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt"))],
+            stdout=howdesbt_log, stderr=howdesbt_log)
+
+        # Remove the union.sbt file
+        os.unlink(os.path.join(index_dir, "union.sbt"))
+
+        # Fix node paths in the final index.detbrief.sbt file
+        with open(os.path.join(index_dir, "index.full.detbrief.sbt"), "w+") as file1:
+            with open(os.path.join(index_dir, "index.detbrief.sbt")) as file2:
+                for line in file2:
+                    line = line.strip()
+                    if line:
+                        # Define the depth of the node in the tree
+                        stars = line.count("*")
+                        # Remove the stars to retrieve the node name
+                        node_name = line[stars:]
+                        # Define the absolute path to the node bloom filter file
+                        node_path = os.path.join(index_dir, node_name)
+                        # Define the new node in the tree
+                        file1.write("{}{}\n".format("*"*stars, node_path))
+        
+        # Get rid of the old tree
+        os.unlink(os.path.join(index_dir, "index.detbrief.sbt"))
+
+        # Rename the new tree
+        shutil.move(os.path.join(index_dir, "index.full.detbrief.sbt"), 
+                    os.path.join(index_dir, "index.detbrief.sbt"))
+        
+        if how_many > 1:
             # Build the bloom filter representation of the current taxonomic level
             bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
 
@@ -674,30 +686,6 @@ def howdesbt(level_dir: str, kmer_len: int=21, filter_size: int=10000, nproc: in
                                           "--or",
                                           "--out={}".format(bf_filepath)],
                 stdout=howdesbt_log, stderr=howdesbt_log)
-        
-        else:
-            # With only one bloom filter it does not make sense to cluster genomes
-            with open(level_list) as file:
-                for line in file:
-                    line = line.strip()
-                    if line:
-                        # There is only one line which refers to the only bloom filter file
-                        shutil.copy(line, os.path.join(level_dir, "{}.bf".format(level_name)))
-
-                        # Manually define the union.sbt file with the single node
-                        with open(os.path.join(index_dir, "union.sbt"), "w+") as union:
-                            union.write("{}\n".format(os.path.join(level_dir, "{}.bf".format(level_name))))
-
-                        # Build the RRR compressed bloom filter file for the node
-                        run(["howdesbt", "build", "--howde",
-                                                  "--tree={}".format(os.path.join(index_dir, "union.sbt")),
-                                                  "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt"))],
-                            stdout=howdesbt_log, stderr=howdesbt_log)
-
-                        # Remove the union.sbt file
-                        os.unlink(os.path.join(index_dir, "union.sbt"))
-
-                        break
         
         # In case of species level or flat structure
         # Remove the uncompressed version of the bloom filter files
