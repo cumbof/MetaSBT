@@ -9,6 +9,7 @@ __date__ = "Jul 6, 2022"
 
 import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
+import multiprocessing as mp
 from pathlib import Path
 from functools import partial
 from collections import Counter
@@ -19,7 +20,7 @@ from typing import Tuple
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import checkm, cluster, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, load_manifest, number, println, run
+    from utils import checkm, cluster, filter_genomes, get_level_boundaries, howdesbt, init_logger, it_exists, kmtricks_matrix, load_manifest, number, println, run
 except:
     pass
 
@@ -159,30 +160,33 @@ def load_taxa(taxa_filepath, genomes_path):
         genome_name = os.path.splitext(os.path.basename(genome_path))[0]
         if genome_path.endswith(".gz"):
             genome_name = os.path.splitext(genome_name)[0]
-        gneome_names.append(genome_name)
+        genome_names.append(genome_name)
     
     if len(set(genome_names).intersection(set(taxonomies.keys()))) < len(set(genome_names)):
         raise Exception("Unable to find all the taxonomic labels for the input reference genomes")
     
     return taxonomies
 
-def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tmp_genomes_dir: str=None, boundaries: str=None, taxonomies: dict=dict(), 
-                       dereplicate: bool=False, similarity: float=100.0, checkm_data: dict=dict(), logger: Logger=None, verbose: bool=False) -> Tuple[dict, list, list]:
+def profile_and_assign(genome_path: str, input_type: str, tmp_dir: str=None, db_dir: str=None, tmp_genomes_dir: str=None, boundaries: str=None, 
+                       boundary_uncertainty: float=0.0, taxonomies: dict=dict(), dereplicate: bool=False, similarity: float=100.0, 
+                       checkm_data: dict=dict(), logger: Logger=None, verbose: bool=False) -> Tuple[dict, list, list]:
     """
     Profile and assign one input genome
 
-    :param genome_path:         Path to the input genome file
-    :param tmp_dir:             Path to the temporary folder
-    :param db_dir:              Path to the database root folder
-    :param tmp_genomes_dir:     Path to the temporary folder for uncompressing input genomes
-    :param boundaries:          Path to the table with taxonomic boundaries
-    :param taxonomies:          Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
-    :param dereplicate:         Enable dereplication of input genome against genomes in the closest cluster
-    :param similarity:          Exclude input genome if its similarity with the closest genome in the database exceed this threshold
-    :param checkm_data:         Dictionary with CheckM statistics
-    :param logger:              Logger object
-    :param verbose:             Print messages on screen
-    :return:                    The assignment
+    :param genome_path:             Path to the input genome file
+    :param input_type:              Nature of the input genomes (MAGs or references)
+    :param tmp_dir:                 Path to the temporary folder
+    :param db_dir:                  Path to the database root folder
+    :param tmp_genomes_dir:         Path to the temporary folder for uncompressing input genomes
+    :param boundaries:              Path to the table with taxonomic boundaries
+    :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
+    :param taxonomies:              Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
+    :param dereplicate:             Enable dereplication of input genome against genomes in the closest cluster
+    :param similarity:              Exclude input genome if its similarity with the closest genome in the database exceed this threshold
+    :param checkm_data:             Dictionary with CheckM statistics
+    :param logger:                  Logger object
+    :param verbose:                 Print messages on screen
+    :return:                        The assignment
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -215,6 +219,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
     # The profile module is in the same folder of the update module
     run([sys.executable, os.path.join(SCRIPT_DIR, "profile.py"), "--input-file", filepath,
                                                                  "--input-id", filepath,
+                                                                 "--input-type", "genome",
                                                                  "--tree", os.path.join(db_dir, "index", "index.detbrief.sbt"),
                                                                  "--expand",
                                                                  "--output-dir", os.path.join(tmp_dir, "profiling"),
@@ -222,7 +227,8 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
         silence=True)
     
     # Define the path to the profiler output file
-    profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".join(genome_name))
+    profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".format(genome_name))
+    printline(profile_path)
 
     # Check whether the profile exists
     if it_exists(profile_path, path_type="file"):
@@ -232,12 +238,13 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
             for line in profile:
                 line = line.strip()
                 if line:
-                    line_split = line.split("\t")
-                    profile_data[line_split[1]] = {
-                        "taxonomy": line_split[2],
-                        "common_kmers": int(line_split[3]),
-                        "score": float(line_split[4])
-                    }
+                    if not line.startswith("#"):
+                        line_split = line.split("\t")
+                        profile_data[line_split[1]] = {
+                            "taxonomy": line_split[2],
+                            "common_kmers": int(line_split[3].split("/")[0]),
+                            "score": float(line_split[4])
+                        }
         
         # Discard the genome if it is too similar with the closest genome according to the similarity score
         # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
@@ -405,7 +412,7 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
                     os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
 
                     # Assign the current genome to the closest lineage
-                    target_genome = oa.path.join(taxdir, "genomes", "{}.{}".format(genome_name, genome_ext))
+                    target_genome = os.path.join(taxdir, "genomes", "{}.{}".format(genome_name, genome_ext))
                     shutil.copy(filepath, target_genome)
                     
                     # The input genome is always uncompressed
@@ -438,9 +445,9 @@ def profile_and_assign(genome_path: str, tmp_dir: str=None, db_dir: str=None, tm
 
     return to_known_taxa, rebuild, unassigned
 
-def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdom: str, tmp_dir: str, boundaries: str=None,
+def update(input_list: str, input_type: str, extension: str, db_dir: str, tmp_dir: str, boundaries: str=None,
            boundary_uncertainty: float=0.0, taxa_map: str=None, completeness: float=0.0, contamination: float=100.0, 
-           dereplicate: bool=False, similarity: float=100.0, unknown_label: str="MI", logger: Logger=None, 
+           dereplicate: bool=False, similarity: float=100.0, unknown_label: str="MSBT", logger: Logger=None, 
            verbose: bool=False, nproc: int=1, pplacer_threads: int=1, parallel: int=1) -> None:
     """
     Update a database with a new set of metagenome-assembled genomes and reference genomes.
@@ -450,7 +457,6 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     :param input_type:              Nature of the input genomes (MAGs or references)
     :param extension:               File extension of the input genome files
     :param db_dir:                  Path to the database root folder
-    :param kingdom:                 Retrieve genomes that belong to a specific kingdom
     :param tmp_dir:                 Path to the temporary folder
     :param boundaries:              Path to the boundaries table file
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
@@ -472,12 +478,8 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     # every time the println function is invoked
     printline = partial(println, logger=logger, verbose=verbose)
 
-    # Check whether the selected kingdom exists in the database
-    if not it_exists(os.path.join(db_dir, "k__{}".format(kingdom)), path_type="folder"):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), os.path.join(db_dir, "k__{}".format(kingdom)))
-
     # Check whether the manifest file exists in the database
-    manifest_filepath = os.path.join(db_dir, "k__{}".format(kingdom), "manifest.txt")
+    manifest_filepath = os.path.join(db_dir, "manifest.txt")
     if not it_exists(manifest_filepath, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
 
@@ -572,7 +574,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
         
         # Run kmtricks to produce the kmer matrix
         output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-        kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, nproc, output_table)
+        kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, kmer_len, filter_size, nproc, output_table)
 
         # Add the header line to the kmer matrix
         with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
@@ -625,14 +627,15 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
     unassigned = list()
 
     # Define a partial function around the profile_and_assign
-    profile_and_assign_partial = partial(profile_and_assign, tmp_dir=tmp_dir, db_dir=db_dir, tmp_genomes_dir=tmp_genomes_dir,
-                                                             boundaries=boundaries, taxonomies=taxonomies, dereplicate=dereplicate,
+    profile_and_assign_partial = partial(profile_and_assign, input_type=input_type, tmp_dir=tmp_dir, db_dir=db_dir, tmp_genomes_dir=tmp_genomes_dir,
+                                                             boundaries=boundaries, boundary_uncertainty=boundary_uncertainty,
+                                                             taxonomies=taxonomies, dereplicate=dereplicate,
                                                              similarity=similarity, checkm_data=checkm_data, 
                                                              logger=logger if parallel == 1 else None, 
                                                              verbose=verbose if parallel == 1 else False)
 
     # Initialise the progress bar
-    pbar = tqdm.tqdm(total=len(genomes_paths), disable=(not verbose))
+    pbar = tqdm.tqdm(total=len(genomes_paths), disable=(not verbose or parallel == 1))
 
     with mp.Pool(processes=parallel) as pool:
         def update_bar(*args):
@@ -661,7 +664,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
 
     # In case a reference has been assigned to an unknown cluster
     # Update the cluster taxonomy by applying a majority voting on the reference genomes taxa
-    if to_knwon_taxa:
+    if to_known_taxa:
         printline("Characterising {} unknown taxa".format(len(to_known_taxa)))
 
         # Iterate over the unknown clusters in dictionary
@@ -757,7 +760,7 @@ def update(input_list: str, input_type: str, extension: str, db_dir: str, kingdo
                     ordered_genome_names.append(genome_name)
 
             # Build the kmers matrix
-            kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, nproc, output_table)
+            kmtricks_matrix(genomes_fof_filepath, kmtricks_tmp_dir, kmer_len, filter_size, nproc, output_table)
 
             # Add the header line to the kmer matrix
             with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
@@ -887,7 +890,7 @@ def main() -> None:
 
     t0 = time.time()
 
-    update(args.input_list, args.type, args.extension, args.db_dir, args.kingdom, args.tmp_dir, 
+    update(args.input_list, args.type, args.extension, args.db_dir, args.tmp_dir, 
            boundaries=args.boundaries, boundary_uncertainty=args.boundary_uncertainty, taxa_map=args.taxa, 
            completeness=args.completeness, contamination=args.contamination, dereplicate=args.dereplicate, 
            similarity=args.similarity, unknown_label=args.unknown_label, logger=logger, verbose=args.verbose, 
