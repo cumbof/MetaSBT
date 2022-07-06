@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 28, 2022"
+__date__ = "Jul 6, 2022"
 
 import sys, os, time, errno, re, shutil, tqdm
 import argparse as ap
@@ -128,7 +128,7 @@ def read_params():
                     help = "Define the nature of the input genomes" )
     p.add_argument( "--unknown-label",
                     type = str,
-                    default = "MI",
+                    default = "MSBT",
                     help = "Prefix label of the newly defined clusters" )
     p.add_argument( "--verbose",
                     action = "store_true",
