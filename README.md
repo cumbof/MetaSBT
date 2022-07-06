@@ -179,6 +179,7 @@ Please note that the `boundaries` module considers clusters with reference genom
 |:-------------------------|:--------|:---------:|:-------------|
 | `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
 | `--db-dir`               |         | ⚑         | Database directory with the taxonomically organised sequence bloom trees |
+| `--flat-structure`       | `False` |           | Genomes in the database have been organized without a taxonomic structure |
 | `--help`                 |         |           | Print the list of arguments and exit |
 | `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom |
 | `--log`                  |         |           | Path to the log file |
