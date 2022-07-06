@@ -6,7 +6,7 @@ In case of input genomes, results on single sequences are merged together
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 28, 2022"
+__date__ = "Jul 5, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -131,8 +131,10 @@ def profile_list(input_file: str, input_id: str, tree: str, threshold: float=0.0
 
     # Run HowDeSBT
     with open(output_file, "w+") as file:
-        run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold],
+        run(["howdesbt", "query", "--sort", "--tree={}".format(tree), "--threshold={}".format(threshold), input_file],
             stdout=file, stderr=file)
+    
+    printline("Output: {}".format(output_file))
 
 def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0.0, expand: bool=False, 
                    stop_at: bool=None, output_dir: str=None, output_prefix: str=None, logger: Logger=None, verbose: bool=False) -> None:
@@ -168,6 +170,8 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     closest_genome_score = 0.0
 
     while it_exists(tree, path_type="file"):
+        printline("Querying {}".format(tree))
+
         # Retrieve the taxonomic level name from the tree file path
         id_dir = os.path.dirname(tree)
         level_dir = os.path.dirname(id_dir)
@@ -182,7 +186,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
 
         # Run HowDeSBT
         with open(output_file, "w+") as file:
-            run(["howdesbt", "query", "--sort", "--distinctkmers", "--tree", tree, "--threshold", threshold, input_file],
+            run(["howdesbt", "query", "--sort", "--tree={}".format(tree), "--threshold={}".format(threshold), input_file],
                 stdout=file, stderr=file)
 
         if it_exists(output_file, path_type="file"):
@@ -199,8 +203,9 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
                             if line_split[0] not in matches_kmers:
                                 matches_kmers[line_split[0]] = {"common": 0, "total": 0}
                             # Update the number of common and total kmers for the current sequence
-                            matches_kmers[line_split[0]]["common"] += int(line_split[1].split("/")[0])
-                            matches_kmers[line_split[0]]["total"] += int(line_split[1].split("/")[1])
+                            hits = line_split[1].split("/")
+                            matches_kmers[line_split[0]]["common"] += int(hits[0])
+                            matches_kmers[line_split[0]]["total"] += int(hits[1])
 
             # Search for the best match
             # The best match is defined as the genome with more kmers in common with the input sequence
@@ -220,6 +225,9 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
                 closest_genome_common_kmers = best_kmers
                 closest_genome_total_kmers = matches_kmers[best_match]["total"]
                 closest_genome_score = best_score
+
+                break
+
             else:
                 # Update the lineage
                 lineage[best_match] = {
@@ -258,12 +266,12 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     # Reconstruct the lineage
     if lineage:
         # Print the closest lineage
-        printline("\nClosest lineage:\n\t{}\n".format("|".join(lineage.keys())))
+        printline("Closest lineage: {}".format("|".join(lineage.keys())))
 
         # Print scores
-        printline("Score:")
+        printline("Listing scores")
         for l in lineage:
-            printline("\t{}\t{}".format(l, lineage[l]["score"]))
+            printline("{}: {}".format(l, lineage[l]["score"]))
             
             # Expand the level ID to the full level name
             level_name = ""
@@ -277,15 +285,16 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
                 output.write("{}\t{}\t{}\t{}\t{}\n".format(input_id,                            # ID of the input query
                                                            level_name,                          # Taxonomic level name
                                                            l,                                   # Lineage
-                                                           "{}/{}".format(lineage[i]["common"], # Number of kmers in common
-                                                                          lineage[i]["total"]), # Total number of kmers in query
-                                                           lineage[i]["score"]))                # Score
+                                                           "{}/{}".format(lineage[l]["common"], # Number of kmers in common
+                                                                          lineage[l]["total"]), # Total number of kmers in query
+                                                           lineage[l]["score"]))                # Score
     
     # Show the closest genome in case the input is a species tree 
     # or the query has been expanded
     if closest_genome:
         # Print the closest genome and its score
-        printline("\nClosest genome:\n\t{}\t{}".format(closest_genome, closest_genome_score))
+        printline("Closest genome: {}".format(closest_genome))
+        printline("Closest genome score: {}".format(closest_genome_score))
 
         # Report the closest genome to the output file
         with open(output_profile, "a+") as output:
@@ -295,6 +304,8 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
                                                        "{}/{}".format(closest_genome_common_kmers, # Number of kmers in common
                                                                       closest_genome_total_kmers), # Total number of kmers in query
                                                        closest_genome_score))                      # Score
+    
+    printline("Output: {}".format(output_profile))
 
 def main() -> None:
     # Load command line parameters
@@ -310,8 +321,8 @@ def main() -> None:
     if not it_exists(args.tree, path_type="file"):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.tree)
     
-    if not it_exists(args.output_dir, path_type="folder"):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_dir)
+    # Create the output folder
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # In case --input_id is not provided
     if not args.input_id:
