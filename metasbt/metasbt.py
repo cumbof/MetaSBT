@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 5, 2022"
+__date__ = "Jul 6, 2022"
 
 import sys
 
@@ -186,6 +186,11 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, 
                 raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS))
 
 def main() -> None:
+    # In case no arguments are specified
+    if len(sys.argv) == 1:
+        # Run the helper
+        sys.argv.append("--help")
+
     # In case of --help and --version options
     # Both the arguments are shared among the main controller and modules
     if ("--help" in sys.argv or "--version" in sys.argv) and len(sys.argv) == 3:
