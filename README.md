@@ -3,14 +3,14 @@ A scalable framework for automatically indexing microbial genomes and accurately
 
 ## Contents
 
-- [Installing `MetaSBT`](https://github.com/cumbof/metasbt#installing-metasbt)
-- [Building a database](https://github.com/cumbof/metasbt#building-a-database)
-- [Defining boundaries](https://github.com/cumbof/metasbt#defining-boundaries)
-- [Profiling genomes](https://github.com/cumbof/metasbt#profiling-genomes)
-- [Updating the database](https://github.com/cumbof/metasbt#updating-the-database)
-- [Building the database report](https://github.com/cumbof/metasbt#building-the-database-report)
-- [Contributing](https://github.com/cumbof/metasbt#contributing)
-- [Support](https://github.com/cumbof/metasbt#support)
+- [Installing `MetaSBT`](https://github.com/cumbof/MetaSBT#installing-metasbt)
+- [Building a database](https://github.com/cumbof/MetaSBT#building-a-database)
+- [Defining boundaries](https://github.com/cumbof/MetaSBT#defining-boundaries)
+- [Profiling genomes](https://github.com/cumbof/MetaSBT#profiling-genomes)
+- [Updating the database](https://github.com/cumbof/MetaSBT#updating-the-database)
+- [Building the database report](https://github.com/cumbof/MetaSBT#building-the-database-report)
+- [Contributing](https://github.com/cumbof/MetaSBT#contributing)
+- [Support](https://github.com/cumbof/MetaSBT#support)
 
 ## Installing `MetaSBT`
 
