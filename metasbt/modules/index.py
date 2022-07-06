@@ -810,7 +810,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
                                                          completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity,
                                                          flat_structure=flat_structure, logger=logger, verbose=False)
         
-        printline("Processing genomes")
+        printline("Processing clusters")
 
         # Initialise the progress bar
         pbar = tqdm.tqdm(total=len(taxonomy2genomes), disable=(not verbose))
@@ -843,7 +843,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
                                                   completeness=completeness, contamination=contamination, dereplicate=dereplicate, similarity=similarity, 
                                                   flat_structure=flat_structure, logger=logger, verbose=False)
 
-        printline("Processing genomes")
+        printline("Processing clusters")
 
         # Initialise the progress bar
         pbar = tqdm.tqdm(total=len(tax_ids), disable=(not verbose))
@@ -1001,8 +1001,9 @@ def main() -> None:
     if not args.kingdom and len(kingdoms):
         args.kingdom = kingdoms[0]
     
-    # Create the kingdom directory
-    os.makedirs(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), exist_ok=True)
+    if args.kingdom:
+        # Create the kingdom directory
+        os.makedirs(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), exist_ok=True)
 
     # Define the database manifest file
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt") if args.flat_structure else os.path.join(args.db_dir, "k__{}".format(args.kingdom), "manifest.txt")
