@@ -251,7 +251,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
                 tree = os.path.join(level_dir, best_match, "index", "index.detbrief.sbt")
     
     # Define the output profile path
-    output_profile = os.path.join(output_dir, "{}__profiles.txt".format(output_prefix))
+    output_profile = os.path.join(output_dir, "{}__profiles.tsv".format(output_prefix))
     
     if not it_exists(output_profile, path_type="file"):
         # Write the header lines in case the output profile does not exist
