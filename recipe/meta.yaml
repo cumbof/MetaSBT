@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/cumbof/{{ name }}/archive/{{ version }}.tar.gz
-  sha256: 9e63dad735cc41c5be18dc08c5a3e0be87f4643525bd554b4aabe96a718c8d43
+  sha256: a4cd8ff3d0538aebee72e2932ced21986d03987309466d7d6ecd58e14a7ffa9d
 
 build:
   number: 0
