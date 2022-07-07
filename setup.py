@@ -9,7 +9,10 @@ setuptools.setup(name="MetaSBT",
                  author="Fabio Cumbo",
                  author_email="fabio.cumbo@gmail.com",
                  url="http://github.com/cumbof/MetaSBT",
-                 license="LICENSE",
+                 license="MIT",
+                 license_files=[
+                    "LICENSE"
+                 ],
                  packages=setuptools.find_packages(),
                  package_data = {
                      "metasbt": [
