@@ -1,13 +1,13 @@
 {% set name = "MetaSBT" %}
-{% set version = "0.1.0-alpha" %}
+{% set version = "0.1.0a0" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  url: https://github.com/cumbof/{{ name }}/archive/{{ version }}.tar.gz
-  sha256: a4cd8ff3d0538aebee72e2932ced21986d03987309466d7d6ecd58e14a7ffa9d
+  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: 56ac4cc3fca0bf779a4457cf4452796a34aaa38fbe0f7f1eac1d87bc7125ec29
 
 build:
   number: 0
