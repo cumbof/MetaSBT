@@ -1,5 +1,5 @@
 {% set name = "MetaSBT" %}
-{% set version = "0.1.0" %}
+{% set version = "0.1.0-alpha" %}
 
 package:
   name: {{ name|lower }}
@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/cumbof/{{ name }}/archive/{{ version }}.tar.gz
-  sha256: 40cdff712af03e782dfcbfa9ac03aaf19a005add1d8e8cbc35054bc78b78a03f
+  sha256: 9e63dad735cc41c5be18dc08c5a3e0be87f4643525bd554b4aabe96a718c8d43
 
 build:
   number: 0
