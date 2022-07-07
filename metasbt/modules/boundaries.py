@@ -250,7 +250,7 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, flat_structure: bool=Fals
             for level_dir in Path(target_dir).glob("**/{}__*".format(level[0])):
                 if os.path.isdir(str(level_dir)):
                     # Define boundaries for the current taxonomic level
-                    define_boundaries(str(level_dir), level, tmp_dir, output, manifest["kmer_len"], manifest["filter_size"]
+                    define_boundaries(str(level_dir), level, tmp_dir, output, manifest["kmer_len"], manifest["filter_size"],
                                       min_genomes=min_genomes, nproc=nproc)
         
         if kingdom:
