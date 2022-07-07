@@ -23,7 +23,7 @@ requirements:
     - setuptools
   run:
     - checkm-genome >=1.2.0
-    - howdesbt >=2.00.02
+    - howdesbt >=2.00.07
     - kmtricks >=1.2.1
     - ncbi-genome-download >=0.3.1
     - ncbitax2lin >=2.3.2
