@@ -6,7 +6,7 @@ In case of input genomes, results on single sequences are merged together
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 5, 2022"
+__date__ = "Jul 14, 2022"
 
 import sys, os, time, errno
 import argparse as ap
@@ -17,7 +17,7 @@ from logging import Logger
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import init_logger, it_exists, number, println, run
+    from utils import init_logger, number, println, run
 except:
     pass
 
@@ -169,7 +169,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     closest_genome_total_kmers = 0
     closest_genome_score = 0.0
 
-    while it_exists(tree, path_type="file"):
+    while os.path.isfile(tree):
         printline("Querying {}".format(tree))
 
         # Retrieve the taxonomic level name from the tree file path
@@ -189,7 +189,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
             run(["howdesbt", "query", "--sort", "--tree={}".format(tree), "--threshold={}".format(threshold), input_file],
                 stdout=file, stderr=file)
 
-        if it_exists(output_file, path_type="file"):
+        if os.path.isfile(output_file):
             # Take track of common and total kmers
             matches_kmers = dict()
             
@@ -253,7 +253,7 @@ def profile_genome(input_file: str, input_id: str, tree: str, threshold: float=0
     # Define the output profile path
     output_profile = os.path.join(output_dir, "{}__profiles.tsv".format(output_prefix))
     
-    if not it_exists(output_profile, path_type="file"):
+    if not os.path.isfile(output_profile):
         # Write the header lines in case the output profile does not exist
         with open(output_profile, "w+") as output:
             output.write("# Tree: {}\n".format(tree))
@@ -315,10 +315,10 @@ def main() -> None:
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the input files and folders exist on the file system
-    if not it_exists(args.input_file, path_type="file"):
+    if not os.path.isfile(args.input_file):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input_file)
     
-    if not it_exists(args.tree, path_type="file"):
+    if not os.path.isfile(args.tree):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.tree)
     
     # Create the output folder

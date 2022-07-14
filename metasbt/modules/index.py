@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 6, 2022"
+__date__ = "Jul 14, 2022"
 
 import sys, os, time, tarfile, gzip, re, shutil, numpy, tqdm, hashlib, math
 import argparse as ap
@@ -20,7 +20,7 @@ from typing import List, Tuple
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import checkm, download, filter_checkm_tables, filter_genomes, howdesbt, init_logger, it_exists, kmtricks_matrix, number, println, run
+    from utils import checkm, download, filter_checkm_tables, filter_genomes, howdesbt, init_logger, kmtricks_matrix, number, println, run
 except:
     pass
 
@@ -216,7 +216,7 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     taxdump = download(taxdump_url, folder_path)
     
     # Raise an exception in case the taxdump.tar.gz file does not exist
-    if not it_exists(taxdump, path_type="file"):
+    if not os.path.isfile(taxdump):
         raise Exception("Unable to retrieve data from remote location\n{}".format(taxdump_url))
 
     # Create the taxdump folder in the temporary directory
@@ -370,7 +370,7 @@ def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
         silence=True)
 
     # Raise an exception in case the ncbi_lineages.csv.gz file does not exist
-    if not it_exists(ncbitax2lin_table, path_type="file"):
+    if not os.path.isfile(ncbitax2lin_table):
         raise Exception("An error has occurred while running ncbitax2lin")
     
     return ncbitax2lin_table
@@ -503,7 +503,7 @@ def organize_data(genomes: list, db_dir: str, tax_label: str, tax_id: str, metad
     
     # Move the metadata table to the taxonomy folder
     if metadata:
-        if it_exists(metadata, path_type="file"):
+        if os.path.isfile(metadata):
             shutil.move(metadata, tax_dir)
     
     if checkm_tables:
@@ -825,21 +825,21 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         # Recover already processed nodes.dmp and names.dmp
         nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
         names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
-        if not it_exists(nodes_dmp, path_type="file") or not it_exists(names_dmp, path_type="file"):
+        if not os.path.isfile(nodes_dmp) or not os.path.isfile(names_dmp):
             nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
 
         # Run ncbitax2lin to extract lineages
         printline("Exporting lineages")
         ncbitax2lin_table = os.path.join(tmp_dir, "ncbi_lineages.csv.gz")
-        if not it_exists(ncbitax2lin_table, path_type="file"):
+        if not os.path.isfile(ncbitax2lin_table):
             ncbitax2lin_table = ncbitax2lin(nodes_dmp, names_dmp, tmp_dir)
 
         # Build a mapping between tax IDs and full taxonomic labels
         # Take track of the taxonomic labels to remove duplicates
         # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
         printline("Building species tax ID to full taxonomy mapping")
-        dump_exists = it_exists(os.path.join(tmp_dir, "taxa.tsv"), path_type="file")
-        tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") if not dump_exists else None)
+        tax_ids, tax_labels = load_taxa(ncbitax2lin_table, kingdom=kingdom, dump=os.path.join(tmp_dir, "taxa.tsv") 
+                                            if not os.path.isfile(os.path.join(tmp_dir, "taxa.tsv")) else None)
 
         # Build a partial function around process_tax_id
         process_partial = partial(process_tax_id, kingdom=kingdom, db_dir=db_dir, tmp_dir=tmp_dir, kmer_len=kmer_len, limit_genomes=limit_genomes, 
@@ -884,7 +884,7 @@ def index(db_dir: str, input_list: str, kingdom: str, tmp_dir: str, kmer_len: in
         genomes_counter = 0
         with open(os.path.join(tmp_dir, "genomes.txt"), "w+") as genomesfile:
             for path in genomes_paths:
-                if it_exists(path, path_type="file"):
+                if os.path.isfile(path):
                     genomesfile.write("{}\n".format(path))
                     genomes_counter += 1
         
@@ -974,7 +974,7 @@ def main() -> None:
 
     if args.kingdom:
         # Check whether the database folder exists
-        if it_exists(os.path.join(args.db_dir, "k__{}".format(args.kingdom)), path_type="folder"):
+        if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(args.kingdom))):
             raise Exception(("An indexed version of the {} kingdom already exists in the database!\n"
                              "Please use the update module to add new genomes").format(args.kingdom))
     
@@ -1011,7 +1011,7 @@ def main() -> None:
 
     # Define the database manifest file
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt")
-    if it_exists(manifest_filepath, path_type="file"):
+    if os.path.isfile(manifest_filepath):
         # Load and compare kmer-len and filter-size
         with open(manifest_filepath) as manifest:
             for line in manifest:

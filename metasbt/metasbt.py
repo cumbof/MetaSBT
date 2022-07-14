@@ -2,7 +2,7 @@
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 6, 2022"
+__date__ = "Jul 14, 2022"
 
 import sys
 
@@ -91,7 +91,7 @@ def get_modules(dirpath: str) -> List[str]:
     Return the list of modules under the specified directory
     """
 
-    if not os.path.exists(dirpath):
+    if not os.path.isdir(dirpath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), dirpath)
 
     modules_list = list()
@@ -170,7 +170,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, 
                      "Please, follow the instructions on the official HowDeSBT repository on GitHub to compile the software with its alternative version of the Makefile"), 
                     verbose=verbose)
 
-    if not os.path.exists(REQUIREMENTS):
+    if not os.path.isfile(REQUIREMENTS):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), REQUIREMENTS)
 
     if verbose:

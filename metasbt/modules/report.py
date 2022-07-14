@@ -5,19 +5,11 @@ Create the report table for a specific database
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jun 28, 2022"
+__date__ = "Jul 14, 2022"
 
 import sys, os, time, errno
 import argparse as ap
 from pathlib import Path
-
-# Local modules are not available when the main controller
-# tries to load them for accessing their variables
-try:
-    # Load utility functions
-    from utils import it_exists
-except:
-    pass
 
 # Define the module name
 TOOL_ID = "report"
@@ -96,7 +88,7 @@ def report(db_dir: str, output_file: str) -> None:
                 references_list = list()
 
                 # In case the mags.txt file exists in the current species folder
-                if it_exists(os.path.join(str(species_dir), "mags.txt"), path_type="file"):
+                if os.path.isfile(os.path.join(str(species_dir), "mags.txt")):
                     with open(os.path.join(str(species_dir), "mags.txt")) as file:
                         for line in file:
                             line = line.strip()
@@ -104,7 +96,7 @@ def report(db_dir: str, output_file: str) -> None:
                                 mags_list.append(line)
                 
                 # Do the same with the genomes.txt file
-                if it_exists(os.path.join(str(species_dir), "references.txt"), path_type="file"):
+                if os.path.isfile(os.path.join(str(species_dir), "references.txt")):
                     with open(os.path.join(str(species_dir), "references.txt")) as file:
                         for line in file:
                             line = line.strip()
@@ -116,7 +108,7 @@ def report(db_dir: str, output_file: str) -> None:
                 qc_stats = dict()
 
                 # Also load the CheckM table
-                if it_exists(os.path.join(str(species_dir), "checkm.tsv"), path_type="file"):
+                if os.path.isfile(os.path.join(str(species_dir), "checkm.tsv")):
                     with open(os.path.join(str(species_dir), "checkm.tsv")) as file:
                         for line in file:
                             line = line.strip()
@@ -170,14 +162,14 @@ def main() -> None:
     args = read_params()
 
     # Check whether the input database folder path exists
-    if not it_exists(args.db_dir, path_type="folder"):
+    if not os.path.isdir(args.db_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
     
     # Check whether the output file and folder exist
     output_folder = os.path.dirname(args.output_file)
-    if it_exists(args.output_file, path_type="file"):
+    if os.path.isfile(args.output_file):
         raise Exception("The output file already exists")
-    if not it_exists(output_folder, path_type="folder"):
+    if not os.path.isdir(output_folder):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
 
     report(args.db_dir, args.output_file)

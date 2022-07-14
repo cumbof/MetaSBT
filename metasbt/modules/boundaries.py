@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 __version__ = "0.1.0"
-__date__ = "Jul 6, 2022"
+__date__ = "Jul 14, 2022"
 
 import sys, os, time, errno, shutil
 import argparse as ap
@@ -17,7 +17,7 @@ from logging import Logger
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import get_boundaries, init_logger, it_exists, load_manifest, kmtricks_matrix, number, println
+    from utils import get_boundaries, init_logger, load_manifest, kmtricks_matrix, number, println
 except:
     pass
 
@@ -220,7 +220,7 @@ def boundaries(db_dir: str, tmp_dir: str, output: str, flat_structure: bool=Fals
     
     # Check whether the manifest file exists
     manifest_filepath = os.path.join(db_dir, "manifest.txt")
-    if not it_exists(manifest_filepath, path_type="file"):
+    if not os.path.isfile(manifest_filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
     
     # Load the manifest file
@@ -270,11 +270,11 @@ def main() -> None:
 
     # Check whether the database folder exists
     target_dir = args.db_dir if not args.kingdom else os.path.join(args.db_dir, "k__{}".format(args.kingdom))
-    if not it_exists(target_dir, path_type="folder"):
+    if not os.path.isdir(target_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
     
     # Check whether the output boundaries table alrady exists
-    if it_exists(args.output, path_type="file"):
+    if os.path.isfile(args.output):
         raise Exception("The output boundaries table already exists")
 
     # Also create the temporary folder
