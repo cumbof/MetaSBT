@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+A scalable framework for automatically indexing microbial genomes and accurately
+characterizing metagenome-assembled genomes with Sequence Bloom Trees
+"""
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
