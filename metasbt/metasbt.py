@@ -2,7 +2,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Jul 25, 2022"
 
 import argparse as ap
 import errno
@@ -188,7 +188,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
     for dependency in dependencies:
         available = "OK" if which(dependency) is not None else "--"
         println("\t[{}] {}".format(available, dependency), verbose=verbose)
-        if dependency == "howdesbt":
+        if dependency == "howdesbt" and available == "OK":
             howdesbt = True
         if stop_unavailable and available == "--":
             raise Exception(
