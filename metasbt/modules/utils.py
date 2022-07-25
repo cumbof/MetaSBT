@@ -1,6 +1,6 @@
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Jul 25, 2022"
 
 import argparse as ap
 import errno
@@ -1132,7 +1132,7 @@ def run(
             # to those specified in input
             subprocess.check_call(cmdline, stdout=stdout, stderr=stderr)
 
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             # Define the error message
             error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(
                 " ".join(cmdline)
@@ -1145,7 +1145,7 @@ def run(
                     "We would be happy to answer your questions and help you troubleshoot any kind of issue with our framework.\n"
                 )
 
-            raise Exception(error_message)
+            raise Exception(error_message).with_traceback(e.__traceback__)
 
     else:
         # There is nothing to run
