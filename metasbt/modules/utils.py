@@ -1,3 +1,7 @@
+"""
+Utility functions
+"""
+
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
 __date__ = "Jul 25, 2022"
