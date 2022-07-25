@@ -26,10 +26,20 @@ import tqdm  # type: ignore
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import (checkm, cluster, filter_checkm_tables,  # type: ignore
-                       filter_genomes, get_level_boundaries, howdesbt,
-                       init_logger, kmtricks_matrix, load_manifest, number,
-                       println, run)
+    from utils import (  # type: ignore  # isort: skip
+        checkm,
+        cluster,
+        filter_checkm_tables,
+        filter_genomes,
+        get_level_boundaries,
+        howdesbt,
+        init_logger,
+        kmtricks_matrix,
+        load_manifest,
+        number,
+        println,
+        run,
+    )
 except Exception:
     pass
 
@@ -181,9 +191,7 @@ def read_params():
         default="MSBT",
         help="Prefix label of the newly defined clusters",
     )
-    p.add_argument(
-        "--verbose", action="store_true", default=False, help="Print results on screen"
-    )
+    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
         "-v",
         "--version",
@@ -194,10 +202,7 @@ def read_params():
     return p.parse_args()
 
 
-def load_taxa(
-    taxa_filepath: Optional[str] = None,
-    genomes_path: Optional[List[str]] = None
-) -> Dict[str, str]:
+def load_taxa(taxa_filepath: Optional[str] = None, genomes_path: Optional[List[str]] = None) -> Dict[str, str]:
     """
     Load the taxa file with the mapping between the input genome names and their taxonomic labels
 
@@ -485,7 +490,11 @@ def profile_and_assign(
                         if taxalabel != closest_taxa:
                             # If the taxonomic labels of the current reference genome and that one of the closest genomedo not match
                             # Report the inconsistency
-                            printline("Inconsistency found:\nInput genome: {}\nClosest lineage: {}".format(taxalabel, closest_taxa))
+                            printline(
+                                "Inconsistency found:\nInput genome: {}\nClosest lineage: {}".format(
+                                    taxalabel, closest_taxa
+                                )
+                            )
 
                         # Assign the current genome to the closest lineage
                         target_genome = os.path.join(
@@ -623,7 +632,9 @@ def update(
             raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
 
     except Exception as e:
-        raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(e.__traceback__)
+        raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
+            e.__traceback__
+        )
 
     # Load the list of genome paths
     input_genomes_paths = [path.strip() for path in open(input_list).readlines() if path.strip()]
@@ -792,18 +803,14 @@ def update(
         verbose=verbose if parallel == 1 else False,
     )
 
-    # Initialise the progress bar
-    pbar = tqdm.tqdm(total=len(genomes_paths), disable=(not verbose or parallel == 1))
-
-    with mp.Pool(processes=parallel) as pool:
-        def update_bar(*args):
-            # Update the progress bar
-            pbar.update()
-            return
-
+    with mp.Pool(processes=parallel) as pool, tqdm.tqdm(
+        total=len(genomes_paths), disable=(not verbose or parallel == 1)
+    ) as pbar:
         # Process the input genome files
-        jobs = [pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=update_bar)
-                for genome_path in genomes_paths]
+        jobs = [
+            pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=pbar.update)
+            for genome_path in genomes_paths
+        ]
 
         # Get results from jobs
         for job in jobs:
@@ -902,9 +909,7 @@ def update(
                             shutil.move(str(file_path), new_levels_subpath)
 
                     # Remove the old bloom filter root node
-                    bloom_filter_node = os.path.join(
-                        new_levels_subpath, "{}.bf".format(unknown_levels[i])
-                    )
+                    bloom_filter_node = os.path.join(new_levels_subpath, "{}.bf".format(unknown_levels[i]))
                     if os.path.isfile(bloom_filter_node):
                         os.unlink(bloom_filter_node)
 

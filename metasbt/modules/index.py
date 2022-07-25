@@ -30,9 +30,18 @@ import tqdm  # type: ignore
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import (checkm, download, filter_checkm_tables,  # type: ignore
-                       filter_genomes, howdesbt, init_logger, kmtricks_matrix,
-                       number, println, run)
+    from utils import (  # type: ignore  # isort: skip
+        checkm,
+        download,
+        filter_checkm_tables,
+        filter_genomes,
+        howdesbt,
+        init_logger,
+        kmtricks_matrix,
+        number,
+        println,
+        run,
+    )
 except Exception:
     pass
 
@@ -231,9 +240,7 @@ def read_params():
         dest="tmp_dir",
         help="Path to the folder for storing temporary data",
     )
-    p.add_argument(
-        "--verbose", action="store_true", default=False, help="Print results on screen"
-    )
+    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
         "-v",
         "--version",
@@ -244,11 +251,7 @@ def read_params():
     return p.parse_args()
 
 
-def count_genomes(
-    tax_id: str,
-    kingdom: str,
-    out_dir: str
-) -> int:
+def count_genomes(tax_id: str, kingdom: str, out_dir: str) -> int:
     """
     Count the number of genomes classified as the provided NCBI tax ID
 
@@ -295,10 +298,7 @@ def count_genomes(
     return genomes_counter
 
 
-def download_taxdump(
-    taxdump_url: str,
-    folder_path: str
-) -> Tuple[str, str]:
+def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     """
     Download and extract the NCBI taxdump tarball
 
@@ -324,13 +324,7 @@ def download_taxdump(
     return os.path.join(taxdump_dir, "nodes.dmp"), os.path.join(taxdump_dir, "names.dmp")
 
 
-def estimate_bf_size(
-    genomes_filepath: str,
-    kmer_len: int,
-    prefix: str,
-    tmp_dir: str,
-    nproc: int = 1
-) -> int:
+def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
     """
     Estimate the bloom filter size with ntCard
 
@@ -377,10 +371,7 @@ def estimate_bf_size(
     return F0 - f1
 
 
-def level_name(
-    current_level: str,
-    prev_level: str
-) -> str:
+def level_name(current_level: str, prev_level: str) -> str:
     """
     Define a taxonomic level name
 
@@ -404,11 +395,7 @@ def level_name(
     return "{}{}".format(level_prefix, level_suffix)
 
 
-def load_taxa(
-    ncbitax2lin_table: str,
-    kingdom: Optional[str] = None,
-    dump: Optional[str] = None
-) -> Tuple[list, list]:
+def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optional[str] = None) -> Tuple[list, list]:
     """
     Load the ncbitax2lin output table
 
@@ -469,11 +456,7 @@ def load_taxa(
     return tax_ids, tax_labels
 
 
-def ncbitax2lin(
-    nodes: str,
-    names: str,
-    out_dir: str
-) -> str:
+def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
     """
     Extract lineages from the NCBI taxdump
 
@@ -544,10 +527,7 @@ def quality_control(
     genome_ids = filter_checkm_tables(checkm_tables, completeness=completeness, contamination=contamination)
 
     # Rebuild the genome file paths
-    genome_paths = [
-        os.path.join(tmp_dir, "genomes", tax_id, "{}.fna.gz".format(genome_id))
-        for genome_id in genome_ids
-    ]
+    genome_paths = [os.path.join(tmp_dir, "genomes", tax_id, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids]
 
     return genome_paths, checkm_tables
 
@@ -655,15 +635,11 @@ def organize_data(
 
     # In case at least one genome survived both the quality control and dereplication steps
     # Define the taxonomy folder in database
-    tax_dir = (
-        os.path.join(db_dir, tax_label.replace("|", os.sep))
-        if not flat_structure
-        else db_dir
-    )
+    tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
     genomes_dir = os.path.join(tax_dir, "genomes")
     os.makedirs(genomes_dir, exist_ok=True)
 
-    references_path = ("references.txt" if not flat_structure else "genomes_{}.txt".format(tax_id))
+    references_path = "references.txt" if not flat_structure else "genomes_{}.txt".format(tax_id)
     with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
         # Move the processed genomes to the taxonomy folder
         for genome_path in genomes:
@@ -685,7 +661,7 @@ def organize_data(
 
     if checkm_tables:
         # Also merge the CheckM output tables and move the result to the taxonomy folder
-        checkm_path = ("checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id))
+        checkm_path = "checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id)
         with open(os.path.join(tax_dir, checkm_path), "w+") as table:
             header = True
             for table_path in checkm_tables:
@@ -792,11 +768,15 @@ def process_input_genomes(
             kmer_len,
             filter_size=None,
             nproc=nproc,
-            similarity=similarity
+            similarity=similarity,
         )
 
         if before_dereplication > len(genomes) and verbose:
-            printline("Dereplication: excluding {}/{} genomes".format(before_dereplication - len(genomes), before_dereplication))
+            printline(
+                "Dereplication: excluding {}/{} genomes".format(
+                    before_dereplication - len(genomes), before_dereplication
+                )
+            )
 
     # Check whether no genomes survived the quality control and the dereplication steps
     if not genomes:
@@ -884,7 +864,9 @@ def process_tax_id(
         # Check whether the number of genomes falls in the --min-genomes --max-genomes interval
         if genomes_counter < min_genomes or genomes_counter > max_genomes:
             if verbose:
-                printline("WARNING: the number of genomes does not respect the minimum and maximum number of genomes allowed")
+                printline(
+                    "WARNING: the number of genomes does not respect the minimum and maximum number of genomes allowed"
+                )
             return list()
 
         # Check whether the number of genomes is greater than the number provided with --limit-genomes
@@ -939,7 +921,11 @@ def process_tax_id(
             )
 
             if before_dereplication > len(genomes) and verbose:
-                printline("Dereplication: excluding {}/{} genomes".format(before_dereplication - len(genomes), before_dereplication))
+                printline(
+                    "Dereplication: excluding {}/{} genomes".format(
+                        before_dereplication - len(genomes), before_dereplication
+                    )
+                )
 
         # Check whether no genomes survived the quality control and the dereplication steps
         if not genomes:
@@ -1105,7 +1091,11 @@ def index(
                             tax_split = line_split[1].split("|")
                             if len(tax_split) != 7:
                                 # Taxonomic labels must have 7 levels
-                                raise Exception("Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(line_split[1]))
+                                raise Exception(
+                                    "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
+                                        line_split[1]
+                                    )
+                                )
                             taxonomy = line_split[1]
 
                         genome_path = line_split[0]
@@ -1166,9 +1156,7 @@ def index(
         tax_ids, tax_labels = load_taxa(
             ncbitax2lin_table,
             kingdom=kingdom,
-            dump=os.path.join(tmp_dir, "taxa.tsv")
-            if not os.path.isfile(os.path.join(tmp_dir, "taxa.tsv"))
-            else None,
+            dump=os.path.join(tmp_dir, "taxa.tsv") if not os.path.isfile(os.path.join(tmp_dir, "taxa.tsv")) else None,
         )
 
         # Build a partial function around process_tax_id
@@ -1204,14 +1192,22 @@ def index(
         if input_list:
             # Process input genomes
             jobs = [
-                pool.apply_async(process_partial, args=(taxonomy2genomes[taxonomy], taxonomy), callback=pbar.update)
+                pool.apply_async(
+                    process_partial,
+                    args=(taxonomy2genomes[taxonomy], taxonomy),
+                    callback=pbar.update,
+                )
                 for taxonomy in taxonomy2genomes
             ]
 
         else:
             # Process the NCBI tax IDs
             jobs = [
-                pool.apply_async(process_partial, args=(tax_id, tax_labels[pos]), callback=pbar.update)
+                pool.apply_async(
+                    process_partial,
+                    args=(tax_id, tax_labels[pos]),
+                    callback=pbar.update,
+                )
                 for pos, tax_id in enumerate(tax_ids)
             ]
 
@@ -1331,9 +1327,10 @@ def main() -> None:
         # Check whether the database folder exists
         if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(args.kingdom))):
             raise Exception(
-                ("An indexed version of the {} kingdom already exists in the database!\n"
-                 "Please use the update module to add new genomes")
-                .format(args.kingdom)
+                (
+                    "An indexed version of the {} kingdom already exists in the database!\n"
+                    "Please use the update module to add new genomes"
+                ).format(args.kingdom)
             )
 
     # Create the database folder
@@ -1345,8 +1342,10 @@ def main() -> None:
     else:
         if not args.estimate_filter_size:
             raise Exception(
-                ("Please specify a bloom filter size with the --filter-size option or "
-                 "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard")
+                (
+                    "Please specify a bloom filter size with the --filter-size option or "
+                    "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard"
+                )
             )
 
     kingdoms = list()
@@ -1355,14 +1354,18 @@ def main() -> None:
         # Build as many manifest file as the number of kingdoms in the input list of taxonomic labels
         try:
             kingdoms = list(
-                set([
-                    line.strip().split("\t")[1].split("|")[0].split("__")[-1]
-                    for line in open(args.input_list).readlines()
-                    if line.strip()
-                ])
+                set(
+                    [
+                        line.strip().split("\t")[1].split("|")[0].split("__")[-1]
+                        for line in open(args.input_list).readlines()
+                        if line.strip()
+                    ]
+                )
             )
         except Exception as e:
-            raise Exception("Input file is not correctly formatted: {}".format(args.input_list)).with_traceback(e.__traceback__)
+            raise Exception("Input file is not correctly formatted: {}".format(args.input_list)).with_traceback(
+                e.__traceback__
+            )
 
     # We can process a single kingdom per run
     if len(kingdoms) > 1:

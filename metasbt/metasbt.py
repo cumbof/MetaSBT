@@ -174,11 +174,7 @@ def print_modules() -> None:
         println("\t{}".format(module_id))
 
 
-def resolve_dependencies(
-    dependencies: List[str],
-    stop_unavailable: bool = False,
-    verbose: bool = True
-) -> None:
+def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False, verbose: bool = True) -> None:
     """
     Check whether all the external software dependencies and Python requirements are available
     """
@@ -196,9 +192,10 @@ def resolve_dependencies(
             howdesbt = True
         if stop_unavailable and available == "--":
             raise Exception(
-                ("The external software dependency \"{}\" is not available on this system.\n"
-                 "Please run \"{} --resolve-dependencies\" to verify the availability of all the required dependencies")
-                .format(dependency, TOOL_ID.lower())
+                (
+                    'The external software dependency "{}" is not available on this system.\n'
+                    'Please run "{} --resolve-dependencies" to verify the availability of all the required dependencies'
+                ).format(dependency, TOOL_ID.lower())
             )
 
     if howdesbt:
@@ -211,10 +208,12 @@ def resolve_dependencies(
             )
         except Exception:
             println(
-                ("\n[WARNING] The HowDeSBT version installed on your system does not provide "
-                 "advanced commands required for indexing and updating a database!\n"
-                 "Please, follow the instructions on the official HowDeSBT repository on GitHub "
-                 "to compile the software with its alternative version of the Makefile"),
+                (
+                    "\n[WARNING] The HowDeSBT version installed on your system does not provide "
+                    "advanced commands required for indexing and updating a database!\n"
+                    "Please, follow the instructions on the official HowDeSBT repository on GitHub "
+                    "to compile the software with its alternative version of the Makefile"
+                ),
                 verbose=verbose,
             )
 
@@ -241,7 +240,9 @@ def resolve_dependencies(
                     ]
                 )
             except Exception as e:
-                raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS)).with_traceback(e.__traceback__)
+                raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS)).with_traceback(
+                    e.__traceback__
+                )
 
 
 def main() -> None:
@@ -322,14 +323,10 @@ def main() -> None:
                     ]
 
                     # Import the external module
-                    module = importlib.import_module(
-                        "metasbt.modules.{}".format(unknown_arg)
-                    )
+                    module = importlib.import_module("metasbt.modules.{}".format(unknown_arg))
 
                     # Resolve external software dependencies
-                    resolve_dependencies(
-                        module.DEPENDENCIES, stop_unavailable=True, verbose=False
-                    )
+                    resolve_dependencies(module.DEPENDENCIES, stop_unavailable=True, verbose=False)
 
                     # Fix paths to the input files and folders
                     for pos in range(len(unknown)):
@@ -357,7 +354,9 @@ def main() -> None:
                 # Print citations and credits
                 println("Thanks for using {}!\n".format(TOOL_ID))
                 print_citations()
-                println("Remember to star the MetaSBT repository on GitHub to stay updated on its development and new features:")
+                println(
+                    "Remember to star the MetaSBT repository on GitHub to stay updated on its development and new features:"
+                )
                 println("https://github.com/cumbof/{}\n".format(TOOL_ID))
             else:
                 raise Exception("Unrecognised module")

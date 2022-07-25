@@ -121,9 +121,7 @@ def read_params():
         required=True,
         help="This is the tree definition file",
     )
-    p.add_argument(
-        "--verbose", action="store_true", default=False, help="Print results on screen"
-    )
+    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
         "-v",
         "--version",

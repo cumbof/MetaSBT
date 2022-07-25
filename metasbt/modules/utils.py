@@ -229,11 +229,7 @@ def cluster(
 
                 for level in sorted(level2score.keys(), key=lambda l: levels.index(l[0])):
                     # Compose the whole taxonomic label up to the current level
-                    taxonomy = (
-                        "{}|{}".format("|".join(assignment), level)
-                        if assignment
-                        else level
-                    )
+                    taxonomy = "{}|{}".format("|".join(assignment), level) if assignment else level
 
                     # Retrieve the boundaries for the current taxonomy
                     if taxonomy in boundaries:
@@ -260,7 +256,8 @@ def cluster(
                                 all_maxk: List[int] = list()
                                 for tax in boundaries:
                                     # In case the current taxonomy in boundaries contain the specific taxonomic level
-                                    if (higher_tax in tax and "|{}__".format(taxonomy.split("|")[-1][0]) in tax):
+                                    tax_level = "|{}__".format(taxonomy.split("|")[-1][0])
+                                    if higher_tax in tax and tax_level in tax:
                                         # Keep track of the boundaries for computing the avarage values
                                         all_mink.append(boundaries[tax]["min"])
                                         all_maxk.append(boundaries[tax]["max"])
@@ -318,7 +315,7 @@ def cluster(
                         common = sum([1 for pos, _ in enumerate(row) if row[pos] > 0 and row2[pos] > 0])
 
                         # In case this number falls into the [last_known_level_mink, last_known_level_maxk] interval
-                        if (common <= last_known_level_maxk and common >= last_known_level_mink):
+                        if common <= last_known_level_maxk and common >= last_known_level_mink:
                             # Set the second genome as assigned
                             assigned_genomes.append(genomes[i2])
                             # Also assign these genomes to the same taxonomy assigned to the current genome
@@ -359,10 +356,7 @@ def cluster(
     return outpath
 
 
-def download(
-    url: str,
-    folder: str
-) -> str:
+def download(url: str, folder: str) -> str:
     """
     Download a file from URL to the specified folder
 
@@ -386,9 +380,7 @@ def download(
 
 
 def filter_checkm_tables(
-    checkm_tables: List[str],
-    completeness: float = 0.0,
-    contamination: float = 100.0
+    checkm_tables: List[str], completeness: float = 0.0, contamination: float = 100.0
 ) -> List[str]:
     """
     Filter genomes according to completeness and contamination criteria
@@ -415,7 +407,7 @@ def filter_checkm_tables(
                             line_split = line.split("\t")
 
                             # Check whether the current genome respect both the completeness and contamination criteria
-                            if (float(line_split[-3]) >= completeness and float(line_split[-2]) <= contamination):
+                            if float(line_split[-3]) >= completeness and float(line_split[-2]) <= contamination:
                                 genomes.append(line_split[0])
 
                         line_count += 1
@@ -423,11 +415,7 @@ def filter_checkm_tables(
     return genomes
 
 
-def filter_genomes(
-    kmer_matrix_filepath: str,
-    outpath: str,
-    similarity: float = 100.0
-) -> None:
+def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float = 100.0) -> None:
     """
     Filter genomes according to their set of kmers.
     Discard a genome if there is at least one other genome with a specific percentage of kmers in common
@@ -485,9 +473,7 @@ def filter_genomes(
             output.write("{}\n".format(genome))
 
 
-def get_boundaries(
-    kmer_matrix_filepath: str
-) -> Tuple[int, int, int]:
+def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int, int]:
     """
     Return kmers boundaries for current taxonomic level defined as the minimum and
     maximum number of common kmers among all the genomes in the current taxonomic level
@@ -526,10 +512,7 @@ def get_boundaries(
     return kmers, minv, maxv
 
 
-def get_level_boundaries(
-    boundaries_filepath: str,
-    taxonomy: str
-) -> Tuple[int, int]:
+def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, int]:
     """
     Retrieve boundaries for a given taxonomic label
 
@@ -831,11 +814,7 @@ def howdesbt(
         raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
 
 
-def init_logger(
-    filepath: Optional[str] = None,
-    toolid: Optional[str] = None,
-    verbose: bool = True
-) -> Optional[Logger]:
+def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, verbose: bool = True) -> Optional[Logger]:
     """
     Define a logger to print on console, on file, or both
 
@@ -1003,9 +982,7 @@ def kmtricks_matrix(
     kmtricks_log.close()
 
 
-def load_manifest(
-    manifest_filepath: str
-) -> dict:
+def load_manifest(manifest_filepath: str) -> dict:
     """
     Load the manifest file
 
@@ -1031,10 +1008,7 @@ def load_manifest(
     return manifest
 
 
-def load_matrix(
-    kmer_matrix_filepath: str,
-    skiprows: int = 0
-) -> np.ndarray:
+def load_matrix(kmer_matrix_filepath: str, skiprows: int = 0) -> np.ndarray:
     """
     Load a kmtricks kmers matrix into a numpy ndarray with a row for each genome
     and a column for each kmer
@@ -1082,7 +1056,7 @@ def load_matrix(
 def number(
     typev: type,
     minv: Optional[Union[int, float]] = None,
-    maxv: Optional[Union[int, float]] = None
+    maxv: Optional[Union[int, float]] = None,
 ) -> Callable:
     """
     Take full control of input numeric types by defining custom intervals
@@ -1110,11 +1084,7 @@ def number(
     return type_func
 
 
-def println(
-    message: str,
-    logger: Optional[Logger] = None,
-    verbose: bool = True
-) -> None:
+def println(message: str, logger: Optional[Logger] = None, verbose: bool = True) -> None:
     """
     Send messages to the logger
     It will print messages on screen, send messages to the log file, or both
@@ -1164,7 +1134,9 @@ def run(
 
         except subprocess.CalledProcessError:
             # Define the error message
-            error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(" ".join(cmdline))
+            error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(
+                " ".join(cmdline)
+            )
 
             if extended_error:
                 # Extend the error message

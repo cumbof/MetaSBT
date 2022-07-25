@@ -21,8 +21,7 @@ from typing import Dict, List, Optional
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import (get_boundaries, init_logger,  # type: ignore
-                       kmtricks_matrix, load_manifest, number, println)
+    from utils import get_boundaries, init_logger, kmtricks_matrix, load_manifest, number, println  # type: ignore
 except Exception:
     pass
 
@@ -105,9 +104,7 @@ def read_params():
         dest="tmp_dir",
         help="Path to the folder for storing temporary data",
     )
-    p.add_argument(
-        "--verbose", action="store_true", default=False, help="Print results on screen"
-    )
+    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
         "-v",
         "--version",
@@ -371,11 +368,7 @@ def main() -> None:
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the database folder exists
-    target_dir = (
-        args.db_dir
-        if not args.kingdom
-        else os.path.join(args.db_dir, "k__{}".format(args.kingdom))
-    )
+    target_dir = args.db_dir if not args.kingdom else os.path.join(args.db_dir, "k__{}".format(args.kingdom))
     if not os.path.isdir(target_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
 
