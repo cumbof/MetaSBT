@@ -3,25 +3,28 @@
 Create the report table for a specific database
 """
 
-__author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
+__author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 14, 2022"
+__date__ = "Jul 24, 2022"
 
-import sys, os, time, errno
 import argparse as ap
+import errno
+import os
 from pathlib import Path
+from typing import List
 
 # Define the module name
 TOOL_ID = "report"
 
 # Define the list of dependencies
-DEPENDENCIES = list()
+DEPENDENCIES: List[str] = list()
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
-    "--db-dir",      # Database folder path
-    "--output-file"  # Output file path
+    "--db-dir",  # Database folder path
+    "--output-file",  # Output file path
 ]
+
 
 def read_params():
     """
@@ -29,28 +32,40 @@ def read_params():
 
     :return:    The ArgumentParser object
     """
-    
-    p = ap.ArgumentParser(prog=TOOL_ID,
-                          description="Build the database report table",
-                          formatter_class=ap.ArgumentDefaultsHelpFormatter)
-    p.add_argument( "--db-dir",
-                    type = os.path.abspath,
-                    required = True,
-                    dest = "db_dir",
-                    help = "This is the database directory with the taxonomically organised sequence bloom trees" )
-    p.add_argument( "--output-file",
-                    type = os.path.abspath,
-                    required = True,
-                    dest = "output_file",
-                    help = "This is the path to the output table" )
-    p.add_argument( "-v",
-                    "--version",
-                    action = "version",
-                    version = "{} version {} ({})".format(TOOL_ID, __version__, __date__),
-                    help = "Print the current {} version and exit".format(TOOL_ID) )
+
+    p = ap.ArgumentParser(
+        prog=TOOL_ID,
+        description="Build the database report table",
+        formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "--db-dir",
+        type=os.path.abspath,
+        required=True,
+        dest="db_dir",
+        help="This is the database directory with the taxonomically organised sequence bloom trees",
+    )
+    p.add_argument(
+        "--output-file",
+        type=os.path.abspath,
+        required=True,
+        dest="output_file",
+        help="This is the path to the output table",
+    )
+    p.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version="{} version {} ({})".format(TOOL_ID, __version__, __date__),
+        help="Print the current {} version and exit".format(TOOL_ID),
+    )
     return p.parse_args()
 
-def report(db_dir: str, output_file: str) -> None:
+
+def report(
+    db_dir: str,
+    output_file: str
+) -> None:
     """
     Build the database report table
 
@@ -61,13 +76,17 @@ def report(db_dir: str, output_file: str) -> None:
     # Initialise the report table
     with open(output_file, "w+") as output:
         # Write header line
-        output.write("# {}\t{}\t{}\t{}\t{}\t{}\n".format("Lineage",                     # Taxonomic label
-                                                         "MAGs",                        # Number of MAGs
-                                                         "Reference genomes",           # Number of reference genomes
-                                                         "Mean completeness",           # Mean QC completeness
-                                                         "Mean contamination",          # Mean QC contamination
-                                                         "Mean strain heterogeneity"))  # Mean QC strain heterogeneity
-        
+        output.write(
+            "# {}\t{}\t{}\t{}\t{}\t{}\n".format(
+                "Lineage",
+                "MAGs",
+                "Reference genomes",
+                "Mean completeness",
+                "Mean contamination",
+                "Mean strain heterogeneity",
+            )
+        )
+
         # Search for all the species folders
         gen = Path(db_dir).glob("**/s__*")
         for species_dir in gen:
@@ -94,7 +113,7 @@ def report(db_dir: str, output_file: str) -> None:
                             line = line.strip()
                             if line:
                                 mags_list.append(line)
-                
+
                 # Do the same with the genomes.txt file
                 if os.path.isfile(os.path.join(str(species_dir), "references.txt")):
                     with open(os.path.join(str(species_dir), "references.txt")) as file:
@@ -117,7 +136,7 @@ def report(db_dir: str, output_file: str) -> None:
                                 qc_stats[line_split[0]] = {
                                     "completeness": float(line_split[-3]),
                                     "contamination": float(line_split[-2]),
-                                    "strain_heterogeneity": float(line_split[-1])
+                                    "strain_heterogeneity": float(line_split[-1]),
                                 }
 
                 # Take track of the number of MAGs and reference genomes
@@ -130,9 +149,9 @@ def report(db_dir: str, output_file: str) -> None:
 
                 # Check whether the reference genomes exist before counting
                 for ref in references_list:
-                    if os.path.join(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(ref))):
+                    if os.path.isfile(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(ref))):
                         references += 1
-                        
+
                         # Also retrieve its QC stats
                         if ref in qc_stats:
                             completeness.append(qc_stats[ref]["completeness"])
@@ -141,7 +160,7 @@ def report(db_dir: str, output_file: str) -> None:
 
                 # Do the same with the MAGs
                 for mag in mags_list:
-                    if os.path.join(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(mag))):
+                    if os.path.isfile(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(mag))):
                         mags += 1
 
                         # Also retrieve its QC stats
@@ -150,12 +169,17 @@ def report(db_dir: str, output_file: str) -> None:
                             contamination.append(qc_stats[mag]["contamination"])
                             strain_heterogeneity.append(qc_stats[mag]["strain_heterogeneity"])
 
-                output.write("{}\t{}\t{}\t{}\t{}\t{}\n".format(lineage,
-                                                               mags,
-                                                               references,
-                                                               round(sum(completeness)/len(completeness), 2) if completeness else 0.0,
-                                                               round(sum(contamination)/len(contamination), 2) if contamination else 0.0,
-                                                               round(sum(strain_heterogeneity)/len(strain_heterogeneity), 2) if strain_heterogeneity else 0.0))
+                output.write(
+                    "{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                        lineage,
+                        mags,
+                        references,
+                        round(sum(completeness) / len(completeness), 2) if completeness else 0.0,
+                        round(sum(contamination) / len(contamination), 2) if contamination else 0.0,
+                        round(sum(strain_heterogeneity) / len(strain_heterogeneity), 2) if strain_heterogeneity else 0.0,
+                    )
+                )
+
 
 def main() -> None:
     # Load command line parameters
@@ -164,7 +188,7 @@ def main() -> None:
     # Check whether the input database folder path exists
     if not os.path.isdir(args.db_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
-    
+
     # Check whether the output file and folder exist
     output_folder = os.path.dirname(args.output_file)
     if os.path.isfile(args.output_file):
@@ -173,6 +197,7 @@ def main() -> None:
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
 
     report(args.db_dir, args.output_file)
+
 
 if __name__ == "__main__":
     main()
