@@ -232,7 +232,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
         if input("\tDo You Want To Continue? [Y/n] ") == "Y":
             try:
                 # Check whether the Python requirements are satisfied with pip
-                subprocess.check_call(
+                run(
                     [
                         sys.executable,
                         "-m",
@@ -241,11 +241,13 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
                         "-r",
                         REQUIREMENTS,
                         "--ignore-installed",
-                    ]
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
-            except Exception as e:
+            except Exception as ex:
                 raise Exception("An error has occurred while running pip on {}".format(REQUIREMENTS)).with_traceback(
-                    e.__traceback__
+                    ex.__traceback__
                 )
 
 
@@ -345,8 +347,8 @@ def main() -> None:
                         # Run the specified module
                         run(cmd_line, extended_error=True)
 
-                    except Exception as e:
-                        println(str(e))
+                    except Exception as ex:
+                        println(str(ex))
                         sys.exit(os.EX_SOFTWARE)
 
                     # Mark module as found and exit

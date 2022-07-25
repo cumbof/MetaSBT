@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Jul 25, 2022"
 
 import argparse as ap
 import errno
@@ -631,9 +631,9 @@ def update(
         if kmer_len == 0 or filter_size == 0:
             raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
 
-    except Exception as e:
+    except Exception as ex:
         raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
-            e.__traceback__
+            ex.__traceback__
         )
 
     # Load the list of genome paths

@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Jul 25, 2022"
 
 import argparse as ap
 import gzip
@@ -1362,9 +1362,9 @@ def main() -> None:
                     ]
                 )
             )
-        except Exception as e:
+        except Exception as ex:
             raise Exception("Input file is not correctly formatted: {}".format(args.input_list)).with_traceback(
-                e.__traceback__
+                ex.__traceback__
             )
 
     # We can process a single kingdom per run
