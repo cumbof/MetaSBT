@@ -15,6 +15,8 @@ A scalable framework for automatically indexing microbial genomes and accurately
   - [`profile`: characterizing genomes and metagenome-assembled genomes](https://github.com/cumbof/MetaSBT#3-profile-characterizing-genomes-and-metagenome-assembled-genomes)
   - [`update`: updating the database](https://github.com/cumbof/MetaSBT#4-update-updating-the-database)
   - [`report`: building the database snapshot report](https://github.com/cumbof/MetaSBT#5-report-building-the-database-snapshot-report)
+- [Unlocking unknown species profiling with `kraken2`](https://github.com/cumbof/MetaSBT#unlocking-unknown-species-profiling-with-kraken2)
+- [Integrating `MetaSBT` in `Galaxy`](https://github.com/cumbof/MetaSBT#integrating-metasbt-in-galaxy)
 - [Credits](https://github.com/cumbof/MetaSBT#credits)
 - [Contributing](https://github.com/cumbof/MetaSBT#contributing)
 - [Support](https://github.com/cumbof/MetaSBT#support)
@@ -353,6 +355,14 @@ The output file is a table that will contain the number of MAGs and reference ge
 | `--db-dir`               | ⚑         | Database folder path |
 | `--output-file`          | ⚑         | Path to the output table |
 | `--version`              |           | Print current module version and exit |
+
+## Unlocking unknown species profiling with `kraken2`
+
+TBA
+
+## Integrating `MetaSBT` in `Galaxy`
+
+TBA
 
 ## Credits
 
