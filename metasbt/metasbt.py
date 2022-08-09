@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 25, 2022"
+__date__ = "Aug 8, 2022"
 
 import argparse as ap
 import errno
@@ -253,7 +253,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
 
 def main() -> None:
     # In case no arguments are specified
-    if len(sys.argv) == 1:
+    if len(sys.argv) <= 1:
         # Run the helper
         sys.argv.append("--help")
 
