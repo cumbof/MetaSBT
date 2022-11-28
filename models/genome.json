@@ -1,0 +1,154 @@
+{
+    "definitions": {}, 
+    "$schema": "http://json-schema.org/draft-07/schema#", 
+    "id": "genome.json", 
+    "type": "object", 
+    "title": "Genome object schema", 
+    "description": "JSON schema for validating genomes information", 
+    "readOnly": true, 
+    "writeOnly": false, 
+    "required": [
+        "dataset_id",
+        "sample_id",
+        "genome_id",
+        "genome_type"
+    ],
+    "properties": {
+        "metasbt_id": {
+            "$id": "#/properties/metasbt_id",
+            "type": "string",
+            "title": "The metasbt_id Schema",
+            "description": "MetaSBT Unique Genome Identifier",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9]{9}$"
+        },
+        "dataset_id": {
+            "$id": "#/properties/dataset_id",
+            "type": "string",
+            "title": "The dataset_id Schema",
+            "description": "Dataset ID",
+            "readOnly": true,
+            "writeOnly": false
+        },
+        "sample_id": {
+            "$id": "#/properties/sample_id",
+            "type": "string",
+            "title": "The sample_id Schema",
+            "description": "Sample ID",
+            "default": "none",
+            "readOnly": true,
+            "writeOnly": false
+        },
+        "genome_id": {
+            "$id": "#/properties/genome_id",
+            "type": "string",
+            "title": "The genome_id Schema",
+            "description": "Genome Identification",
+            "readOnly": true,
+            "writeOnly": false
+        },
+        "genome_type": {
+            "$id": "#/properties/genome_type",
+            "type": "string",
+            "title": "The genome_type Schema",
+            "description": "Metagenome-assembled genome or genome from isolate sequencing",
+            "readOnly": true,
+            "writeOnly": false,
+            "enum": [
+                "Reference",
+                "MAG"
+            ]
+        },
+        "sha256": {
+            "$id": "#/properties/sha256",
+            "type": "string",
+            "title": "The sha256 Schema",
+            "description": "File SHA-256 hash",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9a-z]{64}$"
+        },
+        "file_path": {
+            "$id": "#/properties/file_path",
+            "type": "string",
+            "title": "The file_path Schema",
+            "description": "Relative genome file path",
+            "default": "none",
+            "readOnly": true,
+            "writeOnly": false
+        },
+        "taxonomy": {
+            "$id": "#/properties/taxonomy",
+            "type": "string",
+            "title": "The taxonomy Schema",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^k__[^|]*[|]{1}p__[^|]*[|]{1}c__[^|]*[|]{1}o__[^|]*[|]{1}f__[^|]*[|]{1}g__[^|]*[|]{1}s__[^|]*$"
+        },
+        "taxonomy_id": {
+            "$id": "#/properties/taxonomy_id",
+            "type": "string",
+            "title": "The taxonomy_id Schema",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*$"
+        },
+        "completeness": {
+            "$id": "#/properties/completeness",
+            "type": "string",
+            "title": "The completeness Schema",
+            "description": "Percentage of completeness computed by CheckM",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+        },
+        "contamination": {
+            "$id": "#/properties/contamination",
+            "type": "string",
+            "title": "The contamination Schema",
+            "description": "Percentage of contamination computed by CheckM",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+        },
+        "strain_heterogeneity": {
+            "$id": "#/properties/strain_heterogeneity",
+            "type": "string",
+            "title": "The strain_heterogeneity Schema",
+            "description": "Percentage of strain heterogeneity computed by CheckM",
+            "readOnly": true,
+            "writeOnly": false,
+            "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+        },
+        "link": {
+            "$id": "#/properties/link",
+            "type": "string",
+            "title": "The link Schema",
+            "default": "",
+            "readOnly": true,
+            "writeOnly": false
+        },
+        "tags": {
+            "$id": "#/properties/tags",
+            "type": [
+                "string", 
+                "array"
+            ],
+            "title": "The tags Schema",
+            "description": "Optional tags for the file object",
+            "readOnly": true,
+            "writeOnly": false,
+            "uniqueItems": true,
+            "items": {
+                "$id": "#/properties/tags/items",
+                "type": "string",
+                "title": "The Tag Items Schema",
+                "default": "none",
+                "readOnly": true, 
+                "writeOnly": false, 
+                "pattern": "^(.*)$"
+            }
+        }
+    }
+}
