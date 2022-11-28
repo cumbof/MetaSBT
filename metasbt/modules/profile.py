@@ -126,8 +126,8 @@ def read_params():
         "-v",
         "--version",
         action="version",
-        version="{} version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current {} version and exit".format(TOOL_ID),
+        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
+        help="Print the current \"{}\" version and exit".format(TOOL_ID),
     )
     return p.parse_args()
 
