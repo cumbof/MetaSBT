@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Aug 8, 2022"
+__date__ = "Nov 28, 2022"
 
 import argparse as ap
 import errno
@@ -27,7 +27,7 @@ TOOL_ID = "MetaSBT"
 
 # Control current Python version
 # It requires Python 3 or higher
-if sys.version_info[0] < 3:
+if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
     raise Exception(
         "{} requires Python 3, your current Python version is {}.{}.{}".format(
             TOOL_ID, sys.version_info[0], sys.version_info[1], sys.version_info[2]
