@@ -419,7 +419,7 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
 
     with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
         # Load the first line as header and search for "superkingdom" and "kingdom" columns
-        header = ncbi_table.readline()
+        header = ncbi_table.readline().split(",")
         superkingdom_pos = header.index("superkingdom")  # Archaea, Bacteria, Eukaryota, Viruses
         # Eukaryota superkingdom is limited to the Fungi kingdom
         # Limitation is due to the use of ncbi-genome-download tool (look at available "groups")
