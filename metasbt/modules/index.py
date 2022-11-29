@@ -680,6 +680,7 @@ def organize_data(
     # Move the metadata table to the taxonomy folder
     if metadata:
         if os.path.isfile(metadata):
+            # TODO fix path to the genome file under "local_filename" 
             shutil.move(metadata, tax_dir)
 
     if checkm_tables:
@@ -1021,9 +1022,14 @@ def retrieve_genomes(
         group,
     ]
 
-    # Run ncbi-genome-download to retrieve all the complete genomes
-    # related to the current tax ID from NCBI GenBank
-    run(ncbi_genome_download, silence=True)
+    try:
+        # Run ncbi-genome-download to retrieve all the complete genomes
+        # related to the current tax ID from NCBI GenBank
+        run(ncbi_genome_download, silence=True)
+    
+    except:
+        # In case it is unable to process the tax ID
+        return list(), None
 
     # Define the list of paths to the genome files
     genomes = list()
