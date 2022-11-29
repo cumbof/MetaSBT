@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 25, 2022"
+__date__ = "Nov 29, 2022"
 
 import argparse as ap
 import gzip
@@ -462,8 +462,11 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
                         taxa_map[label].append(int(line_split[0]))
 
     # Use a single tax ID for each label
-    tax_labels = [tax_label for tax_label in taxa_map]
-    tax_ids = [str(min(taxa_map[tax_label])) for tax_label in taxa_map]
+    tax_labels = list()
+    tax_ids = list()
+    for tax_label in taxa_map:
+        tax_labels.append(tax_label)
+        tax_ids.append(str(min(taxa_map[tax_label])))
 
     if dump:
         # Dump the tax map to file
@@ -1039,7 +1042,7 @@ def retrieve_genomes(
         # ncbi-genome-download does not allow to limit the number of genomes that must be retrieved
         # Selecte a random set of at most "--limit-genomes" genomes
         selected = list()
-        random_choice = numpy.random.choice(len(genomes), size=limit_genomes, replace=False)
+        random_choice = numpy.random.RandomState(seed=int(tax_id)).choice(len(genomes), size=limit_genomes, replace=False)
 
         for pos, value in enumerate(random_choice):
             if value == 0:
@@ -1218,13 +1221,17 @@ def index(
     genomes_paths = list()
 
     with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=pbar_len, disable=(not verbose)) as pbar:
+        # Wrapper around the update function of tqdm
+        def progress(*args):
+            pbar.update()
+
         if input_list:
             # Process input genomes
             jobs = [
                 pool.apply_async(
                     process_partial,
                     args=(taxonomy2genomes[taxonomy], taxonomy),
-                    callback=pbar.update(1),
+                    callback=progress,
                 )
                 for taxonomy in taxonomy2genomes
             ]
@@ -1235,7 +1242,7 @@ def index(
                 pool.apply_async(
                     process_partial,
                     args=(tax_id, tax_labels[pos]),
-                    callback=pbar.update(1),
+                    callback=progress,
                 )
                 for pos, tax_id in enumerate(tax_ids)
             ]
@@ -1304,9 +1311,13 @@ def index(
                 folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
+                    # Wrapper around the update function of tqdm
+                    def progress(*args):
+                        pbar.update()
+
                     # Process the NCBI tax IDs
                     jobs = [
-                        pool.apply_async(howdesbt_partial, args=(level_dir,), callback=pbar.update(1))
+                        pool.apply_async(howdesbt_partial, args=(level_dir,), callback=progress)
                         for level_dir in folders
                     ]
 

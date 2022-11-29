@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 25, 2022"
+__date__ = "Nov 29, 2022"
 
 import argparse as ap
 import errno
@@ -806,9 +806,13 @@ def update(
     with mp.Pool(processes=parallel) as pool, tqdm.tqdm(
         total=len(genomes_paths), disable=(not verbose or parallel == 1)
     ) as pbar:
+        # Wrapper around the update function of tqdm
+        def progress(*args):
+            pbar.update()
+
         # Process the input genome files
         jobs = [
-            pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=pbar.update(1))
+            pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=progress)
             for genome_path in genomes_paths
         ]
 
