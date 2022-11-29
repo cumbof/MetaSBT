@@ -903,7 +903,6 @@ def process_tax_id(
             tmp_genomes_dir,
             limit_genomes=limit_genomes,
             nproc=nproc,
-            retries=1,
         )
 
         if verbose:
@@ -977,7 +976,7 @@ def retrieve_genomes(
     out_dir: str,
     limit_genomes: float = numpy.Inf,
     nproc: int = 1,
-    retries: int = 1,
+    retries: int = 5,
 ) -> Tuple[List[str], str]:
     """
     Retrieve genomes from NCBI under a specific tax ID
