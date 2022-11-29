@@ -280,7 +280,7 @@ def count_genomes(tax_id: str, kingdom: str, out_dir: str) -> int:
         "--dry-run",
         "--species-taxids",
         tax_id,
-        kingdom.lower(),
+        group,
     ]
 
     # First check how many genomes belong to the specific tax ID
@@ -1016,7 +1016,7 @@ def retrieve_genomes(
         str(retries),
         "--species-taxids",
         tax_id,
-        "Fungi" if kingdom.lower() == "eukaryota" else kingdom.lower(),
+        group,
     ]
 
     # Run ncbi-genome-download to retrieve all the complete genomes
