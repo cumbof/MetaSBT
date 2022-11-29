@@ -261,6 +261,15 @@ def count_genomes(tax_id: str, kingdom: str, out_dir: str) -> int:
     :return:            The genomes count
     """
 
+    # Fix kingdom in case of Eukaryota and Viruses
+    group = kingdom.lower()
+    if group == "eukaryota":
+        # ncbi-genome-download limit the Eukaryota superkingdom to the Fungi kingdom
+        group = "fungi"
+    elif group == "viruses":
+        # Viruses superkingdom is called Viral
+        group = "viral"
+
     # Define the ncbi-genome-download command line
     ncbi_genome_download = [
         "ncbi-genome-download",
@@ -409,7 +418,13 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
     taxa_map: Dict[str, List[int]] = dict()
 
     with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
-        next(ncbi_table)
+        # Load the first line as header and search for "superkingdom" and "kingdom" columns
+        header = ncbi_table.readline()
+        superkingdom_pos = header.index("superkingdom")  # Archaea, Bacteria, Eukaryota, Viruses
+        # Eukaryota superkingdom is limited to the Fungi kingdom
+        # Limitation is due to the use of ncbi-genome-download tool (look at available "groups")
+        kingdom_pos = header.index("kingdom")  # Fungi
+        
         for line in ncbi_table:
             line = line.strip()
             if line:
@@ -418,15 +433,20 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
                 # Check whether the current taxonomy must be processed
                 skip = True
                 if not kingdom:
-                    if line_split[1].strip():
+                    if line_split[superkingdom_pos].strip():
                         skip = False
-                elif line_split[1] == kingdom:
-                    skip = False
+                elif line_split[superkingdom_pos] == kingdom:
+                    if line_split[superkingdom_pos] == "Eukaryota":
+                        # Process current line in case of Fungi kingdom only
+                        if line_split[kingdom_pos] == "Fungi":
+                            skip == False
+                    else:
+                        skip = False
 
                 if not skip:
                     # Build the current full taxonomic label
                     label = "k__{}|p__{}|c__{}|o__{}|f__{}|g__{}|s__{}".format(
-                        kingdom,  # Kingdom
+                        kingdom,  # Superkingdom/Kingdom
                         level_name(line_split[2], kingdom if kingdom else line_split[1]),  # Phylum
                         level_name(line_split[3], line_split[2]),  # Class
                         level_name(line_split[4], line_split[3]),  # Order
@@ -968,6 +988,15 @@ def retrieve_genomes(
     :return:                List of paths to the genome files and path to the metadata table
     """
 
+    # Fix kingdom in case of Eukaryota and Viruses
+    group = kingdom.lower()
+    if group == "eukaryota":
+        # ncbi-genome-download limit the Eukaryota superkingdom to the Fungi kingdom
+        group = "fungi"
+    elif group == "viruses":
+        # Viruses superkingdom is called Viral
+        group = "viral"
+
     ncbi_genome_download = [
         "ncbi-genome-download",
         "--assembly-levels",
@@ -987,7 +1016,7 @@ def retrieve_genomes(
         str(retries),
         "--species-taxids",
         tax_id,
-        kingdom.lower(),
+        "Fungi" if kingdom.lower() == "eukaryota" else kingdom.lower(),
     ]
 
     # Run ncbi-genome-download to retrieve all the complete genomes
