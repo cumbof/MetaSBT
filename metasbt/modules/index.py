@@ -951,7 +951,7 @@ def process_tax_id(
         if not genomes:
             if verbose:
                 printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
-            return genomes
+            return list()
 
         # Organize genome files
         genomes_paths = organize_data(
@@ -1224,7 +1224,7 @@ def index(
                 pool.apply_async(
                     process_partial,
                     args=(taxonomy2genomes[taxonomy], taxonomy),
-                    callback=pbar.update,
+                    callback=pbar.update(1),
                 )
                 for taxonomy in taxonomy2genomes
             ]
@@ -1235,7 +1235,7 @@ def index(
                 pool.apply_async(
                     process_partial,
                     args=(tax_id, tax_labels[pos]),
-                    callback=pbar.update,
+                    callback=pbar.update(1),
                 )
                 for pos, tax_id in enumerate(tax_ids)
             ]
@@ -1243,9 +1243,6 @@ def index(
         # Get results from jobs
         for job in jobs:
             genomes_paths.extend(job.get())
-
-    # Close the progress bar
-    pbar.close()
 
     # Check whether the bloom filter size must be estimated
     if genomes_paths and estimate_filter_size and not filter_size:
@@ -1309,7 +1306,7 @@ def index(
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
                     # Process the NCBI tax IDs
                     jobs = [
-                        pool.apply_async(howdesbt_partial, args=(level_dir,), callback=pbar.update)
+                        pool.apply_async(howdesbt_partial, args=(level_dir,), callback=pbar.update(1))
                         for level_dir in folders
                     ]
 

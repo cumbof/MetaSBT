@@ -808,7 +808,7 @@ def update(
     ) as pbar:
         # Process the input genome files
         jobs = [
-            pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=pbar.update)
+            pool.apply_async(profile_and_assign_partial, args=(genome_path,), callback=pbar.update(1))
             for genome_path in genomes_paths
         ]
 
@@ -824,9 +824,6 @@ def update(
 
             rebuild.extend(partial_rebuild)
             partial_unassigned.extend(partial_unassigned)
-
-    # Close the progress bar
-    pbar.close()
 
     # In case a reference has been assigned to an unknown cluster
     # Update the cluster taxonomy by applying a majority voting on the reference genomes taxa
