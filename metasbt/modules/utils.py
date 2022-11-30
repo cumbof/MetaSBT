@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 25, 2022"
+__date__ = "Nov 29, 2022"
 
 import argparse as ap
 import errno
@@ -83,6 +83,7 @@ def checkm(
 
                 try:
                     # Run CheckM
+                    # TODO update to CheckM2
                     run(
                         [
                             "checkm",
@@ -333,21 +334,19 @@ def cluster(
                 file.write("--unknown-counter {}\n".format(unknown_counter))
 
         else:
+            # Load the manifest file
+            with open(manifest_filepath) as manifest_file:
+                manifest_lines = manifest_file.readlines()
+            
             # Update the --unknown-counter info
-            updated_manifest_filepath = os.path.join(os.path.dirname(manifest_filepath), "manifest2.txt")
-            with open(updated_manifest_filepath, "w+") as file1:
-                with open(manifest_filepath) as file2:
-                    for line in file2:
-                        line = line.strip()
-                        if line:
-                            line_split = line.split(" ")
-                            if line_split[0] == "--unknown-counter":
-                                line_split[-1] = str(unknown_counter)
-                            file1.write("{}\n".format(" ".join(line_split)))
-
-            # Replace the old manifest file with the updated one
-            os.unlink(manifest_filepath)
-            os.rename(updated_manifest_filepath, manifest_filepath)
+            with open(manifest_filepath, "w+") as manifest_file:
+                for line in manifest_lines:
+                    line = line.strip()
+                    if line:
+                        line_split = line.split(" ")
+                        if line_split[0] == "--unknown-counter":
+                            line_split[-1] = str(unknown_counter)
+                        manifest_file.write("{}\n".format(" ".join(line_split)))
 
     # Dumpt the new assignments to the output file
     with open(outpath, "w+") as out:
@@ -828,6 +827,7 @@ def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, ve
     """
 
     # Define the logger config
+    # TODO configure other logging levels (i.e., NOTSET, DEBUG, INFO, WARN, ERROR, and CRITICAL)
     logging_config: Dict[str, Any] = dict(
         version=1,
         formatters={
@@ -1004,10 +1004,14 @@ def load_manifest(manifest_filepath: str) -> dict:
             line = line.strip()
             if line:
                 line_split = line.split(" ")
-                if line_split[0] == "--kmer-len":
-                    manifest["kmer_len"] = int(line_split[1])
-                elif line_split[0] == "--filter-size":
-                    manifest["filter_size"] = int(line_split[1])
+                
+                # e.g., --kmer-len > kmer_len
+                key = line_split[0].strip("--").replace("-", "_")
+                try:
+                    # Try to cast values to int if possible
+                    manifest[key] = int(line_split[1])
+                except:
+                    manifest[key] = line_split[1]                
 
     return manifest
 
