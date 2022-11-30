@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Cumbo"
+  given-names: "Fabio"
+  orcid: "https://orcid.org/0000-0003-2920-5838"
+- family-names: "Blankenberg"
+  given-names: "Daniel"
+  orcid: "https://orcid.org/0000-0002-6833-9049"
+title: "MetaSBT: A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees"
+version: 1.0
+doi: ---
+date-released: ---
+url: "https://github.com/cumbof/MetaSBT"
