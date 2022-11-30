@@ -8,7 +8,7 @@ authors:
   given-names: "Daniel"
   orcid: "https://orcid.org/0000-0002-6833-9049"
 title: "MetaSBT: A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees"
-version: 1.0
+version: 0.1.0-alpha
 doi: ---
 date-released: ---
 url: "https://github.com/cumbof/MetaSBT"
