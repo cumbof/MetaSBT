@@ -5,13 +5,14 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Nov 30, 2022"
 
 import argparse as ap
 import errno
 import os
 import shutil
 import time
+from datetime import datetime
 from functools import partial
 from logging import Logger
 from pathlib import Path
@@ -274,6 +275,7 @@ def boundaries(
     with open(output, "w+") as file:
         # Write header lines
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
+        file.write("# timestamp: {}".format(datetime.today().strftime("%Y%m%d")))
         file.write("# --db-dir {}\n".format(db_dir))
         if kingdom:
             file.write("# --kingdom {}\n".format(kingdom))
