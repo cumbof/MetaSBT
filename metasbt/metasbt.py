@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Nov 28, 2022"
+__date__ = "Jan 3, 2023"
 
 import argparse as ap
 import errno
@@ -44,7 +44,7 @@ MODULES_DIR = os.path.join(SCRIPT_DIR, "modules")
 REQUIREMENTS = os.path.join(SCRIPT_DIR, "requirements.txt")
 
 # Define the license URL
-LICENSE = "https://raw.githubusercontent.com/cumbof/MetaSBT/main/LICENSE"
+LICENSE = "https://raw.githubusercontent.com/cumbof/{}/main/LICENSE".format(TOOL_ID)
 
 # Define the software repository URLs
 REPOSITORY_URL = "https://github.com/cumbof/{}".format(TOOL_ID)
@@ -306,7 +306,7 @@ def main() -> None:
             # Load the list of module-specific dependencies
             dependencies = list()
             for module_id in modules_list:
-                module = importlib.import_module("metasbt.modules.{}".format(module_id))
+                module = importlib.import_module("{}.modules.{}".format(TOOL_ID.lower(), module_id))
                 dependencies.extend(module.DEPENDENCIES)
 
             # Resolve external software dependencies and Python requirements
@@ -329,7 +329,7 @@ def main() -> None:
                     ]
 
                     # Import the external module
-                    module = importlib.import_module("metasbt.modules.{}".format(unknown_arg))
+                    module = importlib.import_module("{}.modules.{}".format(TOOL_ID.lower(), unknown_arg))
 
                     # Resolve external software dependencies
                     resolve_dependencies(module.DEPENDENCIES, stop_unavailable=True, verbose=False)
@@ -361,7 +361,7 @@ def main() -> None:
                 println("Thanks for using {}!\n".format(TOOL_ID))
                 print_citations()
                 println(
-                    "Remember to star the MetaSBT repository on GitHub to stay updated on its development and new features:"
+                    "Remember to star the {} repository on GitHub to stay updated on its development and new features:".format(TOOL_ID)
                 )
                 println("https://github.com/cumbof/{}\n".format(TOOL_ID))
             else:
