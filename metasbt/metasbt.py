@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jan 3, 2023"
+__date__ = "Jan 5, 2023"
 
 import argparse as ap
 import errno
@@ -122,6 +122,8 @@ def check_for_software_updates() -> None:
 def get_modules(dirpath: str) -> List[str]:
     """
     Return the list of modules under the specified directory
+
+    :param dirpath: Path to the folder with python modules
     """
 
     if not os.path.isdir(dirpath):
@@ -181,6 +183,10 @@ def print_modules() -> None:
 def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False, verbose: bool = True) -> None:
     """
     Check whether all the external software dependencies and Python requirements are available
+
+    :param dependencies:        List of external software dependencies
+    :param stop_unavailable:    Raise an exception in case of a unavailable dependency
+    :param verbose:             Print messages on screen
     """
 
     # Sort the list of dependencies
