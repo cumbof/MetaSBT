@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Nov 29, 2022"
+__date__ = "Jan 27, 2023"
 
 import argparse as ap
 import gzip
@@ -439,7 +439,7 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
                     if line_split[superkingdom_pos] == "Eukaryota":
                         # Process current line in case of Fungi kingdom only
                         if line_split[kingdom_pos] == "Fungi":
-                            skip == False
+                            skip = False
                     else:
                         skip = False
 
