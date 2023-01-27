@@ -164,6 +164,8 @@ In case you would like to create a database from a specific set of genomes avail
 > you may want to get rid of the taxonomic organization of genomes by specifying the `--flat-structure` option that will consider all the input genomes together for the generation of a single sequence bloom tree.
 > Please note that the `--flat-structure` option is not compatible with the `update` module for updating the database with new genomes. Thus, in case you will need to update the sequence bloom tree, there are no other options than building the database from scratch with the new set of genomes.
 
+> :warning: _Please note that this module makes use of the `ncbi-genome-download` external dependency to retrieve genomes under a specific Kingdom. However, this tool limits the Eukaryotes genomes to Fungi only. Thus, in case you specify `--kingdom Eukaryota`, you may expect to retrieve and index Fungi genomes only._
+
 #### Available options
 
 | Option                   | Default | Mandatory | Description  |
@@ -173,13 +175,13 @@ In case you would like to create a database from a specific set of genomes avail
 | `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
 | `--db-dir`               |         | ⚑         | Database folder path |
 | `--dereplicate`          | `False` |           | Dereplicate input genomes |
-| `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically override the `--filter-size` option |
+| `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically overrides the `--filter-size` option |
 | `--filter-size`          |         | ⚑         | Bloom filter size |
 | `--flat-structure`       |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
 | `--help`                 |         |           | Print the list of arguments and exit |
 | `--increase-filter-size` | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
 | `--input-list`           |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
-| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom |
+| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Fungi`) |
 | `--kmer-len`             |         | ⚑         | This is the length of the kmers used for building bloom filters |
 | `--limit-genomes`        | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
 | `--log`                  |         |           | Path to the log file |
