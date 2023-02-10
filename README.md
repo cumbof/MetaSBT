@@ -45,18 +45,18 @@ You may need to add the `bioconda` channel first by running:
 conda config --add channels bioconda
 ```
 
-The `MetaSBT` pipeline is also available by simply cloning this repository and making all the scripts executables:
+The `MetaSBT` pipeline is also available by simply cloning this repository and installing the software with the following commands:
 
 ```bash
 # Clone the MetaSBT repository
 mkdir -p ~/git && cd ~/git
 git clone https://github.com/cumbof/MetaSBT.git
 
-# Make the scripts executable
-chmod -R +x MetaSBT/*.py
+# Move to the MetaSBT root folder
+cd MetaSBT
 
-# Add MetaSBT to the PATH env variable
-PATH=$PATH:~/git/MetaSBT
+# Finally install MetaSBT
+make install
 ```
 
 Once everything is installed, `MetaSBT` will be available on your environment. You can check whether it has been correctly installed by typing the following command in your terminal:
