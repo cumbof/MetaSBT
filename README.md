@@ -105,11 +105,10 @@ Please note that cloning this repository requires [Git](https://git-scm.com/) to
 In this last case, remember to check that the following dependencies are installed and available on your system:
 
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)[^2]
-- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.07)[^3]
-- [kmtricks](https://github.com/tlemane/kmtricks) (version >=1.2.1)[^4]
+- [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.13)[^3]
 - [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
-- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^5]
+- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^4]
 - [pip](https://pip.pypa.io/) (version >=21.2.4)
 - [python](http://www.python.org/) (version >=3.7)
 - [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
@@ -136,7 +135,7 @@ It follows a detailed explanation of all the available modules.
 
 ### 1. `index`: building a reference database
 
-The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `kmtricks` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed with `howdesbt` by building new sequence bloom trees considering only the root nodes of the upper taxonomic levels.
+The `index` subroutine allows to automatically retrieve genomes from isolate sequencing from the NCBI GenBank and organise them in folders that reflect their taxonomic classification. It finally makes use of `howdesbt` to rapidly index all the genomes at the species level and create a sequence bloom tree for each of the species. Lower taxonomic levels are indexed by building new sequence bloom trees considering only the root nodes of the trees at the upper taxonomic levels.
 
 The following command will trigger the generation of the database with all the available bacterial genomes from isolate sequencing in NCBI GenBank:
 
@@ -197,7 +196,7 @@ In case you would like to create a database from a specific set of genomes avail
 
 ### 2. `boundaries`: defining clusters boundaries
 
-The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `kmtricks` to build a kmers table for each of the taxonomic levels in the database with information about the presence/absence of a kmer in genomes that belong to a particular lineage. It finally build a new table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. These boundaries are then used by the `update` module in order to establish whether a new genome must be assigned to the closest cluster identified by the `profile` module.
+The `boundaries` module is crucial for the definition of taxonomy-specific boundaries. It explots `howdesbt` to build a table with the minimum and maximum amount of kmers in common between all the genomes in a particular taxonomic level. These boundaries are then used by the `update` module in order to establish whether a new genome must be assigned to the closest cluster identified by the `profile` module.
 
 The following command will trigger the definition of the kmer boundaries for each taxonomic level in the database:
 
@@ -274,7 +273,7 @@ metasbt profile --input-file ~/mymag.fna \
 
 This module can be used to add new reference genomes and metagenome-assembled genomes (MAGs) to the database generated with the `index` module. 
 
-In case of new MAGs, it first try to profile them by comparing the input genomes with those present in the database. An input genome is assigned to the closest genome in the database if their set of kmers result similar enough. In case the profiler will not be able to characterize the input genome, the `update` subroutine will exploit `kmtricks` to build a kmer matrix for the set of input genomes and automatically group them according to the taxonomy-specific boundaries identified with the `boundaries` utility, and it finally generate new clusters of potentially novel and yet-to-be-named species.
+In case of new MAGs, it first try to profile them by comparing the input genomes with those present in the database. An input genome is assigned to the closest genome in the database if their set of kmers result similar enough. In case the profiler will not be able to characterize the input genome, the `update` subroutine will exploit `howdesbt` to automatically group the input genomes according to the taxonomy-specific boundaries identified with the `boundaries` utility, and it finally generate new clusters of potentially novel and yet-to-be-named species.
 
 In case of new reference genomes from isolate sequencing, the `update` module simply add the new genomes to the corresponding species by rebuilding the species trees and all the trees at the lower taxonomic levels (please note that the taxonomic labels of the input reference genomes are known). If the taxonomy of an input reference genome is not in the database, the module will compare the input genome with all the cluster of species with no references before generating a new branch in the index database. If the input genome results very close to a cluster of unknown genomes, its taxonomic label will be inherited by all the genomes in the unknown cluster.
 
@@ -387,5 +386,4 @@ Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg]
 [^1]: Grüning, Björn, et al. "[Bioconda: sustainable and comprehensive software distribution for the life sciences.](https://doi.org/10.1038/s41592-018-0046-7)" Nature methods 15.7 (2018): 475-476.
 [^2]: Parks, Donovan H., et al. "[CheckM: assessing the quality of microbial genomes recovered from isolates, single cells, and metagenomes.](https://doi.org/10.1101/gr.186072.114)" Genome research 25.7 (2015): 1043-1055.
 [^3]: Harris, Robert S., and Paul Medvedev. "[Improved representation of sequence bloom trees.](https://doi.org/10.1093/bioinformatics/btz662)" Bioinformatics 36.3 (2020): 721-727.
-[^4]: Lemane, Téo, et al. "[kmtricks: Efficient and flexible construction of Bloom filters for large sequencing data collections.](https://doi.org/10.1093/bioadv/vbac029)" Bioinformatics Advances (2022).
-[^5]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
+[^4]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
