@@ -70,6 +70,8 @@ def bfaction(
     if action not in actions:
         raise Exception("Unsupported action \"{}\"!".format(action))
     
+    mode = mode.lower()
+
     # Define supported modes
     bfoperate_modes = ["and", "or", "xor", "eq", "not"]
     bfdistance_modes = ["hamming", "intersect", "union", "theta"]
@@ -80,16 +82,11 @@ def bfaction(
     # Check whether the input genomes exist
     for filepath in genomes:
         if not os.path.isfile(filepath):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
 
     # Keep going in case of 2 or more input genomes
     if len(genomes) < 2:
         raise Exception("The number of input genomes must be >2!")
-
-    # Check for mode
-    mode = mode.lower()
-    if mode not in ["hamming", "intersect", "union", "theta"]:
-        raise Exception("Unaavailable mode \"{}\"".format(mode))
     
     # Check whether the temporary folder exists, otherwise create it
     if not os.path.isdir(tmpdir):
@@ -177,7 +174,7 @@ def bfaction(
                             _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_exists=False)
 
                             # Remove non informative fields
-                            if line_split[-1] == "({})".format(mode):
+                            if line_split[-1] == "({})".format("intersection" if mode == "intersect" else mode):
                                 line_split = " ".join(line_split[:-1]).strip().split(" ")
 
                             if genome1 not in dist:
@@ -532,7 +529,8 @@ def cluster(
                 # the number of kmers in common between the current genome and all the other input genomes
                 for j in range(i+1, len(genomes_list)):
                     # Kmers in common have been already computed
-                    common = bfdistance_intersect[genomes[i]][genomes[j]]
+                    # It returns a float by default
+                    common = int(bfdistance_intersect[genomes[i]][genomes[j]])
 
                     if common >= last_known_level_mink:
                         # Set the second genome as assigned
@@ -799,7 +797,16 @@ def get_boundaries(
             _, genome2, _, _ = get_file_info(bfs[j])
 
             # Result is under key "result"
-            common = bfdistance_intersect[genome1][genome2]
+            # It returns a float by default
+            common = int(bfdistance_intersect[genome1][genome2])
+
+            if common == 0:
+                # This could be only due to a wrong classification and must be reported
+                with open(os.path.join(tmpdir, "zero_common_kmers.tsv"), "a+") as zck:
+                    zck.write("{}\t{}\n".format(genome1, genome2))
+
+                # Pass to the next comparison
+                continue
 
             # Update the minimum and maximum number of common kmers
             if common > maxv:

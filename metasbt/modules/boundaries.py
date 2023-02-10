@@ -165,8 +165,8 @@ def define_boundaries(
                 if line:
                     genome_path = os.path.join(
                         os.path.dirname(str(references_path)),
-                        "genomes",
-                        "{}.fna.gz".format(line),
+                        "filters",
+                        "{}.bf.gz".format(line),
                     )
 
                     if level_id == "species":
@@ -189,8 +189,13 @@ def define_boundaries(
         tmp_level_dir = os.path.join(tmp_dir, "boundaries", level_id, os.path.basename(level_dir))
         os.makedirs(tmp_level_dir, exist_ok=True)
 
+        # Consider all the genomes under a particular level
+        genome_paths = list()
+        for level_id in samples:
+            genome_paths.extend(samples[level_id])
+
         # Extract boundaries
-        all_kmers, min_kmers, max_kmers = get_boundaries(list(samples.values()), tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc)
+        all_kmers, min_kmers, max_kmers = get_boundaries(genome_paths, tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc)
 
         # Get the full lineage from the level folder path
         lineage_list = list()
@@ -256,7 +261,7 @@ def boundaries(
     with open(output, "w+") as file:
         # Write header lines
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
-        file.write("# timestamp: {}".format(datetime.today().strftime("%Y%m%d")))
+        file.write("# timestamp: {}\n".format(datetime.today().strftime("%Y%m%d")))
         file.write("# --db-dir {}\n".format(db_dir))
         if kingdom:
             file.write("# --kingdom {}\n".format(kingdom))
@@ -268,8 +273,8 @@ def boundaries(
                 "Kmers",  # Total number of kmers
                 "Min kmers",  # Minimum number of common kmers among the reference genomes/clusters
                 "Max kmers",  # Maximum number of common kmers among the reference genomes/clusters
-                "Min score",  # Percentage of min kmers on the total number of kmers/clusters
-                "Max score",  # Percentage of max kmers on the total number of kmers/clusters
+                "Min score",  # Percentage of min kmers on the total number of genomes/clusters
+                "Max score",  # Percentage of max kmers on the total number of genomes/clusters
             )
         )
 
