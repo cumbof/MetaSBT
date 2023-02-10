@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Nov 29, 2022"
+__date__ = "Feb 8, 2023"
 
 import argparse as ap
 import errno
@@ -16,6 +16,7 @@ import sys
 import time
 from collections import Counter
 from functools import partial
+from itertools import takewhile
 from logging import Logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,12 +30,12 @@ try:
     from utils import (  # type: ignore  # isort: skip
         checkm,
         cluster,
+        dereplicate_genomes,
         filter_checkm_tables,
-        filter_genomes,
+        get_file_info,
         get_level_boundaries,
         howdesbt,
         init_logger,
-        kmtricks_matrix,
         load_manifest,
         number,
         println,
@@ -47,7 +48,7 @@ except Exception:
 TOOL_ID = "update"
 
 # Define the list of dependencies
-DEPENDENCIES = ["checkm", "howdesbt", "kmtricks"]
+DEPENDENCIES = ["checkm", "howdesbt"]
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -217,21 +218,29 @@ def load_taxa(taxa_filepath: Optional[str] = None, genomes_path: Optional[List[s
     if not os.path.isfile(taxa_filepath) or len(genomes_path) == 0:
         return dict()
 
-    taxonomies = {
-        line.strip().split("\t")[0]: line.strip().split("\t")[1]
-        for line in open(taxa_filepath).readlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
+    # Define a mapping between input genome names and taxonomic labels
+    taxonomies = dict()
 
-    # Check whether a taxonomic label is defined for each of the input genome
+    # Load taxonomic labels
+    with open(taxa_filepath) as taxa_file:
+        for line in taxa_file:
+            line = line.strip()
+            if line:
+                if not line.startswith("#"):
+                    line_split = line.split("\t")
+                    taxonomies[line_split[0]] = line_split[1]
+
+    # Retrieve the input genome names
     genome_names = list()
+
     if genomes_path:
         for genome_path in genomes_path:
-            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_name = os.path.splitext(genome_name)[0]
+            # Get the genome name
+            _, genome_name, _, _ = get_file_info(genome_path)
+
             genome_names.append(genome_name)
 
+    # Check whether a taxonomic label is defined for each of the input genome
     if len(set(genome_names).intersection(set(taxonomies.keys()))) < len(set(genome_names)):
         raise Exception("Unable to find all the taxonomic labels for the input reference genomes")
 
@@ -290,15 +299,14 @@ def profile_and_assign(
     # Otherwise, the input genome is unassigned
     unassigned: List[str] = list()
 
+    # Get genome file info
+    _, genome_name, genome_ext, compression = get_file_info(genome_path)
+
     filepath = genome_path
-    genome_name = os.path.splitext(os.path.basename(filepath))[0]
-    genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
-    # in case the current genome is gzip compressed
-    if genome_path.endswith(".gz"):
-        filepath = os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])
-        genome_name = os.path.splitext(os.path.basename(filepath))[0]
-        genome_ext = os.path.splitext(os.path.basename(filepath))[1][1:]
-        # Unzip the current genome to the tmp folder
+    if compression:
+        filepath = os.path.join(tmp_genomes_dir, "{}{}".format(genome_name, genome_ext))
+
+        # Unzip the genome file into the tmp folder
         with open(filepath, "w+") as file:
             run(["gunzip", "-c", genome_path], stdout=file)
 
@@ -430,7 +438,7 @@ def profile_and_assign(
                     target_genome = os.path.join(
                         closest_taxadir,
                         "genomes",
-                        "{}.{}".format(genome_name, genome_ext),
+                        "{}{}".format(genome_name, genome_ext),
                     )
 
                     # The input genome is always uncompressed
@@ -481,18 +489,18 @@ def profile_and_assign(
                         # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
                         if closest_taxa not in to_known_taxa:
                             to_known_taxa[closest_taxa] = list()
-                        to_known_taxa[closest_taxa].append(genome_name)
+                        to_known_taxa[closest_taxa].append(genome_path)
 
                         printline("{} has been characterised as {}".format(genome_name, closest_taxa))
 
                     elif how_many_references >= 1:
                         # If the closest genome belongs to a cluster with at least one reference genome
                         if taxalabel != closest_taxa:
-                            # If the taxonomic labels of the current reference genome and that one of the closest genomedo not match
-                            # Report the inconsistency
+                            # If the taxonomic labels of the current reference genome and that one of the closest genome do not match
+                            # Report the inconsistency and continue
                             printline(
-                                "Inconsistency found:\nInput genome: {}\nClosest lineage: {}".format(
-                                    taxalabel, closest_taxa
+                                "Inconsistency found for genome {}:\nInput lineage: {}\nClosest lineage: {}".format(
+                                    genome_name, taxalabel, closest_taxa
                                 )
                             )
 
@@ -500,7 +508,7 @@ def profile_and_assign(
                         target_genome = os.path.join(
                             closest_taxadir,
                             "genomes",
-                            "{}.{}".format(genome_name, genome_ext),
+                            "{}{}".format(genome_name, genome_ext),
                         )
 
                         # The input genome is always uncompressed
@@ -521,9 +529,11 @@ def profile_and_assign(
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
+
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not os.path.isfile(checkm_filepath):
                                 checkm_file.write("{}\n".format(checkm_header))
+                            
                             checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
                 else:
@@ -533,7 +543,7 @@ def profile_and_assign(
                     os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
 
                     # Assign the current genome to the closest lineage
-                    target_genome = os.path.join(taxdir, "genomes", "{}.{}".format(genome_name, genome_ext))
+                    target_genome = os.path.join(taxdir, "genomes", "{}{}".format(genome_name, genome_ext))
                     shutil.copy(filepath, target_genome)
 
                     # The input genome is always uncompressed
@@ -554,9 +564,11 @@ def profile_and_assign(
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
+                        
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not os.path.isfile(checkm_filepath):
                                 checkm_file.write("{}\n".format(checkm_header))
+                            
                             checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
     # Remove the uncompressed version of the input genome in the temporary folder
@@ -643,7 +655,7 @@ def update(
     tmp_genomes_dir = os.path.join(tmp_dir, "genomes")
     os.makedirs(tmp_genomes_dir, exist_ok=True)
 
-    # Moving input genomes to the temporary folder
+    # Symlink input genomes
     genomes_paths = list()
     for genome_path in input_genomes_paths:
         os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
@@ -681,16 +693,16 @@ def update(
         # Load CheckM tables
         for checkm_table in checkm_tables:
             with open(checkm_table) as table:
-                line_count = 0
+                first_line = True
                 for line in table:
                     line = line.strip()
                     if line:
-                        if line_count == 0:
+                        if first_line:
                             checkm_header = line
+                            first_line = False
                         else:
                             line_split = line.split("\t")
                             checkm_data[line_split[0]] = line
-                        line_count += 1
 
         # Filter genomes according to the input --completeness and --contamination thresholds
         genome_ids = filter_checkm_tables(checkm_tables, completeness=0.0, contamination=100.0)
@@ -698,9 +710,8 @@ def update(
         # Build the new list of genome paths that passed the filter
         new_genomes_paths = list()
         for genome_path in genomes_paths:
-            genome_id = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_id = os.path.splitext(genome_id)[0]
+            _, genome_id, _, _ = get_file_info(genome_path)
+
             if genome_id in genome_ids:
                 new_genomes_paths.append(genome_path)
 
@@ -712,66 +723,23 @@ def update(
     # Check whether the input genomes must be dereplicated
     if len(genomes_paths) > 1 and dereplicate:
         printline("Dereplicating {} genomes".format(len(genomes_paths)))
-
-        # Define the kmtricks temporary folder
-        kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks")
-        os.makedirs(kmtricks_tmp_dir, exist_ok=True)
-
-        # Create a fof file with the list of genomes
-        genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
-        ordered_genome_names = list()
-        with open(genomes_fof_filepath, "w+") as genomes_fof:
-            for genome_path in genomes_paths:
-                genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-                if genome_path.endswith(".gz"):
-                    genome_name = os.path.splitext(genome_name)[0]
-                genomes_fof.write("{} : {}\n".format(genome_name, genome_path))
-                ordered_genome_names.append(genome_name)
-
-        # Run kmtricks to produce the kmer matrix
-        output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-        kmtricks_matrix(
-            genomes_fof_filepath,
-            kmtricks_tmp_dir,
-            kmer_len,
-            output_table,
-            filter_size=filter_size,
-            nproc=nproc,
-        )
-
-        # Add the header line to the kmer matrix
-        with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-            file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
-            with open(output_table) as file2:
-                for line in file2:
-                    line = line.strip()
-                    if line:
-                        file1.write("{}\n".format(line))
-
-        # Get rid of the matrix withour header line
-        os.unlink(output_table)
-        shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
-
-        # Filter genomes according to their percentage of common kmers defined with --similarity
-        filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", "filtered.txt")
-        filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
-
         before_dereplication = len(genomes_paths)
 
-        # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
-        with open(filtered_genomes_filepath) as filtered_genomes:
-            for line in filtered_genomes:
-                line = line.strip()
-                if line:
-                    gpath = os.path.join(tmp_genomes_dir, "{}.{}".format(line, extension))
-                    if gpath in genomes_paths:
-                        genomes_paths.remove(gpath)
+        genomes_paths = dereplicate_genomes(
+            genomes_paths,
+            "",
+            tmp_dir,
+            kmer_len,
+            filter_size=filter_size,
+            nproc=nproc,
+            similarity=similarity,
+        )
 
         printline("{} genomes have been excluded".format(before_dereplication - len(genomes_paths)))
 
     # Check whether at least one genome survived both the quality control and dereplication steps
     if not genomes_paths:
-        printline("No input genomes available")
+        raise Exception("No input genomes available!")
 
     # In case one or more reference genomes are assigned to an unknown cluster
     # Keep track of the unknown taxonomy and change the lineage with
@@ -785,7 +753,7 @@ def update(
     # They will be assigned to new groups
     unassigned: List[str] = list()
 
-    # Define a partial function around the profile_and_assign
+    # Define a partial function around profile_and_assign
     profile_and_assign_partial = partial(
         profile_and_assign,
         input_type=input_type,
@@ -827,7 +795,7 @@ def update(
                 to_known_taxa[tx].extend(partial_to_known_taxa[tx])
 
             rebuild.extend(partial_rebuild)
-            partial_unassigned.extend(partial_unassigned)
+            unassigned.extend(partial_unassigned)
 
     # In case a reference has been assigned to an unknown cluster
     # Update the cluster taxonomy by applying a majority voting on the reference genomes taxa
@@ -843,60 +811,48 @@ def update(
             known_taxa = list()
 
             # Retrieve the reference genomes taxa from the input mapping file
-            for genome in to_known_taxa[unknown_taxonomy]:
-                known_taxa.append(taxonomies[genome])
+            # and finally move the genome files
+            for genome_path in to_known_taxa[unknown_taxonomy]:
+                _, genome_name, _, compression = get_file_info(genome_path)
+                known_taxa.append(taxonomies[genome_name])
+
+                # Copy the input genome file to the genomes folder
+                unknown_taxonomy_genomes_folder = os.path.join(unknown_taxonomy_path, "genomes")
+                shutil.copy(genome_path, unknown_taxonomy_genomes_folder)
+
+                # In case the input genome is not Gzip compressed
+                if not compression:
+                    gzip_genome_filepath = os.path.join(unknown_taxonomy_genomes_folder, os.path.basename(genome_path))
+                    run(["gzip", gzip_genome_filepath], silence=True)
+                
+                # Also update the list of reference genomes
+                with open(os.path.join(unknown_taxonomy_path, "references.txt"), "a+") as file:
+                    file.write("{}\n".format(genome_name))
 
             # Get the most occurring taxonomic label
-            known_taxa_counter = Counter(known_taxa)
-            assigned_taxonomy: str = known_taxa_counter.most_common(1)[0][0]  # type: ignore
-
-            # Finally move the genome files
-            for genome_path in genomes_paths:
-                genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-                if genome_path.endswith(".gz"):
-                    genome_name = os.path.splitext(genome_name)[0]
-
-                # Check whether the genome name is in the current list of genomes for the unknown taxonomy
-                if genome_name in to_known_taxa[unknown_taxonomy]:
-                    # Copy the input genome file to the genomes folder
-                    shutil.copy(genome_path, os.path.join(unknown_taxonomy_path, "genomes"))
-
-                    # In case the input genome is not gzip compressed
-                    if not genome_path.endswith(".gz"):
-                        run(
-                            [
-                                "gzip",
-                                os.path.join(
-                                    unknown_taxonomy_path,
-                                    "genomes",
-                                    os.path.basename(genome_path),
-                                ),
-                            ],
-                            silence=True,
-                        )
-
-                    # Also update the list of reference genomes
-                    with open(os.path.join(unknown_taxonomy_path, "references.txt"), "a+") as file:
-                        file.write("{}\n".format(genome_name))
+            known_taxa_counter: List[Tuple[str, int]] = Counter(known_taxa).most_common()  # type: ignore
+            # In case of multiple most occurring taxa, pick the first one in lexicographic order
+            most_common_taxa = list(takewhile(lambda x: x[1]>=known_taxa_counter[0][1], known_taxa_counter))
+            assigned_taxonomy = sorted(most_common_taxa, key=lambda x: x[0])[0][0]
 
             # Split taxonomies into levels
             unknown_levels: List[str] = unknown_taxonomy.split("|")
             assigned_levels: List[str] = assigned_taxonomy.split("|")
 
             # Characterise unknown clusters
-            # Iterate backwards over level
+            # Iterate backwards over levels
             for i in range(6, -1, -1):
                 if unknown_levels[i] == assigned_levels[i]:
                     break
 
                 else:
                     # Get the partial levels for the new taxonomy
-                    new_levels = assigned_levels[: i + 1]
+                    new_levels = assigned_levels[:i+1]
                     new_levels_subpath = os.path.join(db_dir, os.sep.join(new_levels))
                     os.makedirs(new_levels_subpath, exist_ok=True)
 
                     # Get the partial levels for the old taxonomy
-                    old_levels = unknown_levels[: i + 1]
+                    old_levels = unknown_levels[:i+1]
                     old_levels_subpath = os.path.join(db_dir, os.sep.join(old_levels))
 
                     # Start moving folders
@@ -921,110 +877,62 @@ def update(
     if unassigned:
         printline("Defining new clusters for {} unassigned genomes".format(len(unassigned)))
 
-        # The kmers matrix already exists in case the dereplication step has been performed
-        # Otherwise, run kmtricks
-        kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks")
-        output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-        if not os.path.isfile(output_table):
-            # Create a fof file with the list of unassigned genomes
-            genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
-            ordered_genome_names = list()
-            with open(genomes_fof_filepath, "w+") as genomes_fof:
-                for genome_path in unassigned:
-                    genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-                    if genome_path.endswith(".gz"):
-                        genome_name = os.path.splitext(genome_name)[0]
-                    genomes_fof.write("{} : {}\n".format(genome_name, genome_path))
-                    ordered_genome_names.append(genome_name)
-
-            # Build the kmers matrix
-            kmtricks_matrix(
-                genomes_fof_filepath,
-                kmtricks_tmp_dir,
-                kmer_len,
-                output_table,
-                filter_size=filter_size,
-                nproc=nproc,
-            )
-
-            # Add the header line to the kmer matrix
-            with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-                file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
-                with open(output_table) as file2:
-                    for line in file2:
-                        line = line.strip()
-                        if line:
-                            file1.write("{}\n".format(line))
-
-            # Get rid of the matrix withour header line
-            os.unlink(output_table)
-            shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
+        # Define a temporary folder for building bloom filters
+        # This already exists in case the dereplication step has been executed
+        howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt")
 
         # Cluster genomes according to the boundaries defined by the boundaries module
         # Define a cluster for each taxomomic level
         # Look at the genomes profiles and update or build new clusters
-        assignments_filepath = os.path.join(db_dir, "assignments.txt")
-        cluster(
-            output_table,
+        assignments = cluster(
+            unassigned,
             boundaries,
             manifest_filepath,
             os.path.join(tmp_dir, "profiling"),
-            assignments_filepath,
+            howdesbt_tmp_dir,
+            os.path.join(db_dir, "assignments.txt"),
             unknown_label=unknown_label,
+            nproc=nproc
         )
 
-        # Load the new assignments
-        assignments = dict()
-        with open(assignments_filepath) as file:
-            for line in file:
-                line = line.strip()
-                if line:
-                    if not line.startswith("#"):
-                        line_split = line.split("\t")
-                        assignments[line_split[0]] = line_split[1]
-
         # Iterate over the input genomes
-        for genome_path in genomes_paths:
-            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_name = os.path.splitext(genome_name)[0]
+        for genome_path in assignments:
+            _, genome_name, _, compressed = get_file_info(genome_path)
 
-            if genome_name in assignments:
-                # Create the new cluster folder in the database
-                tax_dir = os.path.join(db_dir, line_split[1].replace("|", os.sep))
-                tax_genomes_dir = os.path.join(tax_dir, "genomes")
-                os.makedirs(tax_genomes_dir, exist_ok=True)
+            # Create the new cluster folder in the database
+            tax_dir = os.path.join(db_dir, assignments[genome_path].replace("|", os.sep))
+            tax_genomes_dir = os.path.join(tax_dir, "genomes")
+            os.makedirs(tax_genomes_dir, exist_ok=True)
 
-                # Copy the input genome into the genomes folder of the new cluster
-                shutil.copy(genome_path, tax_genomes_dir)
+            # Copy the input genome into the genomes folder of the new cluster
+            shutil.copy(genome_path, tax_genomes_dir)
 
-                # In case the input genome is not gzip compressed
-                if not genome_path.endswith(".gz"):
-                    run(
-                        [
-                            "gzip",
-                            os.path.join(tax_genomes_dir, os.path.basename(genome_path)),
-                        ],
-                        silence=True,
-                    )
+            # In case the input genome is not gzip compressed
+            if not compressed:
+                gzip_genome_filepath = os.path.join(tax_genomes_dir, os.path.basename(genome_path))
+                run(["gzip", gzip_genome_filepath], silence=True)
 
-                # Also update the mags.txt file
-                with open(os.path.join(tax_dir, "mags.txt"), "a+") as file:
-                    file.write("{}\n".format(genome_name))
+            # Also update the mags.txt file
+            with open(os.path.join(tax_dir, "mags.txt"), "a+") as file:
+                file.write("{}\n".format(genome_name))
 
-                # Also report the CheckM statistics of the genomes in the new clusters
-                if genome_name in checkm_data:
-                    checkm_filepath = os.path.join(tax_dir, "checkm.tsv")
-                    with open(checkm_filepath, "a+") as checkm_file:
-                        if not os.path.isfile(checkm_filepath):
-                            checkm_file.write("{}\n".format(checkm_header))
-                        checkm_file.write("{}\n".format(checkm_data[genome_name]))
+            # Also report the CheckM statistics of the genomes in the new clusters
+            if genome_name in checkm_data:
+                checkm_filepath = os.path.join(tax_dir, "checkm.tsv")
+                
+                with open(checkm_filepath, "a+") as checkm_file:
+                    # Add the header line in case the CheckM table does not exist
+                    if not os.path.isfile(checkm_filepath):
+                        checkm_file.write("{}\n".format(checkm_header))
+                    
+                    checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
-                # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
-                rebuild.append(assignments[genome_name])
+            # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
+            rebuild.append(assignments[genome_name])
 
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
+    
     if rebuild:
         printline("Updating the database")
         # Extract the taxonomic levels from the list of taxa that must be rebuilt
