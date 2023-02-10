@@ -36,8 +36,8 @@ esearch -db assembly -query "txid$TXID ${SEARCH_CRITERIA}" < /dev/null \
                     printf "[TXID=%s][ID=%s] Ok\n" "$TXID" "$GCA"
                     # Define a file of file (fof) with the list of genomes for current species
                     GCAPATH=$(readlink -m $OUTDIR/${GCA}.fna.gz)
-                    println "%s\n" "$GCAPATH" >> $FOLDERPATH/genomes.txt
-                    println "%s\n" "$GCA" >> $FOLDERPATH/${CATEGORY}.txt
+                    printf "%s\n" "$GCAPATH" >> $FOLDERPATH/genomes.txt
+                    printf "%s\n" "$GCA" >> $FOLDERPATH/${CATEGORY}.txt
                 else
                     # Delete corrupted genome
                     rm $OUTDIR/${GCA}.fna.gz
