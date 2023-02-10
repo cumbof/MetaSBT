@@ -110,8 +110,8 @@ def read_params():
         "-v",
         "--version",
         action="version",
-        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current \"{}\" version and exit".format(TOOL_ID),
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the current "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
@@ -195,7 +195,9 @@ def define_boundaries(
             genome_paths.extend(samples[level_id])
 
         # Extract boundaries
-        all_kmers, min_kmers, max_kmers = get_boundaries(genome_paths, tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc)
+        all_kmers, min_kmers, max_kmers = get_boundaries(
+            genome_paths, tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc
+        )
 
         # Get the full lineage from the level folder path
         lineage_list = list()

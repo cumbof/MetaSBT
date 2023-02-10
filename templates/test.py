@@ -8,6 +8,7 @@ __version__ = "0.1.0"
 __date__ = "Feb 8, 2023"
 
 import unittest
+from typing import List
 
 # Define the test name
 TOOL_ID = "test_template"
@@ -27,7 +28,7 @@ class MyUnitTest(unittest.TestCase):
         Just a dumb test
         """
 
-        self.assertEqual(2*2, 4)
+        self.assertEqual(2 * 2, 4)
 
 
 if __name__ == "__main__":

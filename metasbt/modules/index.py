@@ -245,8 +245,8 @@ def read_params():
         "-v",
         "--version",
         action="version",
-        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current \"{}\" version and exit".format(TOOL_ID),
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the current "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
@@ -377,7 +377,7 @@ def load_taxa(ncbitax2lin_table: str, kingdom: Optional[str] = None, dump: Optio
         # Eukaryota superkingdom is limited to the Fungi kingdom
         # Limitation is due to the use of ncbi-genome-download tool (look at available "groups")
         kingdom_pos = header.index("kingdom")  # Fungi
-        
+
         for line in ncbi_table:
             line = line.strip()
             if line:
@@ -903,8 +903,8 @@ def retrieve_genomes(
         # Run ncbi-genome-download to retrieve all the complete genomes
         # related to the current tax ID from NCBI GenBank
         run(ncbi_genome_download, silence=True)
-    
-    except:
+
+    except Exception:
         # In case it is unable to process the tax ID
         return list(), None
 
@@ -913,7 +913,7 @@ def retrieve_genomes(
     for genome_path in Path(out_dir).glob("*.fna.gz"):
         # Retrieve the genome name
         _, genome_name, extension, compression = get_file_info(str(genome_path))
-        
+
         # Define the new file path
         new_genome_path = os.path.join(out_dir, "{}{}{}".format(genome_name, extension, compression))
 
@@ -927,7 +927,9 @@ def retrieve_genomes(
         # ncbi-genome-download does not allow to limit the number of genomes that must be retrieved
         # Selecte a random set of at most "--limit-genomes" genomes
         selected = list()
-        random_choice = numpy.random.RandomState(seed=int(tax_id)).choice(len(genomes), size=limit_genomes, replace=False)
+        random_choice = numpy.random.RandomState(seed=int(tax_id)).choice(
+            len(genomes), size=limit_genomes, replace=False
+        )
 
         for pos, value in enumerate(random_choice):
             if value == 0:
@@ -1141,20 +1143,15 @@ def index(
 
     # Check whether the bloom filter size must be estimated
     if genomes_paths and estimate_filter_size and not filter_size:
-        # Dump the global list of genome path to file
-        genomes_counter = 0
-        with open(os.path.join(tmp_dir, "genomes.txt"), "w+") as genomesfile:
-            for path in genomes_paths:
-                if os.path.isfile(path):
-                    genomesfile.write("{}\n".format(path))
-                    genomes_counter += 1
+        # Count the number of genomes
+        genomes_counter = sum([1 for path in genomes_paths if os.path.isfile(path)])
 
         if genomes_counter > 0:
             printline("Estimating the bloom filter size on {} genomes".format(genomes_counter))
 
             # Estimate the bloom filter size
             filter_size = estimate_bf_size(
-                os.path.join(tmp_dir, "genomes.txt"),
+                genomes_paths,
                 kmer_len,
                 os.path.join(tmp_dir, "genomes"),
                 tmp_dir,

@@ -197,8 +197,8 @@ def read_params():
         "-v",
         "--version",
         action="version",
-        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current \"{}\" version and exit".format(TOOL_ID),
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the current "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
@@ -533,7 +533,7 @@ def profile_and_assign(
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not os.path.isfile(checkm_filepath):
                                 checkm_file.write("{}\n".format(checkm_header))
-                            
+
                             checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
                 else:
@@ -564,11 +564,11 @@ def profile_and_assign(
                     # Also add its CheckM statistics if available
                     if genome_name in checkm_data:
                         checkm_filepath = os.path.join(closest_taxadir, "checkm.tsv")
-                        
+
                         with open(checkm_filepath, "a+") as checkm_file:
                             if not os.path.isfile(checkm_filepath):
                                 checkm_file.write("{}\n".format(checkm_header))
-                            
+
                             checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
     # Remove the uncompressed version of the input genome in the temporary folder
@@ -824,7 +824,7 @@ def update(
                 if not compression:
                     gzip_genome_filepath = os.path.join(unknown_taxonomy_genomes_folder, os.path.basename(genome_path))
                     run(["gzip", gzip_genome_filepath], silence=True)
-                
+
                 # Also update the list of reference genomes
                 with open(os.path.join(unknown_taxonomy_path, "references.txt"), "a+") as file:
                     file.write("{}\n".format(genome_name))
@@ -832,7 +832,9 @@ def update(
             # Get the most occurring taxonomic label
             known_taxa_counter: List[Tuple[str, int]] = Counter(known_taxa).most_common()  # type: ignore
             # In case of multiple most occurring taxa, pick the first one in lexicographic order
-            most_common_taxa = list(takewhile(lambda x: x[1]>=known_taxa_counter[0][1], known_taxa_counter))
+            most_common_taxa = list(
+                takewhile(lambda x: x[1] >= known_taxa_counter[0][1], known_taxa_counter)  # noqa: B023
+            )
             assigned_taxonomy = sorted(most_common_taxa, key=lambda x: x[0])[0][0]
 
             # Split taxonomies into levels
@@ -847,12 +849,12 @@ def update(
 
                 else:
                     # Get the partial levels for the new taxonomy
-                    new_levels = assigned_levels[:i+1]
+                    new_levels = assigned_levels[: i + 1]
                     new_levels_subpath = os.path.join(db_dir, os.sep.join(new_levels))
                     os.makedirs(new_levels_subpath, exist_ok=True)
 
                     # Get the partial levels for the old taxonomy
-                    old_levels = unknown_levels[:i+1]
+                    old_levels = unknown_levels[: i + 1]
                     old_levels_subpath = os.path.join(db_dir, os.sep.join(old_levels))
 
                     # Start moving folders
@@ -892,7 +894,7 @@ def update(
             howdesbt_tmp_dir,
             os.path.join(db_dir, "assignments.txt"),
             unknown_label=unknown_label,
-            nproc=nproc
+            nproc=nproc,
         )
 
         # Iterate over the input genomes
@@ -919,12 +921,12 @@ def update(
             # Also report the CheckM statistics of the genomes in the new clusters
             if genome_name in checkm_data:
                 checkm_filepath = os.path.join(tax_dir, "checkm.tsv")
-                
+
                 with open(checkm_filepath, "a+") as checkm_file:
                     # Add the header line in case the CheckM table does not exist
                     if not os.path.isfile(checkm_filepath):
                         checkm_file.write("{}\n".format(checkm_header))
-                    
+
                     checkm_file.write("{}\n".format(checkm_data[genome_name]))
 
             # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
@@ -932,7 +934,7 @@ def update(
 
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
-    
+
     if rebuild:
         printline("Updating the database")
         # Extract the taxonomic levels from the list of taxa that must be rebuilt

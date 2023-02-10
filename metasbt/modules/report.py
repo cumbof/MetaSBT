@@ -56,8 +56,8 @@ def read_params():
         "-v",
         "--version",
         action="version",
-        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current \"{}\" version and exit".format(TOOL_ID),
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the current "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
@@ -194,7 +194,7 @@ def main() -> None:
 
     # Check whether the output folder exists
     output_folder = os.path.abspath(os.path.dirname(args.output_file))
-    
+
     if not os.path.isdir(output_folder):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_folder)
 

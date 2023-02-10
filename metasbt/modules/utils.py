@@ -42,13 +42,13 @@ UNCOMPRESSED_FILES = [
 
 
 def bfaction(
-    genomes: List[str], 
-    tmpdir: str, 
-    kmer_len: int, 
+    genomes: List[str],
+    tmpdir: str,
+    kmer_len: int,
     filter_size: Optional[int] = None,
     nproc: int = 1,
     action: str = "bfdistance",
-    mode: str = "theta"
+    mode: str = "theta",
 ) -> float:
     """
     bfdistance and bfoperate wrapper
@@ -68,16 +68,18 @@ def bfaction(
     actions = ["bfoperate", "bfdistance"]
 
     if action not in actions:
-        raise Exception("Unsupported action \"{}\"!".format(action))
-    
+        raise Exception('Unsupported action "{}"!'.format(action))
+
     mode = mode.lower()
 
     # Define supported modes
     bfoperate_modes = ["and", "or", "xor", "eq", "not"]
     bfdistance_modes = ["hamming", "intersect", "union", "theta"]
 
-    if (action == "bfoperate" and mode not in bfoperate_modes) or (action == "bfdistance" and mode not in bfdistance_modes):
-        raise Exception("Unsupported mode \"{}\" for action \"\"!".format(mode, action))
+    if (action == "bfoperate" and mode not in bfoperate_modes) or (
+        action == "bfdistance" and mode not in bfdistance_modes
+    ):
+        raise Exception('Unsupported mode "{}" for action "{}"!'.format(mode, action))
 
     # Check whether the input genomes exist
     for filepath in genomes:
@@ -87,11 +89,11 @@ def bfaction(
     # Keep going in case of 2 or more input genomes
     if len(genomes) < 2:
         raise Exception("The number of input genomes must be >2!")
-    
+
     # Check whether the temporary folder exists, otherwise create it
     if not os.path.isdir(tmpdir):
         os.makedirs(tmpdir, exist_ok=True)
-    
+
     if not filter_size:
         # Estimate the bloom filter size with ntCard
         filter_size = estimate_bf_size(genomes, kmer_len, os.path.join(tmpdir, "genomes"), tmpdir, nproc=nproc)
@@ -176,7 +178,7 @@ def bfaction(
                         line = line.strip()
                         if line:
                             line_split = line.split(" ")
-                            
+
                             # Get genome names
                             _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_exists=False)
                             _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_exists=False)
@@ -199,7 +201,7 @@ def bfaction(
                         "--list={}".format(bflist.name),
                         "--noout",
                         "--{}".format(mode),
-                        "--report:counts"
+                        "--report:counts",
                     ],
                     stdout=bfaction_out_file,
                     stderr=howdesbt_log,
@@ -368,8 +370,8 @@ def cluster(
         unknown_counter_manifest = manifest["unknown_counter"] if "unknown_counter" in manifest else 0
 
         # Check whether the kmer length and the filter size have been successfully retrieved
-        if kmer_len == 0 or filter_size == 0:    
-            raise Exception("Unable to retrieve \"--kmer-len\" and \"--filter-size\" in {}".format(manifest_filepath))
+        if kmer_len == 0 or filter_size == 0:
+            raise Exception('Unable to retrieve "--kmer-len" and "--filter-size" in {}'.format(manifest_filepath))
 
     except Exception as ex:
         raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
@@ -378,7 +380,7 @@ def cluster(
 
     # Retrieve the list of input genomes
     genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
-    
+
     # Load boundaries
     boundaries: Dict[str, Dict[str, int]] = dict()
     with open(boundaries_filepath) as file:
@@ -415,13 +417,7 @@ def cluster(
     # Compute pair-wise distance between genomes as the number of common kmers
     # This could take a while
     bfdistance_intersect = bfaction(
-        genomes_list, 
-        tmpdir, 
-        kmer_len, 
-        filter_size=filter_size, 
-        nproc=nproc, 
-        action="bfdistance",
-        mode="intersect"
+        genomes_list, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="intersect"
     )
 
     # Iterate over genomes
@@ -429,7 +425,7 @@ def cluster(
         if genomes[i] not in assigned_genomes:
             # Retrieve the genome profile
             profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genomes[i]))
-            
+
             # Check whether the profile exists
             if os.path.isfile(profile):
                 # Load levels and scores
@@ -451,7 +447,7 @@ def cluster(
                 # At the end of the loop below, these numbers corresponds to the boundaries of the species
                 last_known_level_mink = -1
 
-                for level in sorted(level2score.keys(), key=lambda l: levels.index(l[0])):
+                for level in sorted(level2score.keys(), key=lambda lv: levels.index(lv[0])):
                     # Compose the whole taxonomic label up to the current level
                     taxonomy = "{}|{}".format("|".join(assignment), level) if assignment else level
 
@@ -464,7 +460,7 @@ def cluster(
                         # In case the taxonomy does not appear in the boundaries dictionary
                         # Come back to the higher level and search for it
                         higher_tax = "|".join(taxonomy.split("|")[:-1])
-                        
+
                         while higher_tax not in levels_in_boundaries and higher_tax:
                             # Keep truncating levels if they do not appear in the boudaries dictionary
                             higher_tax = "|".join(higher_tax.split("|")[:-1])
@@ -472,23 +468,23 @@ def cluster(
                         if higher_tax in levels_in_boundaries:
                             # Define min boundary
                             mink = -1
-                            
+
                             while mink < 0 and higher_tax:
                                 # Compute the average minimum common kmers among all the
                                 # genomes in all the taxonomic levels that match this search criteria
                                 all_mink: List[int] = list()
-                                
+
                                 for tax in boundaries:
                                     # In case the current taxonomy in boundaries contain the specific taxonomic level
                                     tax_level = "|{}__".format(taxonomy.split("|")[-1][0])
-                                    
+
                                     if higher_tax in tax and tax_level in tax:
                                         # Keep track of the boundaries for computing the avarage values
                                         all_mink.append(boundaries[tax]["min"])
 
                                 if all_mink:
                                     # Compute the boundaries
-                                    mink = int(math.ceil(sum(all_mink)/len(all_mink)))
+                                    mink = int(math.ceil(sum(all_mink) / len(all_mink)))
 
                                 else:
                                     # Keep truncating levels
@@ -514,28 +510,28 @@ def cluster(
 
                 # Fill the assignment with missing levels
                 assigned_levels = len(assignment)
-                
+
                 for pos in range(assigned_levels, len(levels)):
                     # Create new clusters
                     assignment.append("{}__{}{}".format(levels[pos][0], unknown_label, unknown_counter))
-                    
+
                     # Increment the unknown counter
                     unknown_counter += 1
 
                 # Compose the assigned (partial) label
                 assigned_label = "|".join(assignment)
-                
+
                 # Assigne current genome to the defined taxonomy
                 if assigned_label not in assigned_taxa:
                     assigned_taxa[assigned_label] = list()
                 assigned_taxa[assigned_label].append(genomes_list[i])
-                
+
                 # Mark current genome as assigned
                 assigned_genomes.append(genomes[i])
 
                 # Check whether other input genomes look pretty close to the current genome by computing
                 # the number of kmers in common between the current genome and all the other input genomes
-                for j in range(i+1, len(genomes_list)):
+                for j in range(i + 1, len(genomes_list)):
                     # Kmers in common have been already computed
                     # It returns a float by default
                     common = int(bfdistance_intersect[genomes[i]][genomes[j]])
@@ -557,7 +553,7 @@ def cluster(
             # Load the manifest file
             with open(manifest_filepath) as manifest_file:
                 manifest_lines = manifest_file.readlines()
-            
+
             # Update the --unknown-counter info
             with open(manifest_filepath, "w+") as manifest_file:
                 for line in manifest_lines:
@@ -575,7 +571,7 @@ def cluster(
     with open(outpath, "w+") as out:
         # Add header line
         out.write("# Genome\tAssignment\n")
-        
+
         for taxonomy in sorted(assigned_taxa.keys()):
             for genome_path in sorted(assigned_taxa[taxonomy]):
                 # Get genome name
@@ -623,18 +619,12 @@ def dereplicate_genomes(
 
     # Compute the theta distance between all the input genomes
     bfdistance_theta = bfaction(
-        genomes, 
-        howdesbt_tmp_dir, 
-        kmer_len, 
-        filter_size=filter_size, 
-        nproc=nproc, 
-        action="bfdistance",
-        mode="theta"
+        genomes, howdesbt_tmp_dir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="theta"
     )
 
     # Pair-wise comparison of input genomes
     for i in range(len(genomes)):
-        for j in range(i+1, len(genomes)):
+        for j in range(i + 1, len(genomes)):
             # Get genome file names
             _, genome1, _, _ = get_file_info(genomes[i])
             _, genome2, _, _ = get_file_info(genomes[j])
@@ -646,7 +636,7 @@ def dereplicate_genomes(
                 # Also take note if the excluded genomes in the filtered file
                 with open(filtered_genomes_filepath, "a+") as f:
                     f.write("{}\n".format(genomes[i]))
-                
+
                 break
 
     # Redefine the list of genomes by removing the filtered ones
@@ -678,29 +668,35 @@ def download(url: str, folder: str) -> str:
     return os.path.join(folder, url.split(os.sep)[-1])
 
 
-def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
+def estimate_bf_size(genomes: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
     """
     Estimate the bloom filter size with ntCard
 
-    :param genomes_filepath:    Path to the file with the list of paths to the genome files
-    :param kmer_len:            Length of the kmers
-    :param prefix:              Prefix of the output histogram file
-    :param tmp_dir:             Path to the temporary folder
-    :param nproc:               Make it parallel
-    :return:                    The estimated bloom filter size
+    :param genomes:     List of paths to the genome files
+    :param kmer_len:    Length of the kmers
+    :param prefix:      Prefix of the output histogram file
+    :param tmp_dir:     Path to the temporary folder
+    :param nproc:       Make it parallel
+    :return:            The estimated bloom filter size
     """
 
-    # Estimate the bloom filter size with ntCard
-    run(
-        [
-            "ntcard",
-            "--kmer={}".format(kmer_len),
-            "--threads={}".format(nproc),
-            "--pref={}".format(prefix),
-            "@{}".format(genomes_filepath),
-        ],
-        silence=True,
-    )
+    with tempfile.NamedTemporaryFile() as genomes_file:
+        # Dump the list of genome file paths
+        with open(genomes_file.name, "wt") as gfile:
+            for filepath in genomes:
+                gfile.write("{}\n".format(filepath))
+
+        # Estimate the bloom filter size with ntCard
+        run(
+            [
+                "ntcard",
+                "--kmer={}".format(kmer_len),
+                "--threads={}".format(nproc),
+                "--pref={}".format(prefix),
+                "@{}".format(genomes_file.name),
+            ],
+            silence=True,
+        )
 
     F0 = 0
     f1 = 0
@@ -762,11 +758,7 @@ def filter_checkm_tables(
 
 
 def get_boundaries(
-    bfs: List[str], 
-    tmpdir: str, 
-    kmer_len: int, 
-    filter_size: Optional[int] = None, 
-    nproc: int = 1
+    bfs: List[str], tmpdir: str, kmer_len: int, filter_size: Optional[int] = None, nproc: int = 1
 ) -> Tuple[int, int, int]:
     """
     Return kmers boundaries for a specific set of genomes defined as the minimum and
@@ -788,18 +780,12 @@ def get_boundaries(
 
     # Compute the number of kmers in common between all pairs of genomes
     bfdistance_intersect = bfaction(
-        bfs, 
-        tmpdir, 
-        kmer_len, 
-        filter_size=filter_size, 
-        nproc=nproc, 
-        action="bfdistance", 
-        mode="intersect"
+        bfs, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="intersect"
     )
 
     # Iterate over the bloom filters
     for i in range(len(bfs)):
-        for j in range(i+1, len(bfs)):
+        for j in range(i + 1, len(bfs)):
             # Get genome file names
             _, genome1, _, _ = get_file_info(bfs[i])
             _, genome2, _, _ = get_file_info(bfs[j])
@@ -821,17 +807,9 @@ def get_boundaries(
                 maxv = common
             if common < minv:
                 minv = common
-        
+
     # Use bfoperate --or (union) to retrieve the total number of kmers
-    bfoperate_or = bfaction(
-        bfs, 
-        tmpdir, 
-        kmer_len, 
-        filter_size=filter_size, 
-        nproc=nproc, 
-        action="bfoperate", 
-        mode="or"
-    )
+    bfoperate_or = bfaction(bfs, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfoperate", mode="or")
 
     # Result is under the key "result"
     kmers = bfoperate_or["result"]
@@ -868,7 +846,7 @@ def get_file_info(filepath: str, check_supported: bool = True, check_exists: boo
     # Check whether the input file is supported
     if check_supported and extension not in UNCOMPRESSED_FILES:
         raise Exception("Unrecognized input file")
-    
+
     # Retrieve the absolute path to the file folder
     absdir = os.path.abspath(os.path.dirname(filepath))
 
@@ -1006,11 +984,11 @@ def howdesbt(
 
                     # Define the path to the bloom filter representation of the genome
                     bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
-                    
+
                     if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
                         # Define the uncompressed genome path
                         genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, extension))
-                        
+
                         # Uncompress the genome file
                         with open(genome_file, "w+") as file:
                             run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
@@ -1059,7 +1037,7 @@ def howdesbt(
                 if os.path.isdir(os.path.join(level_dir, level)):
                     # Defile the path to the bloom filter file
                     bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
-                    
+
                     if os.path.isfile(bf_filepath):
                         with open(level_list, "a+") as file:
                             file.write("{}\n".format(bf_filepath))
@@ -1283,15 +1261,15 @@ def load_manifest(manifest_filepath: str) -> dict:
             line = line.strip()
             if line:
                 line_split = line.split(" ")
-                
+
                 # e.g., key: --kmer-len > kmer_len
-                key = line_split[0].strip("--").replace("-", "_")
+                key = line_split[0][2:].replace("-", "_")
                 try:
                     # Try to cast values to the appropriate type
                     manifest[key] = literal_eval(line_split[1])
-                except:
+                except Exception:
                     # Otherwise, maintain value as string
-                    manifest[key] = line_split[1]                
+                    manifest[key] = line_split[1]
 
     return manifest
 

@@ -98,12 +98,7 @@ def read_params():
         dest="resolve_dependencies",
         help="Check whether all the external software dependencies are available on your system",
     )
-    p.add_argument(
-        "--tests",
-        action="store_true",
-        default=False,
-        help="List all available tests"
-    )
+    p.add_argument("--tests", action="store_true", default=False, help="List all available tests")
     p.add_argument(
         "-v",
         "--version",
@@ -120,11 +115,11 @@ def check_for_software_updates() -> None:
     """
 
     response = requests.get(RELEASES_API_URL)
-    
+
     if response.status_code == 200:
         # Load the response in dictionary
         data = response.json()
-        
+
         if "tag_name" in data:
             if "v{}".format(__version__) != data["tag_name"]:
                 println("A new release is available!")
@@ -171,7 +166,7 @@ def print_license() -> None:
     """
 
     response = requests.get(LICENSE)
-    
+
     if response.status_code == 200:
         # Print the license content
         println("{}\n".format(response.text))
@@ -207,9 +202,9 @@ def print_tests() -> None:
 
     if not tests_list:
         raise Exception("No tests available!")
-    
+
     println("List of available tests:")
-    
+
     for test_id in sorted(tests_list):
         println("\t{}".format(test_id))
 
@@ -227,16 +222,16 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
     dependencies = sorted(list(set(dependencies)))
 
     println("Checking for software dependencies", verbose=verbose)
-    
+
     howdesbt = False
     # Iterate over the list of external software dependencies
     for dependency in dependencies:
         available = "OK" if which(dependency) is not None else "--"
         println("\t[{}] {}".format(available, dependency), verbose=verbose)
-        
+
         if dependency == "howdesbt" and available == "OK":
             howdesbt = True
-        
+
         if stop_unavailable and available == "--":
             raise Exception(
                 (
@@ -253,7 +248,7 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        
+
         except Exception:
             println(
                 (
@@ -352,13 +347,13 @@ def main() -> None:
 
             # Take track of all the external software dependencies
             dependencies = list()
-            
+
             # Load the list of module- and test-specific dependencies
             for level, modules in zip(["modules", "tests"], [modules_list, tests_list]):
                 for module_id in modules:
                     module = importlib.import_module("{}.{}.{}".format(TOOL_ID.lower(), level, module_id))
                     dependencies.extend(module.DEPENDENCIES)
-            
+
             # Remove duplicates
             dependencies = list(set(dependencies))
 
@@ -397,7 +392,7 @@ def main() -> None:
                     # Current command is a module
                     cmd_basepath = MODULES_DIR
                     subpath = "modules"
-                
+
                 elif unknown_arg in tests_list:
                     # Current command is a unit test
                     cmd_basepath = TESTS_DIR
@@ -422,7 +417,7 @@ def main() -> None:
                         for pos in range(len(unknown)):
                             if unknown[pos] in module.FILES_AND_FOLDERS:
                                 # Always use absolute paths
-                                unknown[pos+1] = os.path.abspath(unknown[pos+1])
+                                unknown[pos + 1] = os.path.abspath(unknown[pos + 1])
 
                     # Expand the command line with all the input arguments
                     cmd_line.extend(unknown)
@@ -447,7 +442,9 @@ def main() -> None:
                     println("Thanks for using {}!\n".format(TOOL_ID))
                     print_citations()
                     println(
-                        "Remember to star the {} repository on GitHub to stay updated on its development and new features:".format(TOOL_ID)
+                        "Remember to star the {} repository on GitHub to stay updated on its development and new features:".format(
+                            TOOL_ID
+                        )
                     )
                     println("https://github.com/cumbof/{}\n".format(TOOL_ID))
             else:

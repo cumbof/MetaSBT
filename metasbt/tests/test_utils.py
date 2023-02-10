@@ -12,7 +12,6 @@ import hashlib
 import os
 import tempfile
 import unittest
-from typing import List
 
 from thesmuggler import smuggle
 
@@ -20,9 +19,7 @@ from thesmuggler import smuggle
 TOOL_ID = "test_utils"
 
 # Define the list of dependencies
-DEPENDENCIES = [
-    "wget"
-]
+DEPENDENCIES = ["wget"]
 
 # Define the test root directory
 TESTS_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -57,7 +54,7 @@ class TestUtils(unittest.TestCase):
 
         # SHA-256 computed on GCA_000005845.2_ASM584v2_genomic.fna.gz
         sha256_hash_precomp = "a8bf0111c936605eb3b8d73d5a5c1dbb64ef39c87553608a6752719995e9d9ba"
-        
+
         # Retrieve the file name after download
         genome_filename = None
 
@@ -73,11 +70,7 @@ class TestUtils(unittest.TestCase):
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genome_filepath)
 
             # Get genome file name
-            _, genome_filename, _, _ = utils.get_file_info(
-                genome_filepath, 
-                check_supported=True, 
-                check_exists=True
-            )
+            _, genome_filename, _, _ = utils.get_file_info(genome_filepath, check_supported=True, check_exists=True)
 
             # Compute the SHA-256 hash
             sha256_hash = hashlib.sha256(open(genome_filepath, "rb").read()).hexdigest()
@@ -87,7 +80,6 @@ class TestUtils(unittest.TestCase):
 
         with self.subTest():
             self.assertEqual(sha256_hash, sha256_hash_precomp)
-
 
     def test_get_file_info(self):
         """
@@ -100,18 +92,14 @@ class TestUtils(unittest.TestCase):
         # It decomposes the input filepath by reporting
         # the absolute path to the file folder, file name,
         # file extension, and file compression
-        dirpath, filename, extension, compression = utils.get_file_info(
-            filepath, 
-            check_supported=False, 
-            check_exists=False
-        )
+        _, filename, extension, compression = utils.get_file_info(filepath, check_supported=False, check_exists=False)
 
         with self.subTest():
             self.assertEqual(filename, "test_utils")
-        
+
         with self.subTest():
             self.assertEqual(extension, ".py")
-        
+
         with self.subTest():
             self.assertIs(compression, None)
 

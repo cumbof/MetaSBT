@@ -44,24 +44,15 @@ def read_params():
     )
 
     # TODO Add other parameters
-    
-    p.add_argument(
-        "--log", 
-        type=os.path.abspath, 
-        help="Path to the log file"
-    )
-    p.add_argument(
-        "--verbose", 
-        action="store_true", 
-        default=False, 
-        help="Print results on screen"
-    )
+
+    p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
+    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
         "-v",
         "--version",
         action="version",
-        version="\"{}\" version {} ({})".format(TOOL_ID, __version__, __date__),
-        help="Print the current \"{}\" version and exit".format(TOOL_ID),
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the current "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
