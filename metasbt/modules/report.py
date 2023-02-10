@@ -5,7 +5,7 @@ Create the report table for a specific database
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Feb 8, 2023"
 
 import argparse as ap
 import errno
@@ -188,12 +188,15 @@ def main() -> None:
     if not os.path.isdir(args.db_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.db_dir)
 
-    # Check whether the output file and folder exist
-    output_folder = os.path.dirname(args.output_file)
+    # Check whether the output file already exists
     if os.path.isfile(args.output_file):
         raise Exception("The output file already exists")
+
+    # Check whether the output folder exists
+    output_folder = os.path.abspath(os.path.dirname(args.output_file))
+    
     if not os.path.isdir(output_folder):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.output_file)
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_folder)
 
     report(args.db_dir, args.output_file)
 
