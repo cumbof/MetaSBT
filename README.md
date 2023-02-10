@@ -86,23 +86,11 @@ The list of available modules is available by typing:
 metasbt --modules
 ```
 
-We strongly suggest to permanently add the `MetaSBT` folder to the PATH environment variable by adding the following line to your `~/.profile` or `~/.bash_profile` (if `bash` is your default shell):
-
-```bash
-echo "PATH=$PATH:~/git/MetaSBT" >> ~/.bash_profile
-```
-
-You may finally need to reload your profile to make these changes effective:
-
-```bash
-source ~/.bash_profile
-```
-
 ### Dependencies
 
 Please note that cloning this repository requires [Git](https://git-scm.com/) to be installed on your system.
 
-In this last case, remember to check that the following dependencies are installed and available on your system:
+In this last case, remember to check that the following external software dependencies are installed and available on your system:
 
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)[^2]
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.13)[^3]
