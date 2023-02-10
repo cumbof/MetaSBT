@@ -105,16 +105,24 @@ def bfaction(
     # Build the bloom filters
     for genome_path in genomes:
         # Retrieve genome file info
-        _, genome_name, extension, _ = get_file_info(genome_path)
+        _, genome_name, extension, compression = get_file_info(genome_path)
 
         # Define the uncompressed genome path
         genome_file = os.path.join(tmpdir, "{}{}".format(genome_name, extension))
 
         if not os.path.exists(genome_file):
-            # Uncompress the genome file
-            # It can always be Gzip compressed here
-            with open(genome_file, "w+") as file:
-                run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
+            if not compression:
+                # Make a symbolic link in case of an uncompressed file
+                os.symlink(
+                    genome_path,
+                    os.path.join(tmpdir, os.path.basename(genome_path)),
+                )
+
+            else:
+                # Uncompress the genome file
+                # It can always be Gzip compressed here
+                with open(genome_file, "w+") as file:
+                    run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
 
         # Define the bloom filter file path
         bf_filepath = os.path.join(tmpdir, "{}.bf".format(genome_name))
