@@ -6,7 +6,7 @@ from metasbt.metasbt import __version__
 
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
     sys.stdout.write(
-        "MetaSBT requires Python 3.8 or higher. Your Python your current Python version is {}.{}.{}\n".format(
+        "MetaSBT requires Python 3.8 or higher. Your current Python version is {}.{}.{}\n".format(
             sys.version_info[0], sys.version_info[1], sys.version_info[2]
         )
     )
@@ -30,11 +30,12 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:main"]},
     install_requires=[
-        "ncbi-genome-download",
-        "ncbitax2lin",
-        "numpy",
-        "requests",
-        "tqdm",
+        "ncbi-genome-download>=0.3.1",
+        "ncbitax2lin>=2.3.2",
+        "numpy>=1.22.3",
+        "requests>=2.28.0",
+        "thesmuggler>=1.0.1",
+        "tqdm>=4.38.0",
     ],
     keywords=[
         "bioinformatics",
