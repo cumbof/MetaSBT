@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jan 27, 2023"
+__date__ = "Feb 8, 2023"
 
 import argparse as ap
 import gzip
@@ -32,12 +32,13 @@ try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
         checkm,
+        dereplicate_genomes,
         download,
+        estimate_bf_size,
         filter_checkm_tables,
-        filter_genomes,
+        get_file_info,
         howdesbt,
         init_logger,
-        kmtricks_matrix,
         number,
         println,
         run,
@@ -52,7 +53,6 @@ TOOL_ID = "index"
 DEPENDENCIES = [
     "checkm",
     "howdesbt",
-    "kmtricks",
     "ncbi-genome-download",
     "ncbitax2lin",
     "ntcard",
@@ -226,10 +226,10 @@ def read_params():
     )
     p.add_argument(
         "--similarity",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=100.0,
+        type=number(float, minv=0.0, maxv=1.0),
+        default=1.0,
         help=(
-            "Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. "
+            "Dereplicate genomes if they have a theta distance greather than this threshold. "
             "This is used exclusively in conjunction with the --dereplicate argument"
         ),
     )
@@ -331,53 +331,6 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
         tar.extractall(taxdump_dir)
 
     return os.path.join(taxdump_dir, "nodes.dmp"), os.path.join(taxdump_dir, "names.dmp")
-
-
-def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
-    """
-    Estimate the bloom filter size with ntCard
-
-    :param genomes_filepath:    Path to the file with the list of paths to the genome files
-    :param kmer_len:            Length of the kmers
-    :param prefix:              Prefix of the output histogram file
-    :param tmp_dir:             Path to the temporary folder
-    :param nproc:               Make it parallel
-    :return:                    The estimated bloom filter size
-    """
-
-    # Estimate the bloom filter size with ntCard
-    run(
-        [
-            "ntcard",
-            "--kmer={}".format(kmer_len),
-            "--threads={}".format(nproc),
-            "--pref={}".format(prefix),
-            "@{}".format(genomes_filepath),
-        ],
-        silence=True,
-    )
-
-    F0 = 0
-    f1 = 0
-
-    # Read the ntCard output hist file
-    with open(os.path.join(tmp_dir, "genomes_k{}.hist".format(kmer_len))) as histfile:
-        F0_found = False
-        f1_found = False
-        for line in histfile:
-            line = line.strip()
-            if line:
-                if line.startswith("F0"):
-                    F0 = int(line.split()[-1])
-                    F0_found = True
-                elif line.startswith("1"):
-                    f1 = int(line.split()[-1])
-                    f1_found = True
-                if F0_found and f1_found:
-                    break
-
-    # Estimate the bloom filter size
-    return F0 - f1
 
 
 def level_name(current_level: str, prev_level: str) -> str:
@@ -538,6 +491,7 @@ def quality_control(
     os.makedirs(checkm_tmp_dir, exist_ok=True)
 
     # Run CheckM on the current set of genomes
+    # Genomes are always downloaded as fna.gz
     checkm_tables = checkm(
         genomes,
         checkm_tmp_dir,
@@ -553,83 +507,6 @@ def quality_control(
     genome_paths = [os.path.join(tmp_dir, "genomes", tax_id, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids]
 
     return genome_paths, checkm_tables
-
-
-def dereplicate_genomes(
-    genomes: list,
-    tax_id: str,
-    tmp_dir: str,
-    kmer_len: int,
-    filter_size: Optional[int] = None,
-    nproc: int = 1,
-    similarity: float = 100.0,
-) -> List[str]:
-    """
-    Dereplicate genomes
-
-    :param genomes:         List of genome file paths
-    :param tax_id:          NCBI tax ID
-    :param tmp_dir:         Path to the temporary folder
-    :param kmer_len:        Length of the kmers
-    :param filter_size:     Size of the bloom filters
-    :param nproc:           Make kmtricks parallel
-    :param similarity:      Similarity threshold
-    :return:                List of genome file paths for genomes that passed the dereplication
-    """
-
-    # Define the kmtricks temporary folder
-    kmtricks_tmp_dir = os.path.join(tmp_dir, "kmtricks", tax_id)
-    os.makedirs(kmtricks_tmp_dir, exist_ok=True)
-
-    # Create a fof file with the list of genomes
-    genomes_fof_filepath = os.path.join(kmtricks_tmp_dir, "genomes.fof")
-    ordered_genome_names = list()
-    with open(genomes_fof_filepath, "w+") as genomes_fof:
-        for genome_path in genomes:
-            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_name = os.path.splitext(genome_name)[0]
-            genomes_fof.write("{} : {}\n".format(genome_name, genome_path))
-            ordered_genome_names.append(genome_name)
-
-    # Run kmtricks to produce the kmer matrix
-    output_table = os.path.join(kmtricks_tmp_dir, "matrix.txt")
-    kmtricks_matrix(
-        genomes_fof_filepath,
-        kmtricks_tmp_dir,
-        kmer_len,
-        output_table,
-        filter_size=filter_size,
-        nproc=nproc,
-    )
-
-    # Add the header line to the kmer matrix
-    with open(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), "w+") as file1:
-        file1.write("#kmer {}\n".format(" ".join(ordered_genome_names)))
-        with open(output_table) as file2:
-            for line in file2:
-                line = line.strip()
-                if line:
-                    file1.write("{}\n".format(line))
-
-    # Get rid of the matrix withour header line
-    os.unlink(output_table)
-    shutil.move(os.path.join(kmtricks_tmp_dir, "matrix_with_header.txt"), output_table)
-
-    # Filter genomes according to their percentage of common kmers defined with --similarity
-    filtered_genomes_filepath = os.path.join(tmp_dir, "kmtricks", tax_id, "filtered.txt")
-    filter_genomes(output_table, filtered_genomes_filepath, similarity=similarity)
-
-    # Iterate over the list of dereplicated genome and rebuild the list of genome file paths
-    with open(filtered_genomes_filepath) as filtered_genomes:
-        for line in filtered_genomes:
-            line = line.strip()
-            if line:
-                gpath = os.path.join(tmp_dir, "genomes", tax_id, "{}.fna.gz".format(line))
-                if gpath in genomes:
-                    genomes.remove(gpath)
-
-    return genomes
 
 
 def organize_data(
@@ -668,10 +545,10 @@ def organize_data(
         for genome_path in genomes:
             shutil.move(genome_path, genomes_dir)
 
+            # Get the genome name from file path
+            _, genome_name, _, _ = get_file_info(genome_path)
+
             # Also take track of the genome names in the references.txt file
-            genome_name = os.path.splitext(os.path.basename(genome_path))[0]
-            if genome_path.endswith(".gz"):
-                genome_name = os.path.splitext(genome_name)[0]
             refsfile.write("{}\n".format(genome_name))
 
             # Add the genome to the full list of genomes in database
@@ -680,7 +557,7 @@ def organize_data(
     # Move the metadata table to the taxonomy folder
     if metadata:
         if os.path.isfile(metadata):
-            # TODO fix path to the genome file under "local_filename" 
+            # TODO fix path to the genome file under "local_filename" in the metadata table
             shutil.move(metadata, tax_dir)
 
     if checkm_tables:
@@ -716,7 +593,7 @@ def process_input_genomes(
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
-    similarity: float = 100.0,
+    similarity: float = 1.0,
     flat_structure: bool = False,
     logger: Optional[Logger] = None,
     verbose: bool = False,
@@ -729,7 +606,7 @@ def process_input_genomes(
     :param taxonomic_label:     Taxonomic label of the input genomes
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
-    :param kmer_len:        Length of the kmers
+    :param kmer_len:            Length of the kmers
     :param nproc:               Make the process parallel when possible
     :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
     :param completeness:        Threshold on the CheckM completeness
@@ -785,7 +662,7 @@ def process_input_genomes(
     if len(genomes) > 1 and dereplicate:
         before_dereplication = len(genomes)
 
-        dereplicate_genomes(
+        genomes = dereplicate_genomes(
             genomes,
             tax_id,
             tmp_dir,
@@ -837,7 +714,7 @@ def process_tax_id(
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
-    similarity: float = 100.0,
+    similarity: float = 1.0,
     flat_structure: bool = False,
     logger: Optional[Logger] = None,
     verbose: bool = False,
@@ -933,7 +810,7 @@ def process_tax_id(
         if len(genomes) > 1 and dereplicate:
             before_dereplication = len(genomes)
 
-            dereplicate_genomes(
+            genomes = dereplicate_genomes(
                 genomes,
                 tax_id,
                 tmp_dir,
@@ -1035,13 +912,16 @@ def retrieve_genomes(
     genomes = list()
     for genome_path in Path(out_dir).glob("*.fna.gz"):
         # Retrieve the genome name
-        genome_name = os.path.splitext(os.path.splitext(os.path.basename(str(genome_path)))[0])[0].split(".")[0]
+        _, genome_name, extension, compression = get_file_info(str(genome_path))
+        
+        # Define the new file path
+        new_genome_path = os.path.join(out_dir, "{}{}{}".format(genome_name, extension, compression))
 
         # Rename the genome file
-        shutil.move(str(genome_path), os.path.join(out_dir, "{}.fna.gz".format(genome_name)))
+        shutil.move(str(genome_path), new_genome_path)
 
         # Add the genome path to the list of genome paths
-        genomes.append(os.path.join(out_dir, "{}.fna.gz".format(genome_name)))
+        genomes.append(new_genome_path)
 
     if len(genomes) > limit_genomes:
         # ncbi-genome-download does not allow to limit the number of genomes that must be retrieved
@@ -1077,7 +957,7 @@ def index(
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
-    similarity: float = 100.0,
+    similarity: float = 1.0,
     logger: Optional[Logger] = None,
     verbose: bool = False,
     nproc: int = 1,
@@ -1088,6 +968,7 @@ def index(
     Build the database baseline
 
     :param db_dir:                  Path to the database root folder
+    :param input_list:              Path to the file with a list of input genome paths
     :param kingdom:                 Retrieve genomes that belong to a specific kingdom
     :param tmp_dir:                 Path to the temporary folder
     :param kmer_len:                Length of the kmers
@@ -1136,6 +1017,8 @@ def index(
                             taxonomy = line_split[1]
 
                         genome_path = line_split[0]
+
+                        # Force input genomes in list to be all .fna.gz
                         if not genome_path.endswith(".fna.gz"):
                             # Check whether input genomes have a valid file extension
                             raise Exception("Invalid input genome extension!\n{}".format(line_split[0]))
