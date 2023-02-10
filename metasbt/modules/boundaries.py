@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Nov 30, 2022"
+__date__ = "Feb 9, 2023"
 
 import argparse as ap
 import errno
@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import get_boundaries, init_logger, kmtricks_matrix, load_manifest, number, println  # type: ignore
+    from utils import get_boundaries, init_logger, load_manifest, number, println  # type: ignore
 except Exception:
     pass
 
@@ -30,7 +30,7 @@ except Exception:
 TOOL_ID = "boundaries"
 
 # Define the list of dependencies
-DEPENDENCIES = ["kmtricks"]
+DEPENDENCIES: List[str] = list()
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -163,22 +163,17 @@ def define_boundaries(
             for line in references:
                 line = line.strip()
                 if line:
+                    genome_path = os.path.join(
+                        os.path.dirname(str(references_path)),
+                        "genomes",
+                        "{}.fna.gz".format(line),
+                    )
+
                     if level_id == "species":
-                        samples[line] = [
-                            os.path.join(
-                                os.path.dirname(str(references_path)),
-                                "genomes",
-                                "{}.fna.gz".format(line),
-                            )
-                        ]
+                        samples[line] = [genome_path]
+
                     else:
-                        samples[next_level].append(
-                            os.path.join(
-                                os.path.dirname(str(references_path)),
-                                "genomes",
-                                "{}.fna.gz".format(line),
-                            )
-                        )
+                        samples[next_level].append(genome_path)
 
     # In case the current taxonomic level is not the species level
     if level_id != "species":
@@ -194,22 +189,8 @@ def define_boundaries(
         tmp_level_dir = os.path.join(tmp_dir, "boundaries", level_id, os.path.basename(level_dir))
         os.makedirs(tmp_level_dir, exist_ok=True)
 
-        with open(os.path.join(tmp_level_dir, "genomes.fof"), "w+") as genomes_fof:
-            for sample_id in samples:
-                genomes_fof.write("{} : {}\n".format(sample_id, " ; ".join(samples[sample_id])))
-
-        # Run kmtricks to build the kmers matrix
-        kmtricks_matrix(
-            os.path.join(tmp_level_dir, "genomes.fof"),
-            tmp_level_dir,
-            kmer_len,
-            os.path.join(tmp_level_dir, "kmers_matrix.txt"),
-            filter_size=filter_size,
-            nproc=nproc,
-        )
-
-        # Extract boundaries from the kmtricks kmers matrix
-        all_kmers, min_kmers, max_kmers = get_boundaries(os.path.join(tmp_level_dir, "kmers_matrix.txt"))
+        # Extract boundaries
+        all_kmers, min_kmers, max_kmers = get_boundaries(list(samples.values()), tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc)
 
         # Get the full lineage from the level folder path
         lineage_list = list()
