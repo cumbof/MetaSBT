@@ -6,7 +6,7 @@ In case of input genomes, results on single sequences are merged together
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Jul 24, 2022"
+__date__ = "Feb 8, 2023"
 
 import argparse as ap
 import errno
@@ -20,7 +20,7 @@ from typing import Optional
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import init_logger, number, println, run  # type: ignore
+    from utils import get_file_info, init_logger, number, println, run  # type: ignore
 except Exception:
     pass
 
@@ -143,7 +143,7 @@ def profile_list(
     verbose: bool = False,
 ) -> None:
     """
-    Query the list of sequences against a specific tree
+    Query a list of sequences against a specific tree
 
     :param input_file:      Path to the input file with query sequences
     :param input_id:        Unique identifier of the input file
@@ -172,6 +172,7 @@ def profile_list(
                 "howdesbt",
                 "query",
                 "--sort",
+                "--distinctkmers",
                 "--tree={}".format(tree),
                 "--threshold={}".format(threshold),
                 input_file,
@@ -248,6 +249,7 @@ def profile_genome(
                     "howdesbt",
                     "query",
                     "--sort",
+                    "--distinctkmers",
                     "--tree={}".format(tree),
                     "--threshold={}".format(threshold),
                     input_file,
@@ -420,10 +422,7 @@ def main() -> None:
     # In case --input_id is not provided
     if not args.input_id:
         # Use the input file name
-        args.input_id = os.path.splitext(os.path.basename(args.input_file))[0]
-        if args.input_file.lower().endswith(".gz"):
-            # Keep removing the extension in case of gzip compressed input file
-            args.input_id = os.path.splitext(args.input_id)[0]
+        _, args.input_id, _, _ = get_file_info(args.input_id)
 
     # In case --output-prefix is not provided
     if not args.output_prefix:
