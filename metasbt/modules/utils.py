@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Nov 29, 2022"
+__date__ = "Feb 9, 2023"
 
 import argparse as ap
 import errno
@@ -14,6 +14,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+from ast import literal_eval
 from collections.abc import Callable
 from logging import Logger
 from logging.config import dictConfig
@@ -21,6 +23,202 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 import numpy as np  # type: ignore
+
+# Define the list of supported extensions for compressed files
+COMPRESSED_FILES = [
+    ".gz",
+    ".rrr",
+]
+
+# Define the list of supported extensions for uncompressed files
+UNCOMPRESSED_FILES = [
+    ".fa",
+    ".fna",
+    ".fasta",
+    ".bf",
+    ".txt",
+    ".tsv",
+]
+
+
+def bfaction(
+    genomes: List[str], 
+    tmpdir: str, 
+    kmer_len: int, 
+    filter_size: Optional[int] = None,
+    nproc: int = 1,
+    action: str = "bfdistance",
+    mode: str = "theta"
+) -> float:
+    """
+    bfdistance and bfoperate wrapper
+
+    :param genomes:     List with paths to the genome or bloom filter files
+    :param tmpdir:      Path to the temporary folder with bloom filters
+    :param kmer_len:    Kmer length
+    :param filter_size: Bloom filter size
+    :param nproc:       Make it parallel
+    :param action:      "bfoperate" or "bfdistance"
+    :param mode:        bfoperate modes: "and", "or", "xor", "eq", and "not"
+                        bfdistance modes: "hamming", "intersect", "union", and "theta"
+    :return:            Dictionary with the result of bfdistance or bfoperate
+    """
+
+    # Define supported actions
+    actions = ["bfoperate", "bfdistance"]
+
+    if action not in actions:
+        raise Exception("Unsupported action \"{}\"!".format(action))
+    
+    # Define supported modes
+    bfoperate_modes = ["and", "or", "xor", "eq", "not"]
+    bfdistance_modes = ["hamming", "intersect", "union", "theta"]
+
+    if (action == "bfoperate" and mode not in bfoperate_modes) or (action == "bfdistance" and mode not in bfdistance_modes):
+        raise Exception("Unsupported mode \"{}\" for action \"\"!".format(mode, action))
+
+    # Check whether the input genomes exist
+    for filepath in genomes:
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
+
+    # Keep going in case of 2 or more input genomes
+    if len(genomes) < 2:
+        raise Exception("The number of input genomes must be >2!")
+
+    # Check for mode
+    mode = mode.lower()
+    if mode not in ["hamming", "intersect", "union", "theta"]:
+        raise Exception("Unaavailable mode \"{}\"".format(mode))
+    
+    # Check whether the temporary folder exists, otherwise create it
+    if not os.path.isdir(tmpdir):
+        os.makedirs(tmpdir, exist_ok=True)
+    
+    if not filter_size:
+        # Estimate the bloom filter size with ntCard
+        filter_size = estimate_bf_size(genomes, kmer_len, os.path.join(tmpdir, "genomes"), tmpdir, nproc=nproc)
+
+    # Take track of all the bloom filter file paths
+    bf_files = list()
+
+    howdesbt_log_filepath = os.path.join(tmpdir, "howdesbt.log")
+    howdesbt_log = open(howdesbt_log_filepath, "w+")
+
+    # Build the bloom filters
+    for genome_path in genomes:
+        # Retrieve genome file info
+        _, genome_name, extension, _ = get_file_info(genome_path)
+
+        # Define the uncompressed genome path
+        genome_file = os.path.join(tmpdir, "{}{}".format(genome_name, extension))
+
+        if not os.path.exists(genome_file):
+            # Uncompress the genome file
+            # It can always be Gzip compressed here
+            with open(genome_file, "w+") as file:
+                run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
+
+        # Define the bloom filter file path
+        bf_filepath = os.path.join(tmpdir, "{}.bf".format(genome_name))
+
+        if not os.path.exists(bf_filepath):
+            # Build the bloom filter representation of the genome
+            run(
+                [
+                    "howdesbt",
+                    "makebf",
+                    "--k={}".format(kmer_len),
+                    "--min=2",
+                    "--bits={}".format(filter_size),
+                    "--hashes=1",
+                    "--seed=0,0",
+                    genome_file,
+                    "--out={}".format(bf_filepath),
+                    "--threads={}".format(nproc),
+                ],
+                stdout=howdesbt_log,
+                stderr=howdesbt_log,
+            )
+
+        if os.path.isfile(bf_filepath):
+            bf_files.append(bf_filepath)
+
+    dist = dict()
+
+    with tempfile.NamedTemporaryFile() as bflist, tempfile.NamedTemporaryFile() as bfaction_out:
+        # Dump the list of bloom filter file paths
+        with open(bflist.name, "wt") as bflist_file:
+            for filepath in bf_files:
+                bflist_file.write("{}\n".format(filepath))
+
+        with open(bfaction_out.name, "wt") as bfaction_out_file:
+            if action == "bfdistance":
+                run(
+                    [
+                        "howdesbt",
+                        "bfdistance",
+                        "--list={}".format(bflist.name),
+                        "--show:{}".format(mode),
+                    ],
+                    stdout=bfaction_out_file,
+                    stderr=howdesbt_log,
+                )
+
+                # Retrieve the output of howdesbt bfdistance
+                with open(bfaction_out.name) as bfaction_out_file:
+                    for line in bfaction_out_file:
+                        line = line.strip()
+                        if line:
+                            line_split = line.split(" ")
+                            
+                            # Get genome names
+                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_exists=False)
+                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_exists=False)
+
+                            # Remove non informative fields
+                            if line_split[-1] == "({})".format(mode):
+                                line_split = " ".join(line_split[:-1]).strip().split(" ")
+
+                            if genome1 not in dist:
+                                dist[genome1] = dict()
+
+                            # Get distance
+                            dist[genome1][genome2] = float(line_split[-1])
+
+            elif action == "bfoperate":
+                run(
+                    [
+                        "howdesbt",
+                        "bfoperate",
+                        "--list={}".format(bflist.name),
+                        "--noout",
+                        "--{}".format(mode),
+                        "--report:counts"
+                    ],
+                    stdout=bfaction_out_file,
+                    stderr=howdesbt_log,
+                )
+
+                # Retrieve the output of howdesbt bfoperate
+                with open(bfaction_out.name) as bfaction_out_file:
+                    for line in bfaction_out_file:
+                        line = line.strip()
+                        if line:
+                            line_split = line.split(" ")
+
+                            key = "result"
+                            if line_split[0] != key:
+                                # Get genome name
+                                _, key, _, _ = get_file_info(line_split[0], check_exists=False)
+
+                            # Get active bits
+                            dist[key] = int(line_split[-3])
+
+    # Close the log
+    howdesbt_log.close()
+
+    return dist
 
 
 def checkm(
@@ -114,50 +312,68 @@ def checkm(
 
 
 def cluster(
-    kmer_matrix_filepath: str,
+    genomes_list: List[str],
     boundaries_filepath: str,
     manifest_filepath: str,
     profiles_dir: str,
+    tmpdir: str,
     outpath: str,
     unknown_label: str = "MSBT",
-) -> str:
+    nproc: int = 1,
+) -> Dict[str, str]:
     """
     Define new clusters with the unassigned MAGs
 
-    :param kmer_matrix_filepath:    Path to the kmers matrix (with header line) computed with kmtricks
+    :param genomes_list:            List with paths to the unassigned genomes
     :param boundaries_filepath:     Path to the file with the taxonomic boundaries defined by the boudaries module
     :param manifest_filepath:       Path to the manifest file
     :param profiles_dir:            Path to the temporary folder with the genomes profiles defined by the profile module
+    :param tmpdir:                  Path to the temporary folder for building bloom filters
     :param outpath:                 Path to the output file with the new assignments
     :param unknown_label:           Prefix label of the newly defined clusters
-    :return:                        Return the path to the output table with the new assignments
+    :param nproc:                   Make bfdistance parallel
+    :return:                        Return the assignments as a dictionary <genome_path, taxonomy>
     """
 
     # Check whether the output file already exists
     if os.path.isfile(outpath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
+        raise FileExistsError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
 
-    # Touch the output file
-    # This is required in order to avoid raising an exception while checking for the input parameters
-    with open(outpath, "x") as out:
-        pass
+    # Also check whether the input files already exist
+    # Otherwise, raise an exception
 
-    # Check whether the input parameters exists on file system
-    for param in locals().values():
-        # In this case, parameter values are always file and folder paths
-        if not os.path.exists(param):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), param)
+    if not os.path.isfile(boundaries_filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), boundaries_filepath)
+
+    if not os.path.isfile(manifest_filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
+
+    if not os.path.isdir(profiles_dir):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), profiles_dir)
+
+    # Retrieve both the kmer length, filter size, and unknown counter from the manifest file
+    manifest = load_manifest(manifest_filepath)
+
+    try:
+        # --kmer-len and --filter-size must be in manifest
+        kmer_len = manifest["kmer_len"]
+        filter_size = manifest["filter_size"]
+
+        # This could be the first time --unknown-counter appears in manifest
+        unknown_counter_manifest = manifest["unknown_counter"] if "unknown_counter" in manifest else 0
+
+        # Check whether the kmer length and the filter size have been successfully retrieved
+        if kmer_len == 0 or filter_size == 0:    
+            raise Exception("Unable to retrieve \"--kmer-len\" and \"--filter-size\" in {}".format(manifest_filepath))
+
+    except Exception as ex:
+        raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
+            ex.__traceback__
+        )
 
     # Retrieve the list of input genomes
-    genomes = list()
-    with open(kmer_matrix_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                # Fields are separated by a space
-                genomes = line.split(" ")[1:]
-                break
-
+    genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
+    
     # Load boundaries
     boundaries: Dict[str, Dict[str, int]] = dict()
     with open(boundaries_filepath) as file:
@@ -181,36 +397,34 @@ def cluster(
         for level in taxonomy.split("|"):
             levels_in_boundaries.add(level)
 
-    # Retrieve the unknown counter from the manifest file
-    unknown_counter_manifest = 0
-    unknown_counter_found = False
-    with open(manifest_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                if line.startswith("--unknown-counter"):
-                    unknown_counter_manifest = int(line.split(" ")[-1])
-                    unknown_counter_found = True
-
     # Initialise variable for counting the unknown clusters
     unknown_counter = unknown_counter_manifest
 
-    # Load the kmers matrix
-    # Skip the header line with the list of genomes
-    matrix = load_matrix(kmer_matrix_filepath, skiprows=1)
+    # Define the list of taxonomic levels for sorting profiles
+    levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
-    # Define the list of level IDs for sorting profiles
-    levels = ["k", "p", "c", "o", "f", "g", "s"]
-
-    # Keep track of the already assigned MAGs
+    # Keep track of the already assigned genomes
     assigned_taxa: Dict[str, List[str]] = dict()
     assigned_genomes: List[str] = list()
 
+    # Compute pair-wise distance between genomes as the number of common kmers
+    # This could take a while
+    bfdistance_intersect = bfaction(
+        genomes_list, 
+        tmpdir, 
+        kmer_len, 
+        filter_size=filter_size, 
+        nproc=nproc, 
+        action="bfdistance",
+        mode="intersect"
+    )
+
     # Iterate over genomes
-    for i, row in enumerate(matrix):
+    for i in range(len(genomes_list)):
         if genomes[i] not in assigned_genomes:
             # Retrieve the genome profile
             profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genomes[i]))
+            
             # Check whether the profile exists
             if os.path.isfile(profile):
                 # Load levels and scores
@@ -227,10 +441,10 @@ def cluster(
 
                 # Define the assignment
                 assignment: List[str] = list()
-                # Keep track of the boundaries for the last identified level
+
+                # Keep track of the boundary for the last identified level
                 # At the end of the loop below, these numbers corresponds to the boundaries of the species
                 last_known_level_mink = -1
-                last_known_level_maxk = -1
 
                 for level in sorted(level2score.keys(), key=lambda l: levels.index(l[0])):
                     # Compose the whole taxonomic label up to the current level
@@ -240,56 +454,54 @@ def cluster(
                     if taxonomy in boundaries:
                         # Search in the boundaries dictionary
                         mink = boundaries[taxonomy]["min"]
-                        maxk = boundaries[taxonomy]["max"]
 
                     else:
                         # In case the taxonomy does not appear in the boundaries dictionary
                         # Come back to the higher level and search for it
                         higher_tax = "|".join(taxonomy.split("|")[:-1])
+                        
                         while higher_tax not in levels_in_boundaries and higher_tax:
                             # Keep truncating levels if they do not appear in the boudaries dictionary
                             higher_tax = "|".join(higher_tax.split("|")[:-1])
 
                         if higher_tax in levels_in_boundaries:
-                            # Define boundaries
+                            # Define min boundary
                             mink = -1
-                            maxk = -1
-                            while mink < 0 and maxk < 0 and higher_tax:
-                                # Compute the average minimum and maximum common kmers among all the
+                            
+                            while mink < 0 and higher_tax:
+                                # Compute the average minimum common kmers among all the
                                 # genomes in all the taxonomic levels that match this search criteria
                                 all_mink: List[int] = list()
-                                all_maxk: List[int] = list()
+                                
                                 for tax in boundaries:
                                     # In case the current taxonomy in boundaries contain the specific taxonomic level
                                     tax_level = "|{}__".format(taxonomy.split("|")[-1][0])
+                                    
                                     if higher_tax in tax and tax_level in tax:
                                         # Keep track of the boundaries for computing the avarage values
                                         all_mink.append(boundaries[tax]["min"])
-                                        all_maxk.append(boundaries[tax]["max"])
 
                                 if all_mink:
                                     # Compute the boundaries
-                                    mink = int(math.ceil(sum(all_mink) / len(all_mink)))
-                                    maxk = int(math.ceil(sum(all_maxk) / len(all_maxk)))
+                                    mink = int(math.ceil(sum(all_mink)/len(all_mink)))
 
                                 else:
                                     # Keep truncating levels
                                     higher_tax = "|".join(higher_tax.split("|")[:-1])
 
-                            if mink < 0 and maxk < 0:
+                            if mink < 0:
                                 # In case computing boundaries for the current taxonomy is not possible
                                 # This should never happen
                                 raise Exception("Unable to assign genome {}".format(genomes[i]))
 
                     # At this point the boudaries are defined
-                    if level2score[level] <= maxk and level2score[level] >= mink:
+                    if level2score[level] >= mink:
                         # In case the score for the current level falls in the boundaries interval
                         # Set the assignment
                         assignment.append(level)
 
-                        # Keep track of the boundaries for this last identified level
+                        # Keep track of the boundary for this last identified level
                         last_known_level_mink = mink
-                        last_known_level_maxk = maxk
 
                     else:
                         # Does not make sense to continue with the other lower taxonomic level
@@ -297,41 +509,43 @@ def cluster(
 
                 # Fill the assignment with missing levels
                 assigned_levels = len(assignment)
-                for i in range(assigned_levels, len(levels)):
+                
+                for pos in range(assigned_levels, len(levels)):
                     # Create new clusters
-                    assignment.append("{}__{}{}".format(levels[i], unknown_label, unknown_counter))
+                    assignment.append("{}__{}{}".format(levels[pos][0], unknown_label, unknown_counter))
+                    
                     # Increment the unknown counter
                     unknown_counter += 1
 
                 # Compose the assigned (partial) label
                 assigned_label = "|".join(assignment)
+                
                 # Assigne current genome to the defined taxonomy
                 if assigned_label not in assigned_taxa:
                     assigned_taxa[assigned_label] = list()
-                assigned_taxa[assigned_label].append(genomes[i])
+                assigned_taxa[assigned_label].append(genomes_list[i])
+                
                 # Mark current genome as assigned
                 assigned_genomes.append(genomes[i])
 
                 # Check whether other input genomes look pretty close to the current genome by computing
                 # the number of kmers in common between the current genome and all the other input genomes
-                for i2, row2 in enumerate(matrix):
-                    if i2 > i:
-                        # Count how many times a 1 appear in the same position of both the arrays
-                        common = sum([1 for pos, _ in enumerate(row) if row[pos] > 0 and row2[pos] > 0])
+                for j in range(i+1, len(genomes_list)):
+                    # Kmers in common have been already computed
+                    common = bfdistance_intersect[genomes[i]][genomes[j]]
 
-                        # In case this number falls into the [last_known_level_mink, last_known_level_maxk] interval
-                        if common <= last_known_level_maxk and common >= last_known_level_mink:
-                            # Set the second genome as assigned
-                            assigned_genomes.append(genomes[i2])
-                            # Also assign these genomes to the same taxonomy assigned to the current genome
-                            assigned_taxa[assigned_label].append(genomes[i2])
+                    if common >= last_known_level_mink:
+                        # Set the second genome as assigned
+                        assigned_genomes.append(genomes[j])
+                        # Also assign these genomes to the same taxonomy assigned to the current genome
+                        assigned_taxa[assigned_label].append(genomes_list[j])
 
     # Update the manifest with the new unknown counter
     if unknown_counter > unknown_counter_manifest:
-        if not unknown_counter_found:
+        if "unknown_counter" not in manifest:
             # Append the --unknown-counter info to the manifest file
-            with open(manifest_filepath, "a+") as file:
-                file.write("--unknown-counter {}\n".format(unknown_counter))
+            with open(manifest_filepath, "a+") as manifest_file:
+                manifest_file.write("--unknown-counter {}\n".format(unknown_counter))
 
         else:
             # Load the manifest file
@@ -348,15 +562,91 @@ def cluster(
                             line_split[-1] = str(unknown_counter)
                         manifest_file.write("{}\n".format(" ".join(line_split)))
 
+    # Mapping genome - taxonomy
+    assignment = dict()
+
     # Dumpt the new assignments to the output file
     with open(outpath, "w+") as out:
         # Add header line
         out.write("# Genome\tAssignment\n")
+        
         for taxonomy in sorted(assigned_taxa.keys()):
-            for genome in sorted(assigned_taxa[taxonomy]):
+            for genome_path in sorted(assigned_taxa[taxonomy]):
+                # Get genome name
+                _, genome, _, _ = get_file_info(genome_path)
+
                 out.write("{}\t{}\n".format(genome, taxonomy))
 
-    return outpath
+                # Take track of mapping genome - taxonomy
+                assignment[genome_path] = taxonomy
+
+    return assignment
+
+
+def dereplicate_genomes(
+    genomes: list,
+    tax_id: str,
+    tmp_dir: str,
+    kmer_len: int,
+    filter_size: Optional[int] = None,
+    nproc: int = 1,
+    similarity: float = 1.0,
+) -> List[str]:
+    """
+    Dereplicate genomes
+
+    :param genomes:         List of genome file paths
+    :param tax_id:          NCBI tax ID
+    :param tmp_dir:         Path to the temporary folder
+    :param kmer_len:        Length of the kmers
+    :param filter_size:     Size of the bloom filters
+    :param nproc:           Make it parallel
+    :param similarity:      Similarity threshold on the theta distance
+                            Theta between two genomes A and B is defined as N/D, where
+                            N is the number of 1s in common between A and B, and
+                            D is the number of 1s in A
+    :return:                List of genome file paths for genomes that passed the dereplication
+    """
+
+    # Define the HowDeSBT temporary folder
+    howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt", tax_id)
+    os.makedirs(howdesbt_tmp_dir, exist_ok=True)
+
+    filtered_genomes_filepath = os.path.join(howdesbt_tmp_dir, "filtered.txt")
+    filtered_genomes = list()
+
+    # Compute the theta distance between all the input genomes
+    bfdistance_theta = bfaction(
+        genomes, 
+        howdesbt_tmp_dir, 
+        kmer_len, 
+        filter_size=filter_size, 
+        nproc=nproc, 
+        action="bfdistance",
+        mode="theta"
+    )
+
+    # Pair-wise comparison of input genomes
+    for i in range(len(genomes)):
+        for j in range(i+1, len(genomes)):
+            # Get genome file names
+            _, genome1, _, _ = get_file_info(genomes[i])
+            _, genome2, _, _ = get_file_info(genomes[j])
+
+            if bfdistance_theta[genome1][genome2] >= similarity:
+                # Take track of excluded genomes
+                filtered_genomes.append(genomes[i])
+
+                # Also take note if the excluded genomes in the filtered file
+                with open(filtered_genomes_filepath, "a+") as f:
+                    f.write("{}\n".format(genomes[i]))
+                
+                break
+
+    # Redefine the list of genomes by removing the filtered ones
+    genomes = list(set(genomes).difference(set(filtered_genomes)))
+
+    return genomes
 
 
 def download(url: str, folder: str) -> str:
@@ -380,6 +670,53 @@ def download(url: str, folder: str) -> str:
     )
 
     return os.path.join(folder, url.split(os.sep)[-1])
+
+
+def estimate_bf_size(genomes_filepath: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
+    """
+    Estimate the bloom filter size with ntCard
+
+    :param genomes_filepath:    Path to the file with the list of paths to the genome files
+    :param kmer_len:            Length of the kmers
+    :param prefix:              Prefix of the output histogram file
+    :param tmp_dir:             Path to the temporary folder
+    :param nproc:               Make it parallel
+    :return:                    The estimated bloom filter size
+    """
+
+    # Estimate the bloom filter size with ntCard
+    run(
+        [
+            "ntcard",
+            "--kmer={}".format(kmer_len),
+            "--threads={}".format(nproc),
+            "--pref={}".format(prefix),
+            "@{}".format(genomes_filepath),
+        ],
+        silence=True,
+    )
+
+    F0 = 0
+    f1 = 0
+
+    # Read the ntCard output hist file
+    with open("{}_k{}.hist".format(prefix, kmer_len)) as histfile:
+        F0_found = False
+        f1_found = False
+        for line in histfile:
+            line = line.strip()
+            if line:
+                if line.startswith("F0"):
+                    F0 = int(line.split()[-1])
+                    F0_found = True
+                elif line.startswith("1"):
+                    f1 = int(line.split()[-1])
+                    f1_found = True
+                if F0_found and f1_found:
+                    break
+
+    # Estimate the bloom filter size
+    return F0 - f1
 
 
 def filter_checkm_tables(
@@ -418,101 +755,109 @@ def filter_checkm_tables(
     return genomes
 
 
-def filter_genomes(kmer_matrix_filepath: str, outpath: str, similarity: float = 100.0) -> None:
+def get_boundaries(
+    bfs: List[str], 
+    tmpdir: str, 
+    kmer_len: int, 
+    filter_size: Optional[int] = None, 
+    nproc: int = 1
+) -> Tuple[int, int, int]:
     """
-    Filter genomes according to their set of kmers.
-    Discard a genome if there is at least one other genome with a specific percentage of kmers in common
-
-    :param kmer_matrix_filepath:    Path to the kmers matrix file (with header line) as output of kmtricks
-    :param outpath:                 Path to the output file with the list of filtered genomes
-    :param similarity:              Discard a genome if it result to have at least this percentage of common kmers with another genome
-    :return:                        List of excluded genomes
-    """
-
-    # Check whether the output file already exists
-    if os.path.isfile(outpath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), outpath)
-
-    # Retrieve the list of input genomes
-    genomes = list()
-    with open(kmer_matrix_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                # Fields are separated by a space
-                genomes = line.split(" ")[1:]
-                break
-
-    # Load the kmers matrix
-    # Skip the header line with the list of genomes
-    matrix = load_matrix(kmer_matrix_filepath, skiprows=1)
-
-    # Take track of the excluded genomes
-    excluded = list()
-
-    # Iterate over genomes
-    for i1, row1 in enumerate(matrix):
-        for i2, row2 in enumerate(matrix):
-            if i2 > i1 and genomes[i1] not in excluded and genomes[i2] not in excluded:
-                # Count the number of kmers for the first genome
-                kmers = sum([1 for k in row1 if k > 0])
-                # Define the filter threshold
-                threshold = int(math.ceil(kmers * similarity / 100.0))
-                # Count how many times a 1 appear in the same position of both the arrays
-                common = sum([1 for pos, _ in enumerate(row1) if row1[i1] > 0 and row2[i2] > 0])
-
-                # Check whether these two genomes must be dereplicated
-                if common >= threshold:
-                    # Add one of the two genomes to the list of exluded genomes
-                    excluded.append(genomes[i2])
-
-    # Check whether all the input genomes have been excluded
-    if len(genomes) == len(excluded):
-        raise Exception("All the input genomes have been excluded")
-
-    # Dump the list of filtered genomes to the output file
-    with open(outpath, "w+") as output:
-        for genome in excluded:
-            output.write("{}\n".format(genome))
-
-
-def get_boundaries(kmer_matrix_filepath: str) -> Tuple[int, int, int]:
-    """
-    Return kmers boundaries for current taxonomic level defined as the minimum and
+    Return kmers boundaries for a specific set of genomes defined as the minimum and
     maximum number of common kmers among all the genomes in the current taxonomic level
 
-    :param kmer_matrix_filepath:   Path to the kmers matrix file (with no header line) as output of kmtricks
-    :return:                       Return a tuple with boundaries
+    :param genomes:     List with paths to the bloom filter representations of the genomes
+    :param tmpdir:      Path to the temporary folder
+    :param kmer_len:    Kmer length
+    :param filter_size: Bloom filter size
+    :param nproc:       Make it parallel
+    :return:            Return a tuple with boundaries
+                        Total number, minimum, and maximum amount of kmers in common among the input genomes
     """
 
-    # Load the kmers matrix
-    # It does not contain any header line
-    matrix = load_matrix(kmer_matrix_filepath)
-
-    # Search for the minimum and maximum number of common kmers among all the genomes in the kmers matrix
+    # Search for the minimum and maximum number of common kmers among all the input genomes
     kmers = 0
     minv = np.Inf
     maxv = 0
 
-    # Iterate over genomes
-    for i1, row1 in enumerate(matrix):
-        for i2, row2 in enumerate(matrix):
-            if i2 > i1:
-                # Count how many times a value >0 appear in the same position of both the arrays
-                # in the count matrix produced by kmtricks
-                common = sum([1 for i, _ in enumerate(row1) if row1[i] > 0 and row2[i] > 0])
+    # Compute the number of kmers in common between all pairs of genomes
+    bfdistance_intersect = bfaction(
+        bfs, 
+        tmpdir, 
+        kmer_len, 
+        filter_size=filter_size, 
+        nproc=nproc, 
+        action="bfdistance", 
+        mode="intersect"
+    )
 
-                # Update the minimum and maximum number of common kmers
-                if common > maxv:
-                    maxv = common
-                if common < minv:
-                    minv = common
+    # Iterate over the bloom filters
+    for i in range(len(bfs)):
+        for j in range(i+1, len(bfs)):
+            # Get genome file names
+            _, genome1, _, _ = get_file_info(bfs[i])
+            _, genome2, _, _ = get_file_info(bfs[j])
 
-        # Also take track of the total number of kmers
-        if kmers == 0:
-            kmers = len(row1)
+            # Result is under key "result"
+            common = bfdistance_intersect[genome1][genome2]
+
+            # Update the minimum and maximum number of common kmers
+            if common > maxv:
+                maxv = common
+            if common < minv:
+                minv = common
+        
+    # Use bfoperate --or (union) to retrieve the total number of kmers
+    bfoperate_or = bfaction(
+        bfs, 
+        tmpdir, 
+        kmer_len, 
+        filter_size=filter_size, 
+        nproc=nproc, 
+        action="bfoperate", 
+        mode="or"
+    )
+
+    # Result is under the key "result"
+    kmers = bfoperate_or["result"]
 
     return kmers, minv, maxv
+
+
+def get_file_info(filepath: str, check_supported: bool = True, check_exists: bool = True) -> str:
+    """
+    Get file path, name, extension, and compression
+
+    :param filepath:    Path to the input file
+    :return:            File path, name, extension, and compression
+    """
+
+    if check_exists:
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+
+    # Trim the folder path out
+    basename = os.path.basename(filepath)
+
+    # Split the basename
+    filename, extension = os.path.splitext(basename)
+
+    # Take track of the extension in case of compression
+    compression = None
+
+    # Check whether it is compressed
+    if extension in COMPRESSED_FILES:
+        compression = extension
+        filename, extension = os.path.splitext(filename)
+
+    # Check whether the input file is supported
+    if check_supported and extension not in UNCOMPRESSED_FILES:
+        raise Exception("Unrecognized input file")
+    
+    # Retrieve the absolute path to the file folder
+    absdir = os.path.abspath(os.path.dirname(filepath))
+
+    return absdir, filename, extension, compression
 
 
 def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, int]:
@@ -639,22 +984,21 @@ def howdesbt(
                 os.makedirs(filters_dir, exist_ok=True)
 
                 # Iterate over the genome files
+                # Genomes are always Gzip compressed .fna files here
                 for genome_path in Path(genomes_folder).glob("*.fna.gz"):
-                    # Retrieve the genome name from the file path
-                    genome_name = os.path.splitext(os.path.basename(str(genome_path)))[0]
-                    if str(genome_path).endswith(".gz"):
-                        genome_name = os.path.splitext(genome_name)[0]
+                    # Retrieve genome file info
+                    _, genome_name, extension, _ = get_file_info(genome_path)
 
+                    # Define the path to the bloom filter representation of the genome
                     bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
+                    
                     if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
-                        # Uncompress the current genome
-                        genome_file = os.path.join(genomes_folder, "{}.fna".format(genome_name))
+                        # Define the uncompressed genome path
+                        genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, extension))
+                        
+                        # Uncompress the genome file
                         with open(genome_file, "w+") as file:
-                            run(
-                                ["gzip", "-dc", str(genome_path)],
-                                stdout=file,
-                                stderr=file,
-                            )
+                            run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
 
                         # Build the bloom filter file from the current genome
                         run(
@@ -687,11 +1031,7 @@ def howdesbt(
                     elif os.path.isfile("{}.gz".format(bf_filepath)):
                         # Uncompress the bloom filter file
                         with open(bf_filepath, "w+") as file:
-                            run(
-                                ["gzip", "-dc", "{}.gz".format(bf_filepath)],
-                                stdout=file,
-                                stderr=file,
-                            )
+                            run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
 
                     # Take track of the current bloom filter file path
                     with open(level_list, "a+") as file:
@@ -702,7 +1042,9 @@ def howdesbt(
             # Define the new list of bloom filters
             for level in os.listdir(level_dir):
                 if os.path.isdir(os.path.join(level_dir, level)):
+                    # Defile the path to the bloom filter file
                     bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
+                    
                     if os.path.isfile(bf_filepath):
                         with open(level_list, "a+") as file:
                             file.write("{}\n".format(bf_filepath))
@@ -908,84 +1250,6 @@ def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, ve
     return None
 
 
-def kmtricks_matrix(
-    genomes_fof: str,
-    run_dir: str,
-    kmer_len: int,
-    output_table: str,
-    filter_size: Optional[int] = None,
-    nproc: int = 1,
-) -> None:
-    """
-    Run kmtricks for building the kmers matrix
-
-    :param genomes_fof:     Path to the fof file with the list of genomes
-    :param run_dir:         Path to the working directory
-    :param kmer_len:        Length of the kmers
-    :param output_table:    Path to the output kmer matrix file
-    :param filter_size:     Size of the bloom filters
-    :param nproc:           Make it parallel
-    """
-
-    # Check whether the run folder exists
-    if not os.path.isdir(run_dir):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), run_dir)
-
-    # Initialise the kmtricks log
-    # Both stdout and stderr will be redirected here
-    kmtricks_log_filepath = os.path.join(run_dir, "kmtricks.log")
-    kmtricks_log = open(kmtricks_log_filepath, "w+")
-
-    # Run kmtricks for building the kmers matrix
-    cmd = [
-        "kmtricks",
-        "pipeline",
-        "--file",
-        genomes_fof,
-        "--run-dir",
-        os.path.join(run_dir, "matrix"),
-        "--kmer-size",
-        str(kmer_len),
-        "--mode",
-        "kmer:count:bin",
-        "--hard-min",
-        "1",
-        "--cpr",
-        "--threads",
-        str(nproc),
-    ]
-
-    if filter_size:
-        cmd.extend(["--bloom-size", str(filter_size)])
-
-    run(cmd, stdout=kmtricks_log, stderr=kmtricks_log)
-
-    # Aggregate partitions into a single kmer matrix
-    run(
-        [
-            "kmtricks",
-            "aggregate",
-            "--run-dir",
-            os.path.join(run_dir, "matrix"),
-            "--matrix",
-            "kmer",
-            "--format",
-            "text",
-            "--cpr-in",
-            "--sorted",
-            "--threads",
-            str(nproc),
-            "--output",
-            output_table,
-        ],
-        stdout=kmtricks_log,
-        stderr=kmtricks_log,
-    )
-
-    # Close the log file handler
-    kmtricks_log.close()
-
-
 def load_manifest(manifest_filepath: str) -> dict:
     """
     Load the manifest file
@@ -1005,60 +1269,16 @@ def load_manifest(manifest_filepath: str) -> dict:
             if line:
                 line_split = line.split(" ")
                 
-                # e.g., --kmer-len > kmer_len
+                # e.g., key: --kmer-len > kmer_len
                 key = line_split[0].strip("--").replace("-", "_")
                 try:
-                    # Try to cast values to int if possible
-                    manifest[key] = int(line_split[1])
+                    # Try to cast values to the appropriate type
+                    manifest[key] = literal_eval(line_split[1])
                 except:
+                    # Otherwise, maintain value as string
                     manifest[key] = line_split[1]                
 
     return manifest
-
-
-def load_matrix(kmer_matrix_filepath: str, skiprows: int = 0) -> np.ndarray:
-    """
-    Load a kmtricks kmers matrix into a numpy ndarray with a row for each genome
-    and a column for each kmer
-
-    :param kmer_matrix_filepath:  Path to the kmers matrix file as output of kmtricks
-    :param skiprows:             Define how many lines must be skipped before loading the matrix
-    :return:                     Return the kmers matrix
-    """
-
-    # Check whether the input file exists
-    if not os.path.isfile(kmer_matrix_filepath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), kmer_matrix_filepath)
-
-    # Retrieve the number of genomes as the number of columns in the matrix
-    # excluding the first one with the list of kmers
-    columns = 0
-    with open(kmer_matrix_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                # Fields are separated by a space
-                columns = len(line.split(" "))
-                break
-
-    # Check whether the number of genomes is greater than one
-    if columns <= 1:
-        raise Exception("Not enough genomes")
-
-    # Load the whole matrix with numpy
-    # Do not consider the first column
-    matrix = np.loadtxt(
-        kmer_matrix_filepath,
-        delimiter=" ",
-        usecols=np.arange(1, columns),
-        skiprows=skiprows,
-    )
-
-    # Transpose the kmers matrix
-    # One row for each genome
-    matrix = matrix.T
-
-    return matrix
 
 
 def number(
