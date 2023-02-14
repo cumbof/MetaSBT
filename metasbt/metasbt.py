@@ -12,6 +12,7 @@ import argparse as ap
 import errno
 import importlib
 import os
+import platform
 import pkgutil
 import subprocess
 import sys
@@ -24,6 +25,11 @@ from metasbt.modules.utils import println, run
 
 # Define the tool name
 TOOL_ID = "MetaSBT"
+
+# Control platform
+# It works on Darwin and Linux platforms
+if platform.system() not in ["Darwin", "Linux"]:
+    raise Exception("{} does not work on {} platforms".format(TOOL_ID, platform.system()))
 
 # Control current Python version
 # It requires Python 3.8 or higher
