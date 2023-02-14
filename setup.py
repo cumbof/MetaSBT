@@ -1,11 +1,15 @@
+import platform
 import sys
 
 import setuptools
 
 from metasbt.metasbt import __version__
 
+if platform.system() not in ["Darwin", "Linux"]:
+    sys.exit("MetaSBT does not work on {} platforms".format(platform.system()))
+
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
-    sys.stdout.write(
+    sys.exit(
         "MetaSBT requires Python 3.8 or higher. Your current Python version is {}.{}.{}\n".format(
             sys.version_info[0], sys.version_info[1], sys.version_info[2]
         )
