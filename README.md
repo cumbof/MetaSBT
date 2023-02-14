@@ -94,9 +94,10 @@ In this last case, remember to check that the following external software depend
 
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)[^2]
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.13)[^3]
+- [kitsune](https://github.com/natapol/kitsune) (version >=)[^4]
 - [ncbi-genome-download](https://github.com/kblin/ncbi-genome-download) (version >=0.3.1)
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
-- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^4]
+- [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^5]
 - [pip](https://pip.pypa.io/) (version >=21.2.4)
 - [python](http://www.python.org/) (version >=3.7)
 - [wget](https://www.gnu.org/software/wget/) (version >=1.21.3)
@@ -129,9 +130,9 @@ The following command will trigger the generation of the database with all the a
 
 ```bash
 metasbt index --db-dir ~/myindex \
-              --kmer-len 31 \
               --estimate-filter-size \
               --increase-filter-size 5.0 \
+              --estimate-kmer-size \
               --kingdom Bacteria \
               --dereplicate \
               --similarity 100.0 \
@@ -140,6 +141,7 @@ metasbt index --db-dir ~/myindex \
               --parallel 4 \
               --nproc 2 \
               --pplacer-threads 2 \
+              --jellyfish-threads 2 \
               --tmp-dir ~/tmp \
               --cleanup \
               --verbose
@@ -160,15 +162,18 @@ In case you would like to create a database from a specific set of genomes avail
 | `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
 | `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
 | `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
+| `--closely-related`      | `False` |           | For closely related genomes use this flag |
 | `--db-dir`               |         | ⚑         | Database folder path |
 | `--dereplicate`          | `False` |           | Dereplicate input genomes |
 | `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically overrides the `--filter-size` option |
+| `--estimate-kmer-size`   | `False` |           | Estimate the optimal kmer size with kitsune. It automatically overrides the `--kmer-len` option |
 | `--filter-size`          |         | ⚑         | Bloom filter size |
 | `--flat-structure`       |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
 | `--help`                 |         |           | Print the list of arguments and exit |
 | `--increase-filter-size` | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
 | `--input-list`           |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
-| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Fungi`) |
+| `--jellyfish-threads`    | `1`     |           | Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances |
+| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Viruses`) |
 | `--kmer-len`             |         | ⚑         | This is the length of the kmers used for building bloom filters |
 | `--limit-genomes`        | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
 | `--log`                  |         |           | Path to the log file |
@@ -374,4 +379,5 @@ Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg]
 [^1]: Grüning, Björn, et al. "[Bioconda: sustainable and comprehensive software distribution for the life sciences.](https://doi.org/10.1038/s41592-018-0046-7)" Nature methods 15.7 (2018): 475-476.
 [^2]: Parks, Donovan H., et al. "[CheckM: assessing the quality of microbial genomes recovered from isolates, single cells, and metagenomes.](https://doi.org/10.1101/gr.186072.114)" Genome research 25.7 (2015): 1043-1055.
 [^3]: Harris, Robert S., and Paul Medvedev. "[Improved representation of sequence bloom trees.](https://doi.org/10.1093/bioinformatics/btz662)" Bioinformatics 36.3 (2020): 721-727.
-[^4]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
+[^4]: Pornputtapong, Natapol, et al. "[KITSUNE: A Tool for Identifying Empirically Optimal K-mer Length for Alignment-Free Phylogenomic Analysis](https://doi.org/10.3389/fbioe.2020.556413)" Frontiers in Bioengineering and Biotechnology 8 (2020): 556413.
+[^5]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
