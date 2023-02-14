@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 8, 2023"
+__date__ = "Feb 14, 2023"
 
 import argparse as ap
 import gzip
@@ -40,6 +40,7 @@ try:
         howdesbt,
         init_logger,
         number,
+        optimal_k,
         println,
         run,
     )
@@ -53,6 +54,7 @@ TOOL_ID = "index"
 DEPENDENCIES = [
     "checkm",
     "howdesbt",
+    "kitsune",
     "ncbi-genome-download",
     "ncbitax2lin",
     "ntcard",
@@ -105,6 +107,13 @@ def read_params():
         help="Remove temporary data at the end of the pipeline",
     )
     p.add_argument(
+        "--closely-related",
+        action="store_true",
+        default=False,
+        dest="closely_related",
+        help="For closesly related genomes use this flag",
+    )
+    p.add_argument(
         "--db-dir",
         type=os.path.abspath,
         required=True,
@@ -122,7 +131,14 @@ def read_params():
         action="store_true",
         default=False,
         dest="estimate_filter_size",
-        help="Automatically estimate the best bloom filter size",
+        help="Automatically estimate the best bloom filter size with ntCard",
+    )
+    p.add_argument(
+        "--estimate-kmer-size",
+        action="store_true",
+        default=False,
+        dest="estimate_kmer_size",
+        help="Automatically estimate the optimal kmer size with kitsune",
     )
     p.add_argument(
         "--filter-size",
@@ -161,6 +177,13 @@ def read_params():
         ),
     )
     p.add_argument(
+        "--jellyfish-threads",
+        type=number(int, minv=1, maxv=os.cpu_count()),
+        default=1,
+        dest="jellyfish_threads",
+        help="Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances",
+    )
+    p.add_argument(
         "--kingdom",
         type=str,
         choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
@@ -168,9 +191,16 @@ def read_params():
     )
     p.add_argument(
         "--kmer-len",
-        type=number(int, minv=8),
+        type=number(int, minv=4),
         required=True,
         dest="kmer_len",
+        help="This is the length of the kmers used for building bloom filters",
+    )
+    p.add_argument(
+        "--kmer-len-limit",
+        type=number(int, minv=4),
+        default=32,
+        dest="kmer_len_limit",
         help="This is the length of the kmers used for building bloom filters",
     )
     p.add_argument(
@@ -956,14 +986,18 @@ def index(
     min_genomes: float = 1.0,
     estimate_filter_size: bool = False,
     increase_filter_size: float = 0.0,
+    estimate_kmer_size: bool = False,
+    kmer_len_limit: int = 32,
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
     similarity: float = 1.0,
+    closely_related: bool = False,
     logger: Optional[Logger] = None,
     verbose: bool = False,
     nproc: int = 1,
     pplacer_threads: int = 1,
+    jellyfish_threads: int = 1,
     parallel: int = 1,
 ) -> None:
     """
@@ -981,14 +1015,18 @@ def index(
     :param min_genomes:             Consider species with a minimum number of genomes
     :param estimate_filter_size:    Run ntCard to estimate the most appropriate bloom filter size
     :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
+    :param estimate_kmer_size:      Run kitsune to estimate the best kmer size
+    :param kmer_len_limit:          Maximum kmer size for kitsune kopt
     :param completeness:            Threshold on the CheckM completeness
     :param contamination:           Threshold on the CheckM contamination
     :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
+    :param closely_related:         For closesly related genomes use this flag
     :param similarity:              Get rid of genomes according to this threshold in case the dereplication step is enabled
     :param logger:                  Logger object
     :param verbose:                 Print messages on screen
     :param nproc:                   Make the process parallel when possible
     :param pplacer_threads:         Maximum number of threads to make pplacer parallel with CheckM
+    :param jellyfish_threads:       Maximum number of threads to make Jellyfish parallel with kitsune
     :param parallel:                Maximum number of processors to process each NCBI tax ID in parallel
     """
 
@@ -1008,26 +1046,27 @@ def index(
 
                         taxonomy = "NA"
                         if len(line_split) == 2:
-                            tax_split = line_split[1].split("|")
-                            if len(tax_split) != 7:
+                            taxonomy = line_split[1]
+
+                            if len(taxonomy.split("|")) != 7:
                                 # Taxonomic labels must have 7 levels
                                 raise Exception(
                                     "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
                                         line_split[1]
                                     )
                                 )
-                            taxonomy = line_split[1]
 
-                        genome_path = line_split[0]
-
-                        # Force input genomes in list to be all .fna.gz
-                        if not genome_path.endswith(".fna.gz"):
-                            # Check whether input genomes have a valid file extension
-                            raise Exception("Invalid input genome extension!\n{}".format(line_split[0]))
+                        # This automatically check whether extension and compression are supported
+                        dirpath, genome_name, extension, compression = get_file_info(line_split[0])
 
                         if taxonomy not in taxonomy2genomes:
                             taxonomy2genomes[taxonomy] = list()
-                        taxonomy2genomes[taxonomy].append(line_split[0])
+
+                        taxonomy2genomes[taxonomy].append(
+                            os.path.join(dirpath, "{}{}{}".format(
+                                genome_name, extension, compression if compression else ""
+                            ))
+                        )
 
         # Force flat structure in case of genomes with no taxonomic label
         if "NA" in taxonomy2genomes:
@@ -1141,32 +1180,47 @@ def index(
         for job in jobs:
             genomes_paths.extend(job.get())
 
+    if not genomes_path:
+        raise Exception("No input genomes found")
+
+    printline("Processing {} genomes".format(len(genomes_paths)))
+
+    # Check whether the kmer size must be estimated
+    if estimate_kmer_size:
+        printline("Estimating the best k-mer size")
+
+        # Estimate a kmer size
+        kmer_len = optimal_k(
+            genomes_paths,
+            kmer_len_limit,
+            os.path.join(tmp_dir, "kitsune"),
+            closely_related=closely_related,
+            nproc=nproc,
+            threads=jellyfish_threads
+        )
+
     # Check whether the bloom filter size must be estimated
-    if genomes_paths and estimate_filter_size and not filter_size:
-        # Count the number of genomes
-        genomes_counter = sum([1 for path in genomes_paths if os.path.isfile(path)])
+    if estimate_filter_size and not filter_size:
+        printline("Estimating the bloom filter size")
 
-        if genomes_counter > 0:
-            printline("Estimating the bloom filter size on {} genomes".format(genomes_counter))
+        # Estimate the bloom filter size
+        filter_size = estimate_bf_size(
+            genomes_paths,
+            kmer_len,
+            os.path.join(tmp_dir, "genomes"),
+            tmp_dir,
+            nproc=nproc,
+        )
 
-            # Estimate the bloom filter size
-            filter_size = estimate_bf_size(
-                genomes_paths,
-                kmer_len,
-                os.path.join(tmp_dir, "genomes"),
-                tmp_dir,
-                nproc=nproc,
-            )
+        # Increment the estimated bloom filter size
+        increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
+        filter_size += increment
 
-            # Increment the estimated bloom filter size
-            increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
-            filter_size += increment
+        manifest_filepath = os.path.join(db_dir, "manifest.txt")
+        with open(manifest_filepath, "a+") as manifest:
+            manifest.write("--filter-size {}\n".format(filter_size))
 
-            manifest_filepath = os.path.join(db_dir, "manifest.txt")
-            with open(manifest_filepath, "a+") as manifest:
-                manifest.write("--filter-size {}\n".format(filter_size))
-
-    if genomes_paths and filter_size and kmer_len:
+    if filter_size and kmer_len:
         # Retrieve the current working directory
         current_folder = os.getcwd()
 
@@ -1259,16 +1313,22 @@ def main() -> None:
     os.makedirs(args.db_dir, exist_ok=True)
 
     # Skip the bloom filter size estimation if the filter size is passed as input
-    if args.filter_size:
-        args.estimate_filter_size = False
-    else:
-        if not args.estimate_filter_size:
-            raise Exception(
-                (
-                    "Please specify a bloom filter size with the --filter-size option or "
-                    "use the --estimate-filter-size flag to automatically estimate the bloom filter size with ntCard"
-                )
+    if not args.filter_size and not args.estimate_filter_size:
+        raise Exception(
+            (
+                "Please specify a bloom filter size with the --filter-size option or "
+                "use the --estimate-filter-size flag to automatically estimate the best bloom filter size with ntCard"
             )
+        )
+
+    # Skip the kmer size estimation if the kmer length is passed as input
+    if not args.kmer_len and not args.estimate_kmer_size:
+        raise Exception(
+            (
+                "Please specify a kmer size with the --kmer-len option or "
+                "use the --estimate-kmer-size flag to automatically estimate the optimal kmer size with kitsune"
+            )
+        )
 
     kingdoms = list()
     if not args.flat_structure and not args.kingdom:
@@ -1341,14 +1401,18 @@ def main() -> None:
         min_genomes=args.min_genomes,
         estimate_filter_size=args.estimate_filter_size,
         increase_filter_size=args.increase_filter_size,
+        estimate_kmer_size=args.estimate_kmer_size,
+        kmer_len_limit=args.kmer_len_limit,
         completeness=args.completeness,
         contamination=args.contamination,
         dereplicate=args.dereplicate,
         similarity=args.similarity,
+        closely_related=args.closely_related,
         logger=logger,
         verbose=args.verbose,
         nproc=args.nproc,
         pplacer_threads=args.pplacer_threads,
+        jellyfish_threads=args.jellyfish_threads,
         parallel=args.parallel,
     )
 
