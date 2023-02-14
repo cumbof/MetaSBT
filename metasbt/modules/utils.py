@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 9, 2023"
+__date__ = "Feb 14, 2023"
 
 import argparse as ap
 import errno
@@ -24,7 +24,20 @@ from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 import numpy as np  # type: ignore
 
+# Define the list of dependencies
+# This is never used but helps to keep track of the external
+# software dependencies required by the functions implemented here
+DEPENDENCIES = [
+    "checkm",
+    "howdesbt",
+    "kitsune",
+    "ntcard",
+    "wget",
+]
+
 # Define the list of supported extensions for compressed files
+# .rrr compression is used by HowDeSBT only
+# Everything else can be Gzip compressed only
 COMPRESSED_FILES = [
     ".gz",
     ".rrr",
@@ -932,6 +945,7 @@ def howdesbt(
 ) -> None:
     """
     Run HowDeSBT on a specific taxonomic level
+    Genomes must be in the "genomes" folder under level_dir
 
     :param level_dir:       Path to the taxonomic level folder
     :param kmer_len:        Length of the kmers
@@ -940,216 +954,215 @@ def howdesbt(
     :param flat_structure:  Genomes are not taxonomically organized
     """
 
-    # Check whether the input folder is a valid path
-    if os.path.isdir(level_dir):
-        # Extract the level name from the level folder path
-        level_name = os.path.basename(level_dir)
+    # Check whether the input folder exists
+    if not os.path.isdir(level_dir):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), level_dir)
 
-        # Define the index folder
-        index_dir = os.path.join(level_dir, "index")
-        if os.path.isdir(index_dir):
-            # Remove old index folder if any
-            shutil.rmtree(index_dir, ignore_errors=True)
+    # Extract the level name from the level folder path
+    level_name = os.path.basename(level_dir)
 
-        # Define the path to the file with the list of genome under the current taxonomic level
-        level_list = os.path.join(level_dir, "{}.txt".format(level_name))
-        if os.path.isfile(level_list):
-            os.unlink(level_list)
+    # Define the index folder
+    index_dir = os.path.join(level_dir, "index")
+    if os.path.isdir(index_dir):
+        # Remove old index folder if any
+        shutil.rmtree(index_dir, ignore_errors=True)
 
-        # Define the path to the bloom filter representation of the current taxonomic level
-        level_filter = os.path.join(level_dir, "{}.bf".format(level_name))
-        if os.path.isfile(level_filter):
-            os.unlink(level_filter)
+    # Define the path to the file with the list of genome under the current taxonomic level
+    level_list = os.path.join(level_dir, "{}.txt".format(level_name))
+    if os.path.isfile(level_list):
+        os.unlink(level_list)
 
-        # Define the log file
-        howdesbt_log_filepath = os.path.join(level_dir, "howdesbt.log")
-        howdesbt_log = open(howdesbt_log_filepath, "w+")
+    # Define the path to the bloom filter representation of the current taxonomic level
+    level_filter = os.path.join(level_dir, "{}.bf".format(level_name))
+    if os.path.isfile(level_filter):
+        os.unlink(level_filter)
 
-        # Take track of how many genomes under the specific taxonomic levels
-        how_many = 0
+    # Define the log file
+    howdesbt_log_filepath = os.path.join(level_dir, "howdesbt.log")
+    howdesbt_log = open(howdesbt_log_filepath, "w+")
 
-        if os.path.basename(level_dir).startswith("s__") or flat_structure:
-            # Search for all the genomes under the current taxonomic level
-            genomes_folder = os.path.join(level_dir, "genomes")
-            if os.path.isdir(genomes_folder):
-                # Create the filters folder
-                filters_dir = os.path.join(os.path.dirname(genomes_folder), "filters")
-                os.makedirs(filters_dir, exist_ok=True)
+    # Take track of how many genomes under the specific taxonomic levels
+    how_many = 0
 
-                # Iterate over the genome files
-                # Genomes are always Gzip compressed .fna files here
-                for genome_path in Path(genomes_folder).glob("*.fna.gz"):
-                    # Retrieve genome file info
-                    _, genome_name, extension, _ = get_file_info(genome_path)
+    if os.path.basename(level_dir).startswith("s__") or flat_structure:
+        # Search for all the genomes under the current taxonomic level
+        genomes_folder = os.path.join(level_dir, "genomes")
+        if os.path.isdir(genomes_folder):
+            # Create the filters folder
+            filters_dir = os.path.join(os.path.dirname(genomes_folder), "filters")
+            os.makedirs(filters_dir, exist_ok=True)
 
-                    # Define the path to the bloom filter representation of the genome
-                    bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
+            # Iterate over the genome files
+            # Genomes are always Gzip compressed .fna files here
+            for genome_path in Path(genomes_folder).glob("*.fna.gz"):
+                # Retrieve genome file info
+                _, genome_name, extension, _ = get_file_info(genome_path)
 
-                    if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
-                        # Define the uncompressed genome path
-                        genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, extension))
+                # Define the path to the bloom filter representation of the genome
+                bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
 
-                        # Uncompress the genome file
-                        with open(genome_file, "w+") as file:
-                            run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
+                if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
+                    # Define the uncompressed genome path
+                    genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, extension))
 
-                        # Build the bloom filter file from the current genome
-                        run(
-                            [
-                                "howdesbt",
-                                "makebf",
-                                "--k={}".format(kmer_len),
-                                "--min=2",
-                                "--bits={}".format(filter_size),
-                                "--hashes=1",
-                                "--seed=0,0",
-                                genome_file,
-                                "--out={}".format(bf_filepath),
-                                "--threads={}".format(nproc),
-                            ],
-                            stdout=howdesbt_log,
-                            stderr=howdesbt_log,
-                        )
+                    # Uncompress the genome file
+                    with open(genome_file, "w+") as file:
+                        run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
 
-                        # Get rid of the uncompressed genome file
-                        os.unlink(genome_file)
+                    # Build the bloom filter file from the current genome
+                    run(
+                        [
+                            "howdesbt",
+                            "makebf",
+                            "--k={}".format(kmer_len),
+                            "--min=2",
+                            "--bits={}".format(filter_size),
+                            "--hashes=1",
+                            "--seed=0,0",
+                            genome_file,
+                            "--out={}".format(bf_filepath),
+                            "--threads={}".format(nproc),
+                        ],
+                        stdout=howdesbt_log,
+                        stderr=howdesbt_log,
+                    )
 
-                        # Compress the bloom filter file
-                        with open("{}.gz".format(bf_filepath), "w+") as file:
-                            run(["gzip", "-c", bf_filepath], stdout=file, stderr=file)
+                    # Get rid of the uncompressed genome file
+                    os.unlink(genome_file)
 
-                        # Increment the genomes counter
-                        how_many += 1
+                    # Compress the bloom filter file
+                    with open("{}.gz".format(bf_filepath), "w+") as file:
+                        run(["gzip", "-c", bf_filepath], stdout=file, stderr=file)
 
-                    elif os.path.isfile("{}.gz".format(bf_filepath)):
-                        # Uncompress the bloom filter file
-                        with open(bf_filepath, "w+") as file:
-                            run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
+                    # Increment the genomes counter
+                    how_many += 1
 
-                    # Take track of the current bloom filter file path
+                elif os.path.isfile("{}.gz".format(bf_filepath)):
+                    # Uncompress the bloom filter file
+                    with open(bf_filepath, "w+") as file:
+                        run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
+
+                # Take track of the current bloom filter file path
+                with open(level_list, "a+") as file:
+                    file.write("{}\n".format(bf_filepath))
+
+    else:
+        # Find all the other taxonomic levels
+        # Define the new list of bloom filters
+        for level in os.listdir(level_dir):
+            if os.path.isdir(os.path.join(level_dir, level)):
+                # Defile the path to the bloom filter file
+                bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
+
+                if os.path.isfile(bf_filepath):
                     with open(level_list, "a+") as file:
                         file.write("{}\n".format(bf_filepath))
 
-        else:
-            # Find all the other taxonomic levels
-            # Define the new list of bloom filters
-            for level in os.listdir(level_dir):
-                if os.path.isdir(os.path.join(level_dir, level)):
-                    # Defile the path to the bloom filter file
-                    bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
+                    # Increment the genomes counter
+                    how_many += 1
 
-                    if os.path.isfile(bf_filepath):
-                        with open(level_list, "a+") as file:
-                            file.write("{}\n".format(bf_filepath))
+    # Build the index folder
+    os.makedirs(index_dir, exist_ok=True)
 
-                        # Increment the genomes counter
-                        how_many += 1
+    # Move to the index folder
+    # This will force howdesbt to build the compressed nodes into the index folder
+    os.chdir(index_dir)
 
-        # Build the index folder
-        os.makedirs(index_dir, exist_ok=True)
-
-        # Move to the index folder
-        # This will force howdesbt to build the compressed nodes into the index folder
-        os.chdir(index_dir)
-
-        if how_many > 1:
-            # Create the tree topology file
-            run(
-                [
-                    "howdesbt",
-                    "cluster",
-                    "--list={}".format(level_list),
-                    "--bits={}".format(filter_size),
-                    "--tree={}".format(os.path.join(index_dir, "union.sbt")),
-                    "--nodename={}".format(os.path.join(index_dir, "node{number}")),
-                    "--keepallnodes",
-                ],
-                stdout=howdesbt_log,
-                stderr=howdesbt_log,
-            )
-
-        else:
-            # With only one bloom filter it does not make sense to cluster genomes
-            bf_filepath = [line.strip() for line in open(level_list).readlines() if line.strip()][0]
-
-            # There is only one line which refers to the only bloom filter file
-            shutil.copy(bf_filepath, os.path.join(level_dir, "{}.bf".format(level_name)))
-
-            # Manually define the union.sbt file with the single node
-            with open(os.path.join(index_dir, "union.sbt"), "w+") as union:
-                union.write("{}\n".format(bf_filepath))
-
-        # Build all the bloom filter files
+    if how_many > 1:
+        # Create the tree topology file
         run(
             [
                 "howdesbt",
-                "build",
-                "--howde",
+                "cluster",
+                "--list={}".format(level_list),
+                "--bits={}".format(filter_size),
                 "--tree={}".format(os.path.join(index_dir, "union.sbt")),
-                "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt")),
+                "--nodename={}".format(os.path.join(index_dir, "node{number}")),
+                "--keepallnodes",
             ],
             stdout=howdesbt_log,
             stderr=howdesbt_log,
         )
 
-        # Remove the union.sbt file
-        os.unlink(os.path.join(index_dir, "union.sbt"))
+    else:
+        # With only one bloom filter it does not make sense to cluster genomes
+        bf_filepath = [line.strip() for line in open(level_list).readlines() if line.strip()][0]
 
-        # Fix node paths in the final index.detbrief.sbt file
-        with open(os.path.join(index_dir, "index.full.detbrief.sbt"), "w+") as file1:
-            with open(os.path.join(index_dir, "index.detbrief.sbt")) as file2:
-                for line in file2:
-                    line = line.strip()
-                    if line:
-                        # Define the depth of the node in the tree
-                        stars = line.count("*")
-                        # Remove the stars to retrieve the node name
-                        node_name = line[stars:]
-                        # Define the absolute path to the node bloom filter file
-                        node_path = os.path.join(index_dir, node_name)
-                        # Define the new node in the tree
-                        file1.write("{}{}\n".format("*" * stars, node_path))
+        # There is only one line which refers to the only bloom filter file
+        shutil.copy(bf_filepath, os.path.join(level_dir, "{}.bf".format(level_name)))
 
-        # Get rid of the old tree
-        os.unlink(os.path.join(index_dir, "index.detbrief.sbt"))
+        # Manually define the union.sbt file with the single node
+        with open(os.path.join(index_dir, "union.sbt"), "w+") as union:
+            union.write("{}\n".format(bf_filepath))
 
-        # Rename the new tree
-        shutil.move(
-            os.path.join(index_dir, "index.full.detbrief.sbt"),
-            os.path.join(index_dir, "index.detbrief.sbt"),
+    # Build all the bloom filter files
+    run(
+        [
+            "howdesbt",
+            "build",
+            "--howde",
+            "--tree={}".format(os.path.join(index_dir, "union.sbt")),
+            "--outtree={}".format(os.path.join(index_dir, "index.detbrief.sbt")),
+        ],
+        stdout=howdesbt_log,
+        stderr=howdesbt_log,
+    )
+
+    # Remove the union.sbt file
+    os.unlink(os.path.join(index_dir, "union.sbt"))
+
+    # Fix node paths in the final index.detbrief.sbt file
+    with open(os.path.join(index_dir, "index.full.detbrief.sbt"), "w+") as file1:
+        with open(os.path.join(index_dir, "index.detbrief.sbt")) as file2:
+            for line in file2:
+                line = line.strip()
+                if line:
+                    # Define the depth of the node in the tree
+                    stars = line.count("*")
+                    # Remove the stars to retrieve the node name
+                    node_name = line[stars:]
+                    # Define the absolute path to the node bloom filter file
+                    node_path = os.path.join(index_dir, node_name)
+                    # Define the new node in the tree
+                    file1.write("{}{}\n".format("*" * stars, node_path))
+
+    # Get rid of the old tree
+    os.unlink(os.path.join(index_dir, "index.detbrief.sbt"))
+
+    # Rename the new tree
+    shutil.move(
+        os.path.join(index_dir, "index.full.detbrief.sbt"),
+        os.path.join(index_dir, "index.detbrief.sbt"),
+    )
+
+    if how_many > 1:
+        # Build the bloom filter representation of the current taxonomic level
+        bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
+
+        # Merge all the leaves together by applying the OR logic operator on the bloom filter files
+        # The resulting bloom filter is the representative one, which is the same as the root node of the tree
+        run(
+            [
+                "howdesbt",
+                "bfoperate",
+                "--list={}".format(level_list),
+                "--or",
+                "--out={}".format(bf_filepath),
+            ],
+            stdout=howdesbt_log,
+            stderr=howdesbt_log,
         )
 
-        if how_many > 1:
-            # Build the bloom filter representation of the current taxonomic level
-            bf_filepath = os.path.join(level_dir, "{}.bf".format(level_name))
+    # In case of species level or flat structure
+    # Remove the uncompressed version of the bloom filter files
+    if os.path.basename(level_dir).startswith("s__") or flat_structure:
+        bf_filepaths = [bf.strip() for bf in open(level_list).readlines() if bf.strip()]
 
-            # Merge all the leaves together by applying the OR logic operator on the bloom filter files
-            # The resulting bloom filter is the representative one, which is the same as the root node of the tree
-            run(
-                [
-                    "howdesbt",
-                    "bfoperate",
-                    "--list={}".format(level_list),
-                    "--or",
-                    "--out={}".format(bf_filepath),
-                ],
-                stdout=howdesbt_log,
-                stderr=howdesbt_log,
-            )
+        for bf in bf_filepaths:
+            os.unlink(bf)
 
-        # In case of species level or flat structure
-        # Remove the uncompressed version of the bloom filter files
-        if os.path.basename(level_dir).startswith("s__") or flat_structure:
-            bf_filepaths = [bf.strip() for bf in open(level_list).readlines() if bf.strip()]
-
-            for bf in bf_filepaths:
-                os.unlink(bf)
-
-        # Close the log file handler
-        howdesbt_log.close()
-
-    else:
-        raise Exception("Unable to run HowDeSBT on the following folder:\n{}".format(level_dir))
+    # Close the log file handler
+    howdesbt_log.close()
 
 
 def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, verbose: bool = True) -> Optional[Logger]:
@@ -1303,6 +1316,102 @@ def number(
             raise ap.ArgumentTypeError("Input value must be {}".format(typev)).with_traceback(e.__traceback__)
 
     return type_func
+
+
+def optimal_k(
+    genomes: List[str],
+    kl: int,
+    tmpdir: str,
+    closely_related: bool = False,
+    nproc: int = 1,
+    threads: int = 1
+) -> int:
+    """
+    Given a set of genomes, try to define the best k-mer length with kitsune
+
+    :param genomes:         List with genome file paths (Gzip compressed or not)
+    :param kl:              kitsune tests different k-mer lengths, starting from k=4 up to kl
+    :param tmpdir:          Path to the temporary folder
+    :param closely_related: For closesly related genomes use this flag
+    :param nproc:           Max number of processes
+    :param threads:         Max number of threads
+    :return:                Optimal k-mer length
+    """
+
+    if len(genomes) < 2:
+        raise Exception("Not enough genomes")
+    
+    if kl < 4:
+        raise ValueError("Initial k-mer length is too small")
+    
+    # Check whether the destination folder path exists
+    if not os.path.isdir(tmpdir):
+        os.makedirs(folder, exist_ok=True)
+    
+    # Take track of the genome file paths in the tmp folder
+    genomes_paths = list()
+
+    for genome_path in genomes:
+        _, genome_name, extension, compression = get_file_info(genome_path, check_supported=True, check_exists=True)
+
+        # Define the uncompressed genome path
+        genome_file = os.path.join(tmpdir, "{}{}".format(genome_name, extension))
+
+        if not compression:
+            # Make a symbolic link in case of an uncompressed file
+            os.symlink(genome_path, genome_file)
+
+        else:
+            # Uncompress the genome file
+            # It can always be Gzip compressed here
+            with open(genome_file, "w+") as file:
+                run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
+        
+        genomes_paths.append(genome_file)
+
+    if not genomes_paths:
+        raise Exception("Not enough genomes. Something went wrong while processing your genomes")
+
+    with tempfile.NamedTemporaryFile() as inputlist, tempfile.NamedTemporaryFile() as outres:
+        # Dump the list of bloom filter file paths
+        with open(inputlist.name, "wt") as inputlist_file:
+            for filepath in genomes_paths:
+                inputlist_file.write("{}\n".format(filepath))
+
+        # Run kitsune
+        # This may take a while and a considerable amount of computational resources
+        run(
+            [
+                "kitsune",
+                "kopt",
+                "--filenames",
+                inputlist.name,
+                "-kl",
+                kl,
+                "--canonical",
+                "--fast",
+                "-n",
+                nproc,
+                "-t",
+                threads,
+                "-o",
+                outres.name,
+                "--closely_related" if closely_related else ""
+            ],
+            silence=True
+        )
+
+        # Get kitsune output message
+        out_content = open(outres.name).read().strip()
+
+        try:
+            # Try to retrieve the optimal k
+            return int(outcontent.split(" ")[-1])
+
+        except Exception as ex:
+            raise Exception("An error has occurred while running kitsune kopt:\n{}".format(out_content)).with_traceback(
+                ex.__traceback__
+            )
 
 
 def println(message: str, logger: Optional[Logger] = None, verbose: bool = True) -> None:
