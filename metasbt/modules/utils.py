@@ -1384,11 +1384,11 @@ def optimal_k(
                 "kopt",
                 inputlist.name,
                 "-kl",
-                kl,
+                str(kl),
                 "--canonical",
                 "--fast",
                 "-t",
-                threads,
+                str(threads),
                 "-o",
                 outres.name,
                 "--closely_related" if closely_related else ""
