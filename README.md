@@ -157,35 +157,37 @@ In case you would like to create a database from a specific set of genomes avail
 
 #### Available options
 
-| Option                   | Default | Mandatory | Description  |
-|:-------------------------|:--------|:---------:|:-------------|
-| `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
-| `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
-| `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
-| `--closely-related`      | `False` |           | For closely related genomes use this flag |
-| `--db-dir`               |         | ⚑         | Database folder path |
-| `--dereplicate`          | `False` |           | Dereplicate input genomes |
-| `--estimate-filter-size` | `False` |           | Estimate the bloom filter size with ntCard. It automatically overrides the `--filter-size` option |
-| `--estimate-kmer-size`   | `False` |           | Estimate the optimal kmer size with kitsune. It automatically overrides the `--kmer-len` option |
-| `--filter-size`          |         | ⚑         | Bloom filter size |
-| `--flat-structure`       |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
-| `--help`                 |         |           | Print the list of arguments and exit |
-| `--increase-filter-size` | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
-| `--input-list`           |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
-| `--jellyfish-threads`    | `1`     |           | Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances |
-| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Viruses`) |
-| `--kmer-len`             |         | ⚑         | This is the length of the kmers used for building bloom filters |
-| `--limit-genomes`        | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
-| `--log`                  |         |           | Path to the log file |
-| `--max-genomes`          | `Inf`   |           | Consider species with this number of genomes at most |
-| `--min-genomes`          | `1`     |           | Consider species with a minimum number of genomes |
-| `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
-| `--parallel`             | `1`     |           | Maximum number of processors to process each NCBI tax ID in parallel |
-| `--pplacer-threads`      | `1`     |           | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
-| `--similarity`           | `100.0` |           | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
-| `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
-| `--verbose`              | `False` |           | Print results on screen |
-| `--version`              |         |           | Print current module version and exit |
+| Option                                    | Default | Mandatory | Description  |
+|:------------------------------------------|:--------|:---------:|:-------------|
+| `--completeness`                          | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
+| `--contamination`                         | `100.0` |           | Maximum contamination percentage allowed for input genomes |
+| `--cleanup`                               | `False` |           | Remove temporary data at the end of the pipeline |
+| `--closely-related`                       | `False` |           | For closely related genomes use this flag |
+| `--db-dir`                                |         | ⚑         | Database folder path |
+| `--dereplicate`                           | `False` |           | Dereplicate input genomes |
+| `--estimate-filter-size`                  | `False` |           | Estimate the bloom filter size with ntCard. It automatically overrides the `--filter-size` option |
+| `--estimate-kmer-size`                    | `False` |           | Estimate the optimal kmer size with kitsune. It automatically overrides the `--kmer-len` option |
+| `--estimate-kmer-size-genomes-number`     |         |           | Number of genomes per group to be considered as input for kitsune. It overrides `--estimate-kmer-size-genomes-percentage` in case of a number > 0 |
+| `--estimate-kmer-size-genomes-percentage` | `100.0` |           | Percentage on the total number of genomes per group to be considered as input for kitsune |
+| `--filter-size`                           |         | ⚑         | Bloom filter size |
+| `--flat-structure`                        |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
+| `--help`                                  |         |           | Print the list of arguments and exit |
+| `--increase-filter-size`                  | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
+| `--input-list`                            |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
+| `--jellyfish-threads`                     | `1`     |           | Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances |
+| `--kingdom`                               |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Viruses`) |
+| `--kmer-len`                              |         | ⚑         | This is the length of the kmers used for building bloom filters |
+| `--limit-genomes`                         | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
+| `--log`                                   |         |           | Path to the log file |
+| `--max-genomes`                           | `Inf`   |           | Consider species with this number of genomes at most |
+| `--min-genomes`                           | `1`     |           | Consider species with a minimum number of genomes |
+| `--nproc`                                 | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
+| `--parallel`                              | `1`     |           | Maximum number of processors to process each NCBI tax ID in parallel |
+| `--pplacer-threads`                       | `1`     |           | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
+| `--similarity`                            | `100.0` |           | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--tmp-dir`                               |         | ⚑         | Path to the temporary folder |
+| `--verbose`                               | `False` |           | Print results on screen |
+| `--version`                               |         |           | Print current module version and exit |
 
 ### 2. `boundaries`: defining clusters boundaries
 
