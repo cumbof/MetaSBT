@@ -1195,7 +1195,6 @@ def index(
             kmer_len_limit,
             os.path.join(tmp_dir, "kitsune"),
             closely_related=closely_related,
-            nproc=nproc,
             threads=jellyfish_threads
         )
 
