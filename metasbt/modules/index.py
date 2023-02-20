@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 14, 2023"
+__date__ = "Feb 20, 2023"
 
 import argparse as ap
 import copy
@@ -145,7 +145,7 @@ def read_params():
     p.add_argument(
         "--estimate-kmer-size-genomes-number",
         type=number(int, minv=1),
-        dest="estimate_kmer_size_number",
+        dest="estimate_kmer_size_genomes_number",
         help=(
             "Number of genomes per group to be considered as input for kitsune. "
             "It overrides --estimate-kmer-size-genomes-percentage in case of a number > 0"
@@ -155,7 +155,7 @@ def read_params():
         "--estimate-kmer-size-genomes-percentage",
         type=number(float, minv=sys.float_info.min, maxv=100.0),
         default=100.0,
-        dest="estimate_kmer_size_genomes",
+        dest="estimate_kmer_size_genomes_percentage",
         help="Percentage on the total number of genomes per group to be considered as input for kitsune",
     )
     p.add_argument(
@@ -210,7 +210,6 @@ def read_params():
     p.add_argument(
         "--kmer-len",
         type=number(int, minv=4),
-        required=True,
         dest="kmer_len",
         help="This is the length of the kmers used for building bloom filters",
     )
