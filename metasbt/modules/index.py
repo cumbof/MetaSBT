@@ -9,6 +9,7 @@ __version__ = "0.1.0"
 __date__ = "Feb 14, 2023"
 
 import argparse as ap
+import copy
 import gzip
 import hashlib
 import math
@@ -16,6 +17,7 @@ import multiprocessing as mp
 import os
 import re
 import shutil
+import sys
 import tarfile
 import time
 from functools import partial
@@ -139,6 +141,22 @@ def read_params():
         default=False,
         dest="estimate_kmer_size",
         help="Automatically estimate the optimal kmer size with kitsune",
+    )
+    p.add_argument(
+        "--estimate-kmer-size-genomes-number",
+        type=number(int, minv=1),
+        dest="estimate_kmer_size_number",
+        help=(
+            "Number of genomes per group to be considered as input for kitsune. "
+            "It overrides --estimate-kmer-size-genomes-percentage in case of a number > 0"
+        ),
+    )
+    p.add_argument(
+        "--estimate-kmer-size-genomes-percentage",
+        type=number(float, minv=sys.float_info.min, maxv=100.0),
+        default=100.0,
+        dest="estimate_kmer_size_genomes",
+        help="Percentage on the total number of genomes per group to be considered as input for kitsune",
     )
     p.add_argument(
         "--filter-size",
@@ -987,6 +1005,8 @@ def index(
     estimate_filter_size: bool = False,
     increase_filter_size: float = 0.0,
     estimate_kmer_size: bool = False,
+    estimate_kmer_size_genomes_number: Optional[int] = None,
+    estimate_kmer_size_genomes_percentage: float = 100.0,
     kmer_len_limit: int = 32,
     completeness: float = 0.0,
     contamination: float = 100.0,
@@ -1003,31 +1023,33 @@ def index(
     """
     Build the database baseline
 
-    :param db_dir:                  Path to the database root folder
-    :param input_list:              Path to the file with a list of input genome paths
-    :param kingdom:                 Retrieve genomes that belong to a specific kingdom
-    :param tmp_dir:                 Path to the temporary folder
-    :param kmer_len:                Length of the kmers
-    :param filter_size:             Size of the bloom filters
-    :param flat_structure:          Do not taxonomically organize genomes
-    :param limit_genomes:           Limit the number of genomes per species
-    :param max_genomes:             Consider species with this number of genomes at most
-    :param min_genomes:             Consider species with a minimum number of genomes
-    :param estimate_filter_size:    Run ntCard to estimate the most appropriate bloom filter size
-    :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
-    :param estimate_kmer_size:      Run kitsune to estimate the best kmer size
-    :param kmer_len_limit:          Maximum kmer size for kitsune kopt
-    :param completeness:            Threshold on the CheckM completeness
-    :param contamination:           Threshold on the CheckM contamination
-    :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
-    :param closely_related:         For closesly related genomes use this flag
-    :param similarity:              Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param logger:                  Logger object
-    :param verbose:                 Print messages on screen
-    :param nproc:                   Make the process parallel when possible
-    :param pplacer_threads:         Maximum number of threads to make pplacer parallel with CheckM
-    :param jellyfish_threads:       Maximum number of threads to make Jellyfish parallel with kitsune
-    :param parallel:                Maximum number of processors to process each NCBI tax ID in parallel
+    :param db_dir:                                  Path to the database root folder
+    :param input_list:                              Path to the file with a list of input genome paths
+    :param kingdom:                                 Retrieve genomes that belong to a specific kingdom
+    :param tmp_dir:                                 Path to the temporary folder
+    :param kmer_len:                                Length of the kmers
+    :param filter_size:                             Size of the bloom filters
+    :param flat_structure:                          Do not taxonomically organize genomes
+    :param limit_genomes:                           Limit the number of genomes per species
+    :param max_genomes:                             Consider species with this number of genomes at most
+    :param min_genomes:                             Consider species with a minimum number of genomes
+    :param estimate_filter_size:                    Run ntCard to estimate the most appropriate bloom filter size
+    :param increase_filter_size:                    Increase the estimated bloom filter size by the specified percentage
+    :param estimate_kmer_size:                      Run kitsune to estimate the best kmer size
+    :param estimate_kmer_size_genomes_number:       Number of genomes per group as input for kitsune
+    :param estimate_kmer_size_genomes_percentage:   Percentage on the total number of genomes per group as input for kitsune
+    :param kmer_len_limit:                          Maximum kmer size for kitsune kopt
+    :param completeness:                            Threshold on the CheckM completeness
+    :param contamination:                           Threshold on the CheckM contamination
+    :param dereplicate:                             Enable the dereplication step to get rid of replicated genomes
+    :param closely_related:                         For closesly related genomes use this flag
+    :param similarity:                              Get rid of genomes according to this threshold in case the dereplication step is enabled
+    :param logger:                                  Logger object
+    :param verbose:                                 Print messages on screen
+    :param nproc:                                   Make the process parallel when possible
+    :param pplacer_threads:                         Maximum number of threads to make pplacer parallel with CheckM
+    :param jellyfish_threads:                       Maximum number of threads to make Jellyfish parallel with kitsune
+    :param parallel:                                Maximum number of processors to process each NCBI tax ID in parallel
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -1189,9 +1211,74 @@ def index(
     if estimate_kmer_size:
         printline("Estimating the best k-mer size")
 
+        # Always use the same seed for reproducibility
+        rng = numpy.random.default_rng(0)
+
+        # Number of genomes to be considered for estimating the optimal kmer size with kitsune
+        select_at_most = 0
+        is_percentage = False
+
+        if isinstance(estimate_kmer_size_genomes_number, int):
+            # Select a specific number of genomes at most
+            select_at_most = estimate_kmer_size_genomes_number
+        
+        else:
+            # Remember that the number of genomes will be selected based on a percentage
+            is_percentage = True
+
+        if is_percentage and estimate_kmer_size_genomes_percentage == 100.0:
+            # There is no need for subsampling in case of --estimate-kmer-size-genomes-percentage 100.0
+            genomes_paths_sub = genomes_paths
+        
+        else:
+            if flat_structure:
+                if select_at_most == 0:
+                    # Select genomes as a percentage of the total number of genomes
+                    select_at_most = int(math.ceil(len(genomes_paths) * estimate_kmer_size_genomes_percentage / 100.0))
+
+                # Subsampling genomes as input for kitsune
+                rng.shuffle(genomes_paths)
+                genomes_paths_sub = genomes_paths[:select_at_most]
+
+            else:
+                genomes_paths_sub = list()
+
+                # Genomes must be taxonomically reorganized
+                species2genomes = dict()
+
+                for genome_path in genomes_paths:
+                    # Get the genomes folder
+                    dirpath, _, _, _ = get_file_info(genome_path)
+
+                    # Retrieve the species id
+                    # Genomes are located under the "genomes" folder, under the species directory
+                    species = dirpath.split(os.sep)[-2]
+
+                    # Group genomes according to their species
+                    if species not in species2genomes:
+                        species2genomes[species] = list()
+                    species2genomes[species].append(genome_path)
+
+                for species in species2genomes:
+                    species_genomes = species2genomes[species]
+
+                    # Cluster specific maximum number of genomes to be considered for kitsune
+                    select_at_most_in_species = select_at_most
+
+                    if select_at_most_in_species == 0:
+                        # Select genomes as a percentage of the total number of genomes
+                        select_at_most_in_species = int(math.ceil(len(species_genomes) * estimate_kmer_size_genomes_percentage / 100.0))
+
+                    # Subsampling genomes as input for kitsune
+                    rng.shuffle(species_genomes)
+                    genomes_paths_sub.extend(species_genomes[:select_at_most_in_species])
+
+        if len(genomes_paths_sub) < 2:
+            raise Exception("Not enough genomes for estimating the optimal kmer size with kitsune!")
+
         # Estimate a kmer size
         kmer_len = optimal_k(
-            genomes_paths,
+            genomes_paths_sub,
             kmer_len_limit,
             os.path.join(tmp_dir, "kitsune"),
             closely_related=closely_related,
@@ -1401,6 +1488,8 @@ def main() -> None:
         estimate_filter_size=args.estimate_filter_size,
         increase_filter_size=args.increase_filter_size,
         estimate_kmer_size=args.estimate_kmer_size,
+        estimate_kmer_size_genomes_number=args.estimate_kmer_size_genomes_number,
+        estimate_kmer_size_genomes_percentage=args.estimate_kmer_size_genomes_percentage,
         kmer_len_limit=args.kmer_len_limit,
         completeness=args.completeness,
         contamination=args.contamination,
