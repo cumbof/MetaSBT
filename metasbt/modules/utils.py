@@ -1344,7 +1344,7 @@ def optimal_k(
     
     # Check whether the destination folder path exists
     if not os.path.isdir(tmpdir):
-        os.makedirs(folder, exist_ok=True)
+        os.makedirs(tmpdir, exist_ok=True)
     
     # Take track of the genome file paths in the tmp folder
     genomes_paths = list()
