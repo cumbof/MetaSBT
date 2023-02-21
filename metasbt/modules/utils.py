@@ -1323,6 +1323,7 @@ def optimal_k(
     kl: int,
     tmpdir: str,
     closely_related: bool = False,
+    nproc: int = 1,
     threads: int = 1
 ) -> int:
     """
@@ -1332,6 +1333,7 @@ def optimal_k(
     :param kl:              kitsune tests different k-mer lengths, starting from k=4 up to kl
     :param tmpdir:          Path to the temporary folder
     :param closely_related: For closesly related genomes use this flag
+    :param nproc:           Max number of processes
     :param threads:         Max number of threads
     :return:                Optimal k-mer length
     """
@@ -1382,11 +1384,14 @@ def optimal_k(
             [
                 "kitsune",
                 "kopt",
+                "--filenames",
                 inputlist.name,
                 "-kl",
                 str(kl),
                 "--canonical",
                 "--fast",
+                "-n",
+                str(nproc),
                 "-t",
                 str(threads),
                 "-o",
