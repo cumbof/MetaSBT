@@ -1202,7 +1202,7 @@ def index(
         for job in jobs:
             genomes_paths.extend(job.get())
 
-    if not genomes_path:
+    if not genomes_paths:
         raise Exception("No input genomes found")
 
     printline("Processing {} genomes".format(len(genomes_paths)))
