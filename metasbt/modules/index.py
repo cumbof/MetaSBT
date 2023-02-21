@@ -590,10 +590,11 @@ def organize_data(
     with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
         # Move the processed genomes to the taxonomy folder
         for genome_path in genomes:
-            shutil.move(genome_path, genomes_dir)
-
             # Get the genome name from file path
             _, genome_name, _, _ = get_file_info(genome_path)
+
+            # Move the genome file into the species folder
+            shutil.move(genome_path, genomes_dir)
 
             # Also take track of the genome names in the references.txt file
             refsfile.write("{}\n".format(genome_name))
