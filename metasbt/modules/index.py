@@ -1207,8 +1207,12 @@ def index(
 
     printline("Processing {} genomes".format(len(genomes_paths)))
 
+    # Define the manifest file path
+    # This is used in case the --filter-size and/or --kmer-len must be estimated
+    manifest_filepath = os.path.join(db_dir, "manifest.txt")
+
     # Check whether the kmer size must be estimated
-    if estimate_kmer_size:
+    if estimate_kmer_size and not kmer_len:
         printline("Estimating the best k-mer size")
 
         # Always use the same seed for reproducibility
@@ -1285,6 +1289,10 @@ def index(
             threads=jellyfish_threads
         )
 
+        # Update the manifest file with the --filter-size
+        with open(manifest_filepath, "a+") as manifest:
+            manifest.write("--kmer-len {}\n".format(kmer_len))
+
     # Check whether the bloom filter size must be estimated
     if estimate_filter_size and not filter_size:
         printline("Estimating the bloom filter size")
@@ -1302,7 +1310,7 @@ def index(
         increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
         filter_size += increment
 
-        manifest_filepath = os.path.join(db_dir, "manifest.txt")
+        # Update the manifest file with the --filter-size
         with open(manifest_filepath, "a+") as manifest:
             manifest.write("--filter-size {}\n".format(filter_size))
 
@@ -1448,23 +1456,30 @@ def main() -> None:
 
     # Define the database manifest file
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt")
+
     if os.path.isfile(manifest_filepath):
-        # Load and compare kmer-len and filter-size
+        # Load and compare --kmer-len and --filter-size
         with open(manifest_filepath) as manifest:
             for line in manifest:
                 line = line.strip()
                 if line:
                     line_split = line.split(" ")
+
                     if line_split[0] == "--kmer-len":
                         if args.kmer_len != int(line_split[1]):
                             raise Exception("The kmer length is not compatible with the specified database")
+
                     elif line_split[0] == "--filter-size":
                         if args.filter_size:
                             if args.filter_size != int(line_split[1]):
                                 raise Exception("The bloom filter size is not compatible with the specified database")
+
     else:
+        # Initialize manifest file
         with open(manifest_filepath, "w+") as manifest:
-            manifest.write("--kmer-len {}\n".format(args.kmer_len))
+            if args.kmer_len:
+                manifest.write("--kmer-len {}\n".format(args.kmer_len))
+            
             if args.filter_size:
                 manifest.write("--filter-size {}\n".format(args.filter_size))
 
