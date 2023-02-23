@@ -167,17 +167,18 @@ In case you would like to create a database from a specific set of genomes avail
 | `--dereplicate`                           | `False` |           | Dereplicate input genomes |
 | `--estimate-filter-size`                  | `False` |           | Estimate the bloom filter size with ntCard. It automatically overrides the `--filter-size` option |
 | `--estimate-kmer-size`                    | `False` |           | Estimate the optimal kmer size with kitsune. It automatically overrides the `--kmer-len` option |
-| `--estimate-kmer-size-genomes-number`     |         |           | Number of genomes per group to be considered as input for kitsune. It overrides `--estimate-kmer-size-genomes-percentage` in case of a number > 0 |
-| `--estimate-kmer-size-genomes-percentage` | `100.0` |           | Percentage on the total number of genomes per group to be considered as input for kitsune |
 | `--filter-size`                           |         | ⚑         | Bloom filter size |
 | `--flat-structure`                        |         |           | Organize genomes without any taxonomic organization. This will lead to the creation of a single sequence bloom tree |
 | `--help`                                  |         |           | Print the list of arguments and exit |
-| `--increase-filter-size`                  | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate_filter_size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
+| `--increase-filter-size`                  | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate-filter-size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
 | `--input-list`                            |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
 | `--jellyfish-threads`                     | `1`     |           | Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances |
 | `--kingdom`                               |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Viruses`) |
 | `--kmer-len`                              |         | ⚑         | This is the length of the kmers used for building bloom filters |
+| `--limit-estimation-number`               |         |           | Limit the number of genomes per group to be considered as input for kitsune and ntCard. It overrides --limit-estimation-percentage in case of a number > 0 |
+| `--limit-estimation-percentage`           | `100.0` |           | Percentage on the total number of genomes per group to be considered as input for kitsune and ntCard |
 | `--limit-genomes`                         | `Inf`   |           | Limit the number of genomes per species. This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number |
+| `--limit-kmer-size`                       | `32`    |           | Limit the estimation of the optimal kmer size with kitsune to this value at most |
 | `--log`                                   |         |           | Path to the log file |
 | `--max-genomes`                           | `Inf`   |           | Consider species with this number of genomes at most |
 | `--min-genomes`                           | `1`     |           | Consider species with a minimum number of genomes |
