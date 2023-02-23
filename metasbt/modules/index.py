@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 20, 2023"
+__date__ = "Feb 23, 2023"
 
 import argparse as ap
 import copy
@@ -41,6 +41,7 @@ try:
         get_file_info,
         howdesbt,
         init_logger,
+        integrity_check,
         number,
         optimal_k,
         println,
@@ -143,22 +144,6 @@ def read_params():
         help="Automatically estimate the optimal kmer size with kitsune",
     )
     p.add_argument(
-        "--estimate-kmer-size-genomes-number",
-        type=number(int, minv=1),
-        dest="estimate_kmer_size_genomes_number",
-        help=(
-            "Number of genomes per group to be considered as input for kitsune. "
-            "It overrides --estimate-kmer-size-genomes-percentage in case of a number > 0"
-        ),
-    )
-    p.add_argument(
-        "--estimate-kmer-size-genomes-percentage",
-        type=number(float, minv=sys.float_info.min, maxv=100.0),
-        default=100.0,
-        dest="estimate_kmer_size_genomes_percentage",
-        help="Percentage on the total number of genomes per group to be considered as input for kitsune",
-    )
-    p.add_argument(
         "--filter-size",
         type=number(int, minv=10000),
         dest="filter_size",
@@ -181,7 +166,7 @@ def read_params():
         dest="increase_filter_size",
         help=(
             "Increase the estimated filter size by the specified percentage. "
-            "This is used in conjunction with the --estimate_filter_size argument only. "
+            "This is used in conjunction with the --estimate-filter-size argument only. "
             "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes"
         ),
     )
@@ -214,11 +199,20 @@ def read_params():
         help="This is the length of the kmers used for building bloom filters",
     )
     p.add_argument(
-        "--kmer-len-limit",
-        type=number(int, minv=4),
-        default=32,
-        dest="kmer_len_limit",
-        help="This is the length of the kmers used for building bloom filters",
+        "--limit-estimation-number",
+        type=number(int, minv=1),
+        dest="limit_estimation_number",
+        help=(
+            "Limit the number of genomes per group to be considered as input for kitsune and ntCard. "
+            "It overrides --limit-estimation-percentage in case of a number > 0"
+        ),
+    )
+    p.add_argument(
+        "--limit-estimation-percentage",
+        type=number(float, minv=sys.float_info.min, maxv=100.0),
+        default=100.0,
+        dest="limit_estimation_percentage",
+        help="Percentage on the total number of genomes per group to be considered as input for kitsune and ntCard",
     )
     p.add_argument(
         "--limit-genomes",
@@ -230,6 +224,13 @@ def read_params():
             "This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number. "
             "The number of genomes per species is not limited by default"
         ),
+    )
+    p.add_argument(
+        "--limit-kmer-size",
+        type=number(int, minv=4),
+        default=32,
+        dest="limit_kmer_size",
+        help="Limit the estimation of the optimal kmer size with kitsune to this value at most",
     )
     p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
     p.add_argument(
@@ -958,18 +959,24 @@ def retrieve_genomes(
 
     # Define the list of paths to the genome files
     genomes = list()
+
     for genome_path in Path(out_dir).glob("*.fna.gz"):
-        # Retrieve the genome name
-        _, genome_name, extension, compression = get_file_info(str(genome_path))
+        if integrity_check(str(genome_path)):
+            # Retrieve the genome name
+            _, genome_name, extension, compression = get_file_info(str(genome_path), check_exists=False)
 
-        # Define the new file path
-        new_genome_path = os.path.join(out_dir, "{}{}{}".format(genome_name, extension, compression))
+            # Define the new file path
+            new_genome_path = os.path.join(out_dir, "{}{}{}".format(genome_name, extension, compression))
 
-        # Rename the genome file
-        shutil.move(str(genome_path), new_genome_path)
+            # Rename the genome file
+            shutil.move(str(genome_path), new_genome_path)
 
-        # Add the genome path to the list of genome paths
-        genomes.append(new_genome_path)
+            # Add the genome path to the list of genome paths
+            genomes.append(new_genome_path)
+
+        else:
+            # The genome file is corrupted
+            os.unlink(str(genome_path))
 
     if len(genomes) > limit_genomes:
         # ncbi-genome-download does not allow to limit the number of genomes that must be retrieved
@@ -991,23 +998,103 @@ def retrieve_genomes(
     return genomes, os.path.join(out_dir, "metadata.tsv")
 
 
+def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structure=False) -> List[str]:
+    """
+    Given a list of genomes, define a sublist with a limited number of genomes taken randomly
+
+    :param genomes:             Input list of paths to the genomes files
+    :param limit_number:        Limit the number of elements in the resulting list to this number
+                                If defined, it overrides the percentage
+    :param limit_percentage:    Limit the size of the resulting list to this percentage computed 
+                                on the total number of elements in the input list
+    :param flat_structure:      Genomes organization
+    :return:                    The sublist of genomes
+    """
+
+    if not genomes or limit_number == 0 or limit_percentage == 0.0:
+        return list()
+
+    # Always use the same seed for reproducibility
+    rng = numpy.random.default_rng(0)
+
+    # Number of genomes to be considered for estimating the optimal kmer size with kitsune
+    select_at_most = 0
+    is_percentage = False
+
+    if isinstance(limit_number, int):
+        # Select a specific number of genomes at most
+        select_at_most = limit_number
+
+    else:
+        # Remember that the number of genomes will be selected based on a percentage
+        is_percentage = True
+
+    if is_percentage and limit_percentage == 100.0:
+        # There is no need for subsampling here
+        return genomes
+
+    genomes_sub = list()
+
+    if flat_structure:
+        if select_at_most == 0:
+            # Select genomes as a percentage of the total number of genomes
+            select_at_most = int(math.ceil(len(genomes) * limit_percentage / 100.0))
+
+        # Subsampling genomes as input for kitsune
+        rng.shuffle(genomes)
+        genomes_sub = genomes[:select_at_most]
+
+    else:
+        # Genomes must be taxonomically reorganized
+        species2genomes = dict()
+
+        for genome_path in genomes:
+            # Get the genomes folder
+            dirpath, _, _, _ = get_file_info(genome_path)
+
+            # Retrieve the species id
+            # Genomes are located under the "genomes" folder, under the species directory
+            species = dirpath.split(os.sep)[-2]
+
+            # Group genomes according to their species
+            if species not in species2genomes:
+                species2genomes[species] = list()
+            species2genomes[species].append(genome_path)
+
+        for species in species2genomes:
+            species_genomes = species2genomes[species]
+
+            # Cluster specific maximum number of genomes to be considered for kitsune
+            select_at_most_in_species = select_at_most
+
+            if select_at_most_in_species == 0:
+                # Select genomes as a percentage of the total number of genomes
+                select_at_most_in_species = int(math.ceil(len(species_genomes) * limit_percentage / 100.0))
+
+            # Subsampling genomes as input for kitsune
+            rng.shuffle(species_genomes)
+            genomes_sub.extend(species_genomes[:select_at_most_in_species])
+
+    return genomes_sub
+
+
 def index(
     db_dir: str,
     input_list: str,
     kingdom: str,
     tmp_dir: str,
-    kmer_len: int,
-    filter_size: int,
+    kmer_len: Optional[int] = None,
+    filter_size: Optional[int] = None,
     flat_structure: bool = False,
     limit_genomes: float = numpy.Inf,
     max_genomes: float = numpy.Inf,
     min_genomes: float = 1.0,
-    estimate_filter_size: bool = False,
+    estimate_filter_size: bool = True,
     increase_filter_size: float = 0.0,
-    estimate_kmer_size: bool = False,
-    estimate_kmer_size_genomes_number: Optional[int] = None,
-    estimate_kmer_size_genomes_percentage: float = 100.0,
-    kmer_len_limit: int = 32,
+    estimate_kmer_size: bool = True,
+    limit_estimation_number: Optional[int] = None,
+    limit_estimation_percentage: float = 100.0,
+    limit_kmer_size: int = 32,
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
@@ -1023,33 +1110,33 @@ def index(
     """
     Build the database baseline
 
-    :param db_dir:                                  Path to the database root folder
-    :param input_list:                              Path to the file with a list of input genome paths
-    :param kingdom:                                 Retrieve genomes that belong to a specific kingdom
-    :param tmp_dir:                                 Path to the temporary folder
-    :param kmer_len:                                Length of the kmers
-    :param filter_size:                             Size of the bloom filters
-    :param flat_structure:                          Do not taxonomically organize genomes
-    :param limit_genomes:                           Limit the number of genomes per species
-    :param max_genomes:                             Consider species with this number of genomes at most
-    :param min_genomes:                             Consider species with a minimum number of genomes
-    :param estimate_filter_size:                    Run ntCard to estimate the most appropriate bloom filter size
-    :param increase_filter_size:                    Increase the estimated bloom filter size by the specified percentage
-    :param estimate_kmer_size:                      Run kitsune to estimate the best kmer size
-    :param estimate_kmer_size_genomes_number:       Number of genomes per group as input for kitsune
-    :param estimate_kmer_size_genomes_percentage:   Percentage on the total number of genomes per group as input for kitsune
-    :param kmer_len_limit:                          Maximum kmer size for kitsune kopt
-    :param completeness:                            Threshold on the CheckM completeness
-    :param contamination:                           Threshold on the CheckM contamination
-    :param dereplicate:                             Enable the dereplication step to get rid of replicated genomes
-    :param closely_related:                         For closesly related genomes use this flag
-    :param similarity:                              Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param logger:                                  Logger object
-    :param verbose:                                 Print messages on screen
-    :param nproc:                                   Make the process parallel when possible
-    :param pplacer_threads:                         Maximum number of threads to make pplacer parallel with CheckM
-    :param jellyfish_threads:                       Maximum number of threads to make Jellyfish parallel with kitsune
-    :param parallel:                                Maximum number of processors to process each NCBI tax ID in parallel
+    :param db_dir:                      Path to the database root folder
+    :param input_list:                  Path to the file with a list of input genome paths
+    :param kingdom:                     Retrieve genomes that belong to a specific kingdom
+    :param tmp_dir:                     Path to the temporary folder
+    :param kmer_len:                    Length of the kmers
+    :param filter_size:                 Size of the bloom filters
+    :param flat_structure:              Do not taxonomically organize genomes
+    :param limit_genomes:               Limit the number of genomes per species
+    :param max_genomes:                 Consider species with this number of genomes at most
+    :param min_genomes:                 Consider species with a minimum number of genomes
+    :param estimate_filter_size:        Run ntCard to estimate the most appropriate bloom filter size
+    :param increase_filter_size:        Increase the estimated bloom filter size by the specified percentage
+    :param estimate_kmer_size:          Run kitsune to estimate the best kmer size
+    :param limit_estimation_number:     Number of genomes per group as input for kitsune and ntCard
+    :param limit_estimation_percentage: Percentage on the total number of genomes per group as input for kitsune and ntCard
+    :param limit_kmer_size:             Maximum kmer size for kitsune kopt
+    :param completeness:                Threshold on the CheckM completeness
+    :param contamination:               Threshold on the CheckM contamination
+    :param dereplicate:                 Enable the dereplication step to get rid of replicated genomes
+    :param closely_related:             For closesly related genomes use this flag
+    :param similarity:                  Get rid of genomes according to this threshold in case the dereplication step is enabled
+    :param logger:                      Logger object
+    :param verbose:                     Print messages on screen
+    :param nproc:                       Make the process parallel when possible
+    :param pplacer_threads:             Maximum number of threads to make pplacer parallel with CheckM
+    :param jellyfish_threads:           Maximum number of threads to make Jellyfish parallel with kitsune
+    :param parallel:                    Maximum number of processors to process each NCBI tax ID in parallel
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -1211,71 +1298,21 @@ def index(
     # This is used in case the --filter-size and/or --kmer-len must be estimated
     manifest_filepath = os.path.join(db_dir, "manifest.txt")
 
+    # Limited set of genomes in case of --estimate-kmer-size and/or --estimate-filter-size
+    # The set is limited to the number of genomes specified with --limit-estimation-number or limit_estimation_percentage
+    genomes_paths_sub = list()
+
     # Check whether the kmer size must be estimated
     if estimate_kmer_size and not kmer_len:
-        printline("Estimating the best k-mer size")
+        printline("Estimating the best k-mer size. Please be patient, this may take a while")
 
-        # Always use the same seed for reproducibility
-        rng = numpy.random.default_rng(0)
-
-        # Number of genomes to be considered for estimating the optimal kmer size with kitsune
-        select_at_most = 0
-        is_percentage = False
-
-        if isinstance(estimate_kmer_size_genomes_number, int):
-            # Select a specific number of genomes at most
-            select_at_most = estimate_kmer_size_genomes_number
-        
-        else:
-            # Remember that the number of genomes will be selected based on a percentage
-            is_percentage = True
-
-        if is_percentage and estimate_kmer_size_genomes_percentage == 100.0:
-            # There is no need for subsampling in case of --estimate-kmer-size-genomes-percentage 100.0
-            genomes_paths_sub = genomes_paths
-        
-        else:
-            if flat_structure:
-                if select_at_most == 0:
-                    # Select genomes as a percentage of the total number of genomes
-                    select_at_most = int(math.ceil(len(genomes_paths) * estimate_kmer_size_genomes_percentage / 100.0))
-
-                # Subsampling genomes as input for kitsune
-                rng.shuffle(genomes_paths)
-                genomes_paths_sub = genomes_paths[:select_at_most]
-
-            else:
-                genomes_paths_sub = list()
-
-                # Genomes must be taxonomically reorganized
-                species2genomes = dict()
-
-                for genome_path in genomes_paths:
-                    # Get the genomes folder
-                    dirpath, _, _, _ = get_file_info(genome_path)
-
-                    # Retrieve the species id
-                    # Genomes are located under the "genomes" folder, under the species directory
-                    species = dirpath.split(os.sep)[-2]
-
-                    # Group genomes according to their species
-                    if species not in species2genomes:
-                        species2genomes[species] = list()
-                    species2genomes[species].append(genome_path)
-
-                for species in species2genomes:
-                    species_genomes = species2genomes[species]
-
-                    # Cluster specific maximum number of genomes to be considered for kitsune
-                    select_at_most_in_species = select_at_most
-
-                    if select_at_most_in_species == 0:
-                        # Select genomes as a percentage of the total number of genomes
-                        select_at_most_in_species = int(math.ceil(len(species_genomes) * estimate_kmer_size_genomes_percentage / 100.0))
-
-                    # Subsampling genomes as input for kitsune
-                    rng.shuffle(species_genomes)
-                    genomes_paths_sub.extend(species_genomes[:select_at_most_in_species])
+        # Define a subset of genomes
+        genomes_paths_sub = get_sublist(
+            genomes_paths,
+            limit_number=limit_estimation_number,
+            limit_percentage=limit_estimation_percentage,
+            flat_structure=flat_structure
+        )
 
         if len(genomes_paths_sub) < 2:
             raise Exception("Not enough genomes for estimating the optimal kmer size with kitsune!")
@@ -1283,7 +1320,7 @@ def index(
         # Estimate a kmer size
         kmer_len = optimal_k(
             genomes_paths_sub,
-            kmer_len_limit,
+            limit_kmer_size,
             os.path.join(tmp_dir, "kitsune"),
             closely_related=closely_related,
             nproc=nproc,
@@ -1298,9 +1335,20 @@ def index(
     if estimate_filter_size and not filter_size:
         printline("Estimating the bloom filter size")
 
+        # Use the precomputed subset of genomes in case it has already been
+        # defined because of the --estimate-kmer-size
+        if not genomes_paths_sub:
+            # Define a subset of genomes
+            genomes_paths_sub = get_sublist(
+                genomes_paths,
+                limit_number=limit_estimation_number,
+                limit_percentage=limit_estimation_percentage,
+                flat_structure=flat_structure
+            )
+
         # Estimate the bloom filter size
         filter_size = estimate_bf_size(
-            genomes_paths,
+            genomes_paths_sub,
             kmer_len,
             os.path.join(tmp_dir, "genomes"),
             tmp_dir,
@@ -1460,6 +1508,7 @@ def main() -> None:
 
     if os.path.isfile(manifest_filepath):
         # Load and compare --kmer-len and --filter-size
+        # This is require to resume the process
         with open(manifest_filepath) as manifest:
             for line in manifest:
                 line = line.strip()
@@ -1467,13 +1516,18 @@ def main() -> None:
                     line_split = line.split(" ")
 
                     if line_split[0] == "--kmer-len":
-                        if args.kmer_len != int(line_split[1]):
+                        if not args.kmer_len:
+                            args.kmer_len = int(line_split[1])
+
+                        elif args.kmer_len != int(line_split[1]):
                             raise Exception("The kmer length is not compatible with the specified database")
 
                     elif line_split[0] == "--filter-size":
-                        if args.filter_size:
-                            if args.filter_size != int(line_split[1]):
-                                raise Exception("The bloom filter size is not compatible with the specified database")
+                        if not args.filter_size:
+                            args.filter_size = int(line_split[1])
+
+                        elif args.filter_size != int(line_split[1]):
+                            raise Exception("The bloom filter size is not compatible with the specified database")
 
     else:
         # Initialize manifest file
@@ -1495,8 +1549,8 @@ def main() -> None:
         args.input_list,
         args.kingdom,
         args.tmp_dir,
-        args.kmer_len,
-        args.filter_size,
+        kmer_len=args.kmer_len,
+        filter_size=args.filter_size,
         flat_structure=args.flat_structure,
         limit_genomes=args.limit_genomes,
         max_genomes=args.max_genomes,
@@ -1504,9 +1558,9 @@ def main() -> None:
         estimate_filter_size=args.estimate_filter_size,
         increase_filter_size=args.increase_filter_size,
         estimate_kmer_size=args.estimate_kmer_size,
-        estimate_kmer_size_genomes_number=args.estimate_kmer_size_genomes_number,
-        estimate_kmer_size_genomes_percentage=args.estimate_kmer_size_genomes_percentage,
-        kmer_len_limit=args.kmer_len_limit,
+        limit_estimation_number=args.limit_estimation_number,
+        limit_estimation_percentage=args.limit_estimation_percentage,
+        limit_kmer_size=args.limit_kmer_size,
         completeness=args.completeness,
         contamination=args.contamination,
         dereplicate=args.dereplicate,
