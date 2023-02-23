@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 14, 2023"
+__date__ = "Feb 23, 2023"
 
 import argparse as ap
 import errno
@@ -830,7 +830,7 @@ def get_boundaries(
     return kmers, minv, maxv
 
 
-def get_file_info(filepath: str, check_supported: bool = True, check_exists: bool = True) -> str:
+def get_file_info(filepath: str, check_supported: bool = True, check_exists: bool = True) -> Tuple[str, str, str, str]:
     """
     Get file path, name, extension, and compression
 
@@ -838,9 +838,8 @@ def get_file_info(filepath: str, check_supported: bool = True, check_exists: boo
     :return:            File path, name, extension, and compression
     """
 
-    if check_exists:
-        if not os.path.isfile(filepath):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+    if check_exists and not os.path.isfile(filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
 
     # Trim the folder path out
     basename = os.path.basename(filepath)
@@ -1256,7 +1255,32 @@ def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, ve
     return None
 
 
-def load_manifest(manifest_filepath: str) -> dict:
+def integrity_check(filepath) -> bool:
+    """
+    This is for Gzipped files only
+
+    :param filepath:    Path to the Gzipped file
+    :return:            True if it passes the integrity check
+    """
+
+    # This checks whether the input file exists and its extension and compression are supported
+    _, _, _, compression = get_file_info(filepath, check_supported=True, check_exists=True)
+
+    if compression != ".gz":
+        # Limit the compression to Gzipped files only
+        raise Exception("Unsupported file type")
+
+    try:
+        # It always throws an Exception in case of a return value > 0
+        run(["gzip", "-t", filepath], silence=True)
+
+    except Exception:
+        return False
+
+    return True
+
+
+def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:
     """
     Load the manifest file
 
