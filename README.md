@@ -219,7 +219,8 @@ metasbt boundaries --db-dir ~/myindex \
 | `--help`                 |         |           | Print the list of arguments and exit |
 | `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom |
 | `--log`                  |         |           | Path to the log file |
-| `--min-genomes`          | `3`     |           | Consider clusters with at least this number of genomes |
+| `--max-genomes`          |         |           | Maximum number of genomes per cluster to be considered for computing boundaries. Genomes are selected randomly in case the size of clusters is greater than this number. This must be greater than or equals to --min-genomes |
+| `--min-genomes`          | `3`     |           | Consider clusters with a minimum number of genomes only |
 | `--nproc`                | `1`     |           | This argument refers to the number of processors used for parallelizing the pipeline when possible |
 | `--output`               |         | ⚑         | Output file with kmer boundaries for each of the taxonomic labels in the database |
 | `--tmp-dir`              |         | ⚑         | Path to the temporary folder |
