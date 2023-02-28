@@ -1389,8 +1389,8 @@ def index(
                 "phylum",
                 "kingdom",
             ]:
-                printline("Running HowDeSBT at the {} level".format(level))
                 folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
+                printline("Running HowDeSBT at the {} level ({} clusters)".format(level, len(folders)))
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
                     # Wrapper around the update function of tqdm
