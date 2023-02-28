@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 9, 2023"
+__date__ = "Feb 28, 2023"
 
 import argparse as ap
 import errno
@@ -17,6 +17,8 @@ from functools import partial
 from logging import Logger
 from pathlib import Path
 from typing import Dict, List, Optional
+
+import numpy  # type: ignore
 
 # Local modules are not available when the main controller
 # tries to load them for accessing their variables
@@ -80,11 +82,21 @@ def read_params():
     )
     p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
     p.add_argument(
+        "--max-genomes",
+        type=number(int, minv=3),
+        dest="max_genomes",
+        help=(
+            "Maximum number of genomes per cluster to be considered for computing boundaries. "
+            "Genomes are selected randomly in case the size of clusters is greater than this number. "
+            "This must always be greater than or equals to --min-genomes"
+        ),
+    )
+    p.add_argument(
         "--min-genomes",
         type=number(int, minv=3),
         default=3,
         dest="min_genomes",
-        help="Consider clusters with at least this number of genomes",
+        help="Consider clusters with a minimum number of genomes only",
     )
     p.add_argument(
         "--nproc",
@@ -123,6 +135,7 @@ def define_boundaries(
     output: str,
     kmer_len: int,
     filter_size: int,
+    max_genomes: Optional[int] = None,
     min_genomes: int = 3,
     nproc: int = 1,
 ) -> None:
@@ -135,6 +148,7 @@ def define_boundaries(
     :param output:          Path to the output table file with boundaries
     :param kmer_len:        Length of the kmers
     :param filter_size:     Size of the bloom filters
+    :param max_genomes:     Consider this number of genomes at most for computing boundaries
     :param min_genomes:     Consider clusters with at least this number of genomes
     :param nproc:           Make the process parallel when possible
     """
@@ -194,6 +208,14 @@ def define_boundaries(
         for level_id in samples:
             genome_paths.extend(samples[level_id])
 
+        if max_genomes:
+            # Always use the same seed for reproducibility
+            rng = numpy.random.default_rng(0)
+
+            # Shuffle the list of genome paths and get the first "max_genomes"
+            rng.shuffle(genome_paths)
+            genome_paths = genome_paths[:max_genomes]
+
         # Extract boundaries
         all_kmers, min_kmers, max_kmers = get_boundaries(
             genome_paths, tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc
@@ -234,6 +256,7 @@ def boundaries(
     tmp_dir: str,
     output: str,
     flat_structure: bool = False,
+    max_genomes: Optional[int] = None,
     min_genomes: int = 3,
     kingdom: Optional[str] = None,
     logger: Optional[Logger] = None,
@@ -268,6 +291,8 @@ def boundaries(
         if kingdom:
             file.write("# --kingdom {}\n".format(kingdom))
         file.write("# --min-genomes {}\n".format(min_genomes))
+        if max_genomes:
+            file.write("# --max-genomes {}\n".format(max_genomes))
         file.write(
             "# {}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                 "Lineage",  # Taxonomic label
@@ -305,6 +330,7 @@ def boundaries(
             output,
             manifest["kmer_len"],
             manifest["filter_size"],
+            max_genomes=max_genomes,
             min_genomes=min_genomes,
             nproc=nproc,
         )
@@ -329,6 +355,7 @@ def boundaries(
                         output,
                         manifest["kmer_len"],
                         manifest["filter_size"],
+                        max_genomes=max_genomes,
                         min_genomes=min_genomes,
                         nproc=nproc,
                     )
@@ -342,6 +369,7 @@ def boundaries(
                 output,
                 manifest["kmer_len"],
                 manifest["filter_size"],
+                max_genomes=max_genomes,
                 min_genomes=min_genomes,
                 nproc=nproc,
             )
@@ -366,6 +394,10 @@ def main() -> None:
     if os.path.isfile(args.output):
         raise Exception("The output boundaries table already exists")
 
+    # Check whether --max-genomes >= --min-genomes
+    if args.max_genomes and args.max_genomes < args.min_genomes:
+        raise ValueError("--max-genomes must always be greater than or equals to --min-genomes")
+
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
@@ -377,6 +409,7 @@ def main() -> None:
         args.tmp_dir,
         args.output,
         flat_structure=args.flat_structure,
+        max_genomes=args.max_genomes,
         min_genomes=args.min_genomes,
         kingdom=args.kingdom,
         logger=logger,
