@@ -215,8 +215,8 @@ def define_boundaries(
 
         # Consider all the genomes under a particular level
         genome_paths = list()
-        for level_id in samples:
-            genome_paths.extend(samples[level_id])
+        for tax_level_id in samples:
+            genome_paths.extend(samples[tax_level_id])
 
         if max_genomes:
             # Always use the same seed for reproducibility
