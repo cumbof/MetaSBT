@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 28, 2023"
+__date__ = "Mar 1, 2023"
 
 import argparse as ap
 import errno
@@ -334,7 +334,7 @@ def checkm(
 
 def cluster(
     genomes_list: List[str],
-    boundaries_filepath: str,
+    boundaries: Dict[str, Dict[str, Union[int, float]]],
     manifest_filepath: str,
     profiles_dir: str,
     tmpdir: str,
@@ -345,15 +345,15 @@ def cluster(
     """
     Define new clusters with the unassigned MAGs
 
-    :param genomes_list:            List with paths to the unassigned genomes
-    :param boundaries_filepath:     Path to the file with the taxonomic boundaries defined by the boudaries module
-    :param manifest_filepath:       Path to the manifest file
-    :param profiles_dir:            Path to the temporary folder with the genomes profiles defined by the profile module
-    :param tmpdir:                  Path to the temporary folder for building bloom filters
-    :param outpath:                 Path to the output file with the new assignments
-    :param unknown_label:           Prefix label of the newly defined clusters
-    :param nproc:                   Make bfdistance parallel
-    :return:                        Return the assignments as a dictionary <genome_path, taxonomy>
+    :param genomes_list:        List with paths to the unassigned genomes
+    :param boundaries:          Boundaries table produced by the boundaries module
+    :param manifest_filepath:   Path to the manifest file
+    :param profiles_dir:        Path to the temporary folder with the genomes profiles defined by the profile module
+    :param tmpdir:              Path to the temporary folder for building bloom filters
+    :param outpath:             Path to the output file with the new assignments
+    :param unknown_label:       Prefix label of the newly defined clusters
+    :param nproc:               Make bfdistance parallel
+    :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
     """
 
     # Check whether the output file already exists
@@ -362,9 +362,6 @@ def cluster(
 
     # Also check whether the input files already exist
     # Otherwise, raise an exception
-
-    if not os.path.isfile(boundaries_filepath):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), boundaries_filepath)
 
     if not os.path.isfile(manifest_filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
@@ -394,23 +391,6 @@ def cluster(
 
     # Retrieve the list of input genomes
     genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
-
-    # Load boundaries
-    boundaries: Dict[str, Dict[str, int]] = dict()
-    with open(boundaries_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                # Skip the header lines
-                if not line.startswith("#"):
-                    line_split = line.split("\t")
-                    if line_split[0] not in boundaries:
-                        boundaries[line_split[0]] = dict()
-
-                    # Get the minimum and maximum common kmers among all the genomes
-                    # in the current taxonomic level
-                    boundaries[line_split[0]]["min"] = int(line_split[1])
-                    boundaries[line_split[0]]["max"] = int(line_split[2])
 
     # Extract all the levels from the taxonomic labels in boundaries
     levels_in_boundaries = set()
@@ -468,7 +448,7 @@ def cluster(
                     # Retrieve the boundaries for the current taxonomy
                     if taxonomy in boundaries:
                         # Search in the boundaries dictionary
-                        mink = boundaries[taxonomy]["min"]
+                        mink = boundaries[taxonomy]["min_kmers"]
 
                     else:
                         # In case the taxonomy does not appear in the boundaries dictionary
@@ -494,7 +474,7 @@ def cluster(
 
                                     if higher_tax in tax and tax_level in tax:
                                         # Keep track of the boundaries for computing the avarage values
-                                        all_mink.append(boundaries[tax]["min"])
+                                        all_mink.append(boundaries[tax]["min_kmers"])
 
                                 if all_mink:
                                     # Compute the boundaries
@@ -866,30 +846,17 @@ def get_file_info(filepath: str, check_supported: bool = True, check_exists: boo
     return absdir, filename, extension, compression
 
 
-def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, int]:
+def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], taxonomy: str) -> Tuple[int, int]:
     """
     Retrieve boundaries for a given taxonomic label
 
-    :param boundaries_filepath:     Path to the file with boundaries produced by the boundaries module
-    :param taxonomy:                Taxonomic label
-    :return:                        Boundaries
+    :param boundaries:  Boundaries table produced by the boundaries module
+    :param taxonomy:    Taxonomic label
+    :return:            Taxonomy-specific boundaries
     """
 
     minv = 0
     maxv = 0
-
-    # Load the boundaries file
-    boundaries = dict()
-    with open(boundaries_filepath) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                if not line.startswith("#"):
-                    line_split = line.split("\t")
-                    boundaries[line_split[0]] = {
-                        "min": int(line_split[3]),
-                        "max": int(line_split[4]),
-                    }
 
     # Keep track of the min and max common kmers
     min_bounds = list()
@@ -913,8 +880,8 @@ def get_level_boundaries(boundaries_filepath: str, taxonomy: str) -> Tuple[int, 
         if taxonomic_boundaries:
             # In case the current taxonomy is in the boundaries file
             for tax in taxonomic_boundaries:
-                min_bounds.append(taxonomic_boundaries[tax]["min"])
-                max_bounds.append(taxonomic_boundaries[tax]["max"])
+                min_bounds.append(taxonomic_boundaries[tax]["min_kmers"])
+                max_bounds.append(taxonomic_boundaries[tax]["max_kmers"])
 
             minv = int(sum(min_bounds) / len(min_bounds))
             maxv = int(sum(max_bounds) / len(max_bounds))
@@ -1279,6 +1246,40 @@ def integrity_check(filepath) -> bool:
         return False
 
     return True
+
+
+def load_boundaries(boundaries_filepath: str) -> Dict[str, Dict[str, Union[int, float]]]:
+    """
+    Load the table produced by the boundaries module
+
+    :param boundaries_filepath: Path to the boundaries table
+    :return:                    Dictionary with the table content indexed by taxa
+    """
+
+    if not os.path.isfile(boundaries_filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), boundaries_filepath)
+    
+    boundaries = dict()
+
+    with open(boundaries_filepath) as table:
+        for line in table:
+            line = line.strip()
+            if line:
+                if not line.startswith("#"):
+                    line_split = line.split("\t")
+                    
+                    # Indexed by taxonomic labels
+                    boundaries[line_split[0]] = {
+                        "clusters": int(line_split[1]),
+                        "references": int(line_split[2]),
+                        "all_kmers": int(line_split[3]),
+                        "min_kmers": int(line_split[4]),
+                        "max_kmers": int(line_split[5]),
+                        "min_score": float(line_split[6]),
+                        "max_score": float(line_split[7]),
+                    }
+
+    return boundaries
 
 
 def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:

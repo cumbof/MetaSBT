@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 8, 2023"
+__date__ = "Mar 1, 2023"
 
 import argparse as ap
 import errno
@@ -36,6 +36,7 @@ try:
         get_level_boundaries,
         howdesbt,
         init_logger,
+        load_boundaries,
         load_manifest,
         number,
         println,
@@ -253,7 +254,7 @@ def profile_and_assign(
     tmp_dir: str,
     db_dir: str,
     tmp_genomes_dir: str,
-    boundaries: Optional[str] = None,
+    boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
     taxonomies: Optional[dict] = None,
     dereplicate: bool = False,
@@ -271,7 +272,7 @@ def profile_and_assign(
     :param tmp_dir:                 Path to the temporary folder
     :param db_dir:                  Path to the database root folder
     :param tmp_genomes_dir:         Path to the temporary folder for uncompressing input genomes
-    :param boundaries:              Path to the table with taxonomic boundaries
+    :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
     :param taxonomies:              Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
     :param dereplicate:             Enable dereplication of input genome against genomes in the closest cluster
@@ -584,7 +585,7 @@ def update(
     extension: str,
     db_dir: str,
     tmp_dir: str,
-    boundaries: Optional[str] = None,
+    boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
     taxa_map: Optional[str] = None,
     completeness: float = 0.0,
@@ -607,7 +608,7 @@ def update(
     :param extension:               File extension of the input genome files
     :param db_dir:                  Path to the database root folder
     :param tmp_dir:                 Path to the temporary folder
-    :param boundaries:              Path to the boundaries table file
+    :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
     :param taxa_map:                Path to the file with the mapping between the input genome names and their taxonomic labels
                                     Used only in case of input reference genomes
@@ -997,6 +998,13 @@ def main() -> None:
     if args.type == "references" and not os.path.isfile(args.taxa):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.taxa)
 
+    # Check whether the boundaries table exists
+    if not os.path.isfile(args.boundaries):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.boundaries)
+    
+    # Load the boundaries table
+    boundaries_table = load_boundaries(args.boundaries)
+
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
@@ -1009,7 +1017,7 @@ def main() -> None:
         args.extension,
         args.db_dir,
         args.tmp_dir,
-        boundaries=args.boundaries,
+        boundaries_table,
         boundary_uncertainty=args.boundary_uncertainty,
         taxa_map=args.taxa,
         completeness=args.completeness,
