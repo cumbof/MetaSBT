@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 23, 2023"
+__date__ = "Feb 28, 2023"
 
 import argparse as ap
 import errno
@@ -190,7 +190,8 @@ def bfaction(
                     for line in bfaction_out_file:
                         line = line.strip()
                         if line:
-                            line_split = line.split(" ")
+                            # This is require to replace consecutive space instances with a single space
+                            line_split = " ".join(line.split()).split(" ")
 
                             # Get genome names
                             _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_exists=False)
