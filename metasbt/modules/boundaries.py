@@ -5,7 +5,7 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 28, 2023"
+__date__ = "Mar 1, 2023"
 
 import argparse as ap
 import errno
@@ -170,7 +170,7 @@ def define_boundaries(
                     next_level = path_split[path_pos + 1]
                     break
 
-        if level_id != "species":
+        if level_id != "species" and next_level not in samples:
             samples[next_level] = list()
 
         with open(str(references_path)) as references:
