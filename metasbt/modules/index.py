@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 23, 2023"
+__date__ = "Feb 28, 2023"
 
 import argparse as ap
 import copy
@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy  # type: ignore
+import pandas  # type: ignore
 import tqdm  # type: ignore
 
 # Local modules are not available when the main controller
@@ -606,8 +607,14 @@ def organize_data(
     # Move the metadata table to the taxonomy folder
     if metadata:
         if os.path.isfile(metadata):
-            # TODO fix path to the genome file under "local_filename" in the metadata table
-            shutil.move(metadata, tax_dir)
+            # Fix the "local_filename" column in the metadata table
+            df = pandas.read_csv(metadata, sep="\t")
+            df["local_filename"] = df["local_filename"].apply(
+                lambda filepath: get_file_info(filepath, check_supported=False, check_exists=False)[1]
+            )
+
+            # Dump the metadata table into the species folder
+            df.to_csv(os.path.join(tax_dir, "metadata.tsv"), sep="\t", index=False)
 
     if checkm_tables:
         # Also merge the CheckM output tables and move the result to the taxonomy folder
