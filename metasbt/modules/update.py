@@ -19,7 +19,7 @@ from functools import partial
 from itertools import takewhile
 from logging import Logger
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tqdm  # type: ignore
 
