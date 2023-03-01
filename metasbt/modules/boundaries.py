@@ -232,15 +232,7 @@ def define_boundaries(
         )
 
         # Get the full lineage from the level folder path
-        lineage_list = list()
-        kingdom_found = False
-        for level in level_dir.split(os.sep):
-            if level.startswith("k__"):
-                kingdom_found = True
-            if kingdom_found:
-                lineage_list.append(level)
-
-        lineage = "|".join(lineage_list)
+        lineage = get_lineage_from_path(level_dir)
 
         # In case of --flat-structure
         if len(lineage.strip()) == 0:
@@ -260,6 +252,29 @@ def define_boundaries(
                     round(max_kmers / all_kmers, 3),
                 )
             )
+
+
+def get_lineage_from_path(folder_path: str) -> str:
+    """
+    Rebuild a lineage from a taxonomic folder path
+
+    :param folder_path: Path to the taxonomic folder
+    :return:            Lineage
+    """
+
+    lineage_list = list()
+    kingdom_found = False
+
+    for level in folder_path.split(os.sep):
+        # Search for the kingdom level
+        if level.startswith("k__"):
+            kingdom_found = True
+
+        # Start rebuilding the lineage form the kingdom
+        if kingdom_found:
+            lineage_list.append(level)
+
+    return "|".join(lineage_list)
 
 
 def boundaries(
@@ -357,8 +372,11 @@ def boundaries(
         # Iterate over the taxonomic levels
         for level in levels:
             printline("Defining {} boundaries".format(level))
+
             for level_dir in Path(target_dir).glob("**/{}__*".format(level[0])):
                 if os.path.isdir(str(level_dir)):
+                    printline("Processing {}".format(get_lineage_from_path(str(level_dir))))
+
                     # Define boundaries for the current taxonomic level
                     define_boundaries(
                         str(level_dir),
