@@ -160,6 +160,10 @@ def define_boundaries(
     # Databases without a taxonomic structure use genomes.txt
     references_paths.extend(list(Path(level_dir).glob("**/genomes.txt")))
 
+    # Take track of the overall number of reference genomes
+    # under a specific taxonomic level
+    references_count = 0
+
     for references_path in references_paths:
         path_split = str(references_path).split(os.sep)
         # In case the current level_id is species
@@ -189,11 +193,17 @@ def define_boundaries(
                     else:
                         samples[next_level].append(genome_path)
 
+                    references_count += 1
+
     # In case the current taxonomic level is not the species level
     if level_id != "species":
         # Get rid of clusters with not enough genomes according to min_genomes
         for sample_id in list(samples.keys()):
             if len(samples[sample_id]) < min_genomes:
+                # Redefine references count
+                references_count -= len(samples[sample_id])
+
+                # Remove cluster
                 del samples[sample_id]
 
     # In case the number of genomes in the current taxonomic level
@@ -239,9 +249,10 @@ def define_boundaries(
         # Dump results to the boundaries table
         with open(output, "a+") as table:
             table.write(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                     lineage,
-                    len(samples),
+                    len(samples) if level_id != "species" else 0,
+                    references_count,
                     all_kmers,
                     min_kmers,
                     max_kmers,
@@ -294,8 +305,9 @@ def boundaries(
         if max_genomes:
             file.write("# --max-genomes {}\n".format(max_genomes))
         file.write(
-            "# {}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+            "# {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                 "Lineage",  # Taxonomic label
+                "Clusters",  # Number of clusters, valid for every taxonomic level except the species one
                 "References",  # Number of reference genomes or clustrs under a specific taxonomic level
                 "Kmers",  # Total number of kmers
                 "Min kmers",  # Minimum number of common kmers among the reference genomes/clusters
