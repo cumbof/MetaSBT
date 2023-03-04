@@ -856,26 +856,7 @@ def process_tax_id(
             genomes_urls = genomes_urls[:limit_genomes]
 
         # Keep track of the paths to the downloaded genome files
-        genomes = list()
-
-        with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=pbar_len, disable=(not verbose)) as pbar:
-            # Wrapper around the update function of tqdm
-            def progress(*args):
-                pbar.update()
-
-            # Retrieve genomes form NCBI GenBank
-            jobs = [
-                pool.apply_async(
-                    download,
-                    args=(genome_url, tmp_genomes_dir),
-                    callback=progress
-                )
-                for genome_url in genomes_urls
-            ]
-
-            # Get results from jobs
-            for job in jobs:
-                genomes.append(job.get())
+        genomes = [download(genome_url, tmp_genomes_dir) for genome_url in genomes_urls]
 
         if verbose:
             printline("Retrieved {}/{} genomes".format(len(genomes), len(genomes_urls)))
