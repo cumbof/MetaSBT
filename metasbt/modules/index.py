@@ -854,7 +854,7 @@ def process_tax_id(
     genomes_urls = list()
 
     for genome_info in genomes_info:
-        if genome_info["excluded_from_refseq"] in REFERENCE_TAGS:
+        if not genome_info["excluded_from_refseq"].strip() or genome_info["excluded_from_refseq"] in REFERENCE_TAGS:
             if filter_criteria:
                 # Iterate over filter criteria and check whether current genome matches with them
                 for criteria in filter_criteria:
