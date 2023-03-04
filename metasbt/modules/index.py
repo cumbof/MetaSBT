@@ -415,12 +415,18 @@ def level_name(current_level: str, prev_level: str) -> str:
     return "{}{}".format(level_prefix, level_suffix)
 
 
-def load_taxa(ncbitax2lin_table: str, superkingdom: Optional[str] = None, dump: Optional[str] = None) -> Tuple[list, list]:
+def load_taxa(
+    ncbitax2lin_table: str,
+    superkingdom: Optional[str] = None,
+    kingdom: Optional[str] = None,
+    dump: Optional[str] = None
+) -> Tuple[list, list]:
     """
     Load the ncbitax2lin output table
 
     :param ncbitax2lin_table:   Path to the output table produced by ncbitax2lin
     :param superkingdom:        Consider a specific superkingdom only
+    :param kingdom:             Kingdom
     :param dump:                Path to the output table
     :return:                    The lists of NCBI tax IDs and full taxonomic labels
     """
@@ -432,9 +438,7 @@ def load_taxa(ncbitax2lin_table: str, superkingdom: Optional[str] = None, dump: 
         # Load the first line as header and search for "superkingdom" and "kingdom" columns
         header = ncbi_table.readline().split(",")
         superkingdom_pos = header.index("superkingdom")  # Archaea, Bacteria, Eukaryota, Viruses
-        # Eukaryota superkingdom is limited to the Fungi kingdom
-        # Limitation is due to the use of ncbi-genome-download tool (look at available "groups")
-        kingdom_pos = header.index("kingdom")  # Fungi
+        kingdom_pos = header.index("kingdom")
 
         for line in ncbi_table:
             line = line.strip()
@@ -443,15 +447,15 @@ def load_taxa(ncbitax2lin_table: str, superkingdom: Optional[str] = None, dump: 
 
                 # Check whether the current taxonomy must be processed
                 skip = True
-                if not superkingdom:
-                    if line_split[superkingdom_pos].strip():
+                
+                if not superkingdom and line_split[superkingdom_pos].strip():
+                    skip = False
+                
+                elif line_split[superkingdom_pos] == superkingdom:
+                    if not kingdom:
                         skip = False
-                elif line_split[superkingdom_pos] == kingdom:
-                    if line_split[superkingdom_pos] == "Eukaryota":
-                        # Process current line in case of Fungi kingdom only
-                        if line_split[kingdom_pos] == "Fungi":
-                            skip = False
-                    else:
+                    
+                    elif line_split[kingdom_pos] == kingdom:
                         skip = False
 
                 if not skip:
@@ -771,7 +775,6 @@ def process_tax_id(
     tax_id: str,
     tax_label: str,
     genomes_info: List[Dict[str, str]],
-    superkingdom: str,
     db_dir: str,
     tmp_dir: str,
     kmer_len: int,
@@ -795,7 +798,6 @@ def process_tax_id(
     :param tax_id:              NCBI tax ID of a species
     :param tax_label:           Full taxonomic label
     :param genomes_info:        List of dictionaries with genomes information
-    :param superkingdom:        Retrieve genomes that belong to a specific superkingdom
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
     :param kmer_len:            Length of the kmers
@@ -1024,6 +1026,7 @@ def index(
     input_list: str,
     superkingdom: str,
     tmp_dir: str,
+    kingdom: Optional[str] = None,
     kmer_len: Optional[int] = None,
     filter_size: Optional[int] = None,
     flat_structure: bool = False,
@@ -1055,6 +1058,7 @@ def index(
     :param input_list:                  Path to the file with a list of input genome paths
     :param superkingdom:                Retrieve genomes that belong to a specific superkingdom
     :param tmp_dir:                     Path to the temporary folder
+    :param kingdom:                     Kingdom
     :param kmer_len:                    Length of the kmers
     :param filter_size:                 Size of the bloom filters
     :param flat_structure:              Do not taxonomically organize genomes
@@ -1167,6 +1171,7 @@ def index(
         tax_ids, tax_labels = load_taxa(
             ncbitax2lin_table,
             superkingdom=superkingdom,
+            kingdom=kingdom,
             dump=os.path.join(tmp_dir, "taxa.tsv") if not os.path.isfile(os.path.join(tmp_dir, "taxa.tsv")) else None,
         )
 
@@ -1178,7 +1183,6 @@ def index(
         # Build a partial function around process_tax_id
         process_partial = partial(
             process_tax_id,
-            superkingdom=superkingdom,
             db_dir=db_dir,
             tmp_dir=tmp_dir,
             kmer_len=kmer_len,
@@ -1492,6 +1496,7 @@ def main() -> None:
         args.input_list,
         args.superkingdom,
         args.tmp_dir,
+        kingdom=args.kingdom,
         kmer_len=args.kmer_len,
         filter_size=args.filter_size,
         flat_structure=args.flat_structure,
