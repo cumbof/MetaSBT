@@ -343,6 +343,8 @@ def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Di
             line = line.replace("\n", "")
             
             if line:
+                line_split = line.split("\t")
+
                 species_taxid = line_split[header.index("species_taxid")]
                 ftp_path = line_split[header.index("ftp_path")]
                 genome_url = os.path.join(ftp_path, "{}_genomic.fna.gz".format(os.path.basename(ftp_path)))
