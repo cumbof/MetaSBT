@@ -620,12 +620,13 @@ def organize_data(
             metafile.write("# {}\n".format("\t".join(header_list)))
 
             for genome_info in metadata:
-                info = list()
+                if os.path.join(genomes_dir, "{}.fna.gz".format(genome_info["local_filename"])) in genomes_paths:
+                    line = list()
 
-                for h in header_list:
-                    info.append(genome_info[h])
+                    for h in header_list:
+                        line.append(genome_info[h])
 
-                metafile.write("{}\n".format("\t".join(info)))
+                    metafile.write("{}\n".format("\t".join(line)))
 
     if checkm_tables:
         # Also merge the CheckM output tables and move the result to the taxonomy folder
@@ -824,7 +825,7 @@ def process_tax_id(
     # Take track of the paths to the genome files
     genomes_paths = list()
 
-    genomes_urls = [genome_info["ftp_filepath"] for genome_info in genomes_info]
+    genomes_urls = [genome_info["ftp_filepath"] for genome_info in genomes_info if genome_info["refseq_category"] == "reference genome"]
 
     if len(genomes_urls) > 0:
         if verbose:
