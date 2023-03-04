@@ -1186,7 +1186,11 @@ def index(
         printline("Processing clusters")
 
         # Define the length of the progress bar
-        pbar_len = len(tax_ids)
+        pbar_len = 0
+
+        for txid in tax_ids:
+            if txid in assembly_summary:
+                pbar_len += 1
 
     # Take track of all the genomes paths
     genomes_paths = list()
