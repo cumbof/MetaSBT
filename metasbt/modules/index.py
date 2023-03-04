@@ -75,10 +75,13 @@ FILES_AND_FOLDERS = [
 TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
 # Define the url to the NCBI GenBank Assembly Summary
+# https://ftp.ncbi.nlm.nih.gov/genomes/README_assembly_summary.txt
+# https://www.ncbi.nlm.nih.gov/assembly/help/
 ASSEMBLY_SUMMARY_URL = "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt"
 
 # Consider a genome as a reference if it contains one of the following tags
-# under the exclude_from_refseq column in the NCBI GenBank Assembly Summary table
+# under the excluded_from_refseq column in the NCBI GenBank Assembly Summary table
+# https://www.ncbi.nlm.nih.gov/assembly/help/anomnotrefseq/
 REFERENCE_TAGS = [
     "derived from single cell",
     "derived from surveillance project",
@@ -851,7 +854,7 @@ def process_tax_id(
     genomes_urls = list()
 
     for genome_info in genomes_info:
-        if genome_info["exclude_from_refseq"] in REFERENCE_TAGS:
+        if genome_info["excluded_from_refseq"] in REFERENCE_TAGS:
             if filter_criteria:
                 # Iterate over filter criteria and check whether current genome matches with them
                 for criteria in filter_criteria:
