@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 3, 2023"
+__date__ = "Mar 4, 2023"
 
 import argparse as ap
 import gzip
@@ -45,6 +45,7 @@ try:
         optimal_k,
         println,
         run,
+        validate_url,
     )
 except Exception:
     pass
@@ -75,6 +76,22 @@ TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
 # Define the url to the NCBI GenBank Assembly Summary
 ASSEMBLY_SUMMARY_URL = "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt"
+
+# Consider a genome as a reference if it contains one of the following tags
+# under the exclude_from_refseq column in the NCBI GenBank Assembly Summary table
+REFERENCE_TAGS = [
+    "derived from single cell",
+    "derived from surveillance project",
+    "assembly from type material",
+    "assembly from synonym type material",
+    "assembly designated as neotype",
+    "assembly designated as reftype",
+    "assembly from pathotype material",
+    "assembly from proxytype material",
+    "missing strain identifier",
+    "genus undefined",
+    "from large multi-isolate project"
+]
 
 
 def read_params():
@@ -338,31 +355,30 @@ def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Di
         header = next(asf)[1:].strip().split("\t")
 
         for line in asf:
-            # Remove the new line character
-            # Do not strip the line since there could be some missing info at the end
-            line = line.replace("\n", "")
-            
-            if line:
+            if line.strip():
                 line_split = line.split("\t")
 
                 species_taxid = line_split[header.index("species_taxid")]
                 ftp_path = line_split[header.index("ftp_path")]
                 genome_url = os.path.join(ftp_path, "{}_genomic.fna.gz".format(os.path.basename(ftp_path)))
 
-                if species_taxid not in assembly_summary:
-                    assembly_summary[species_taxid] = list()
+                # Check whether the genome URL is valid
+                # Otherwise, skip the genome
+                if species_taxid and validate_url(genome_url):
+                    if species_taxid not in assembly_summary:
+                        assembly_summary[species_taxid] = list()
 
-                species_info = dict()
-                
-                for h in header:
-                    species_info[h] = line_split[header.index(h)]
+                    species_info = dict()
+                    
+                    for h in header:
+                        species_info[h] = line_split[header.index(h)].strip()
 
-                species_info["ftp_filepath"] = genome_url
+                    species_info["ftp_filepath"] = genome_url
 
-                _, local_filename, _, _ = get_file_info(genome_url, check_supported=False, check_exists=False)
-                species_info["local_filename"] = os.path.basename(local_filename)
+                    _, local_filename, _, _ = get_file_info(genome_url, check_supported=False, check_exists=False)
+                    species_info["local_filename"] = os.path.basename(local_filename)
 
-                assembly_summary[species_taxid].append(species_info)
+                    assembly_summary[species_taxid].append(species_info)
 
     return assembly_summary
 
@@ -790,12 +806,13 @@ def process_tax_id(
     dereplicate: bool = False,
     similarity: float = 1.0,
     flat_structure: bool = False,
+    filter_criteria: Dict[str, List[str]] = None,
     logger: Optional[Logger] = None,
     verbose: bool = False,
 ) -> List[str]:
     """
     Process a specific NCBI tax ID
-    Download, quality-control, and dereplicate genomes
+    Download reference genomes only, perform quality-control and dereplication
 
     :param tax_id:              NCBI tax ID of a species
     :param tax_label:           Full taxonomic label
@@ -813,6 +830,7 @@ def process_tax_id(
     :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
     :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
     :param flat_structure:      Do not taxonomically organize genomes
+    :param filter_criteria:     Dictionary with genomes filter criteria on assembly summary information
     :param logger:              Logger object
     :param verbose:             Print messages on screen
     :return:                    The list of paths to the genome files
@@ -829,7 +847,19 @@ def process_tax_id(
     # Take track of the paths to the genome files
     genomes_paths = list()
 
-    genomes_urls = [genome_info["ftp_filepath"] for genome_info in genomes_info if genome_info["refseq_category"] == "reference genome"]
+    # Take track of genomes URLs
+    genomes_urls = list()
+
+    for genome_info in genomes_info:
+        if genome_info["exclude_from_refseq"] in REFERENCE_TAGS:
+            if filter_criteria:
+                # Iterate over filter criteria and check whether current genome matches with them
+                for criteria in filter_criteria:
+                    if genome_info[criteria] in filter_criteria[criteria]:
+                        genomes_urls.append(genome_info["ftp_filepath"])
+            else:
+                # Consider every genome in genomes_info
+                genomes_urls.append(genome_info["ftp_filepath"])
 
     if len(genomes_urls) > 0:
         if verbose:
@@ -1179,6 +1209,7 @@ def index(
             dereplicate=dereplicate,
             similarity=similarity,
             flat_structure=flat_structure,
+            filter_criteria=None,
             logger=logger,
             verbose=False,
         )
