@@ -32,6 +32,7 @@ import tqdm  # type: ignore
 try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
+        build_sh,
         checkm,
         dereplicate_genomes,
         download,
@@ -1509,6 +1510,9 @@ def main() -> None:
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
+
+    # Build a sh script with the command line used to launch the index module
+    build_sh(sys.argv, TOOL_ID, args.db_dir)
 
     t0 = time.time()
 

@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 1, 2023"
+__date__ = "Mar 4, 2023"
 
 import argparse as ap
 import errno
@@ -28,6 +28,7 @@ import tqdm  # type: ignore
 try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
+        build_sh,
         checkm,
         cluster,
         dereplicate_genomes,
@@ -1008,6 +1009,9 @@ def main() -> None:
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
+
+    # Build a sh script with the command line used to launch the update module
+    build_sh(sys.argv, TOOL_ID, args.db_dir)
 
     t0 = time.time()
 

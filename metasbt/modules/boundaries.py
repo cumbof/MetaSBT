@@ -5,12 +5,13 @@ Define cluster-specific boundaries as the minimum and maximum number of common k
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 1, 2023"
+__date__ = "Mar 4, 2023"
 
 import argparse as ap
 import errno
 import os
 import shutil
+import sys
 import time
 from datetime import datetime
 from functools import partial
@@ -24,7 +25,7 @@ import numpy  # type: ignore
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import get_boundaries, init_logger, load_manifest, number, println  # type: ignore
+    from utils import build_sh, get_boundaries, init_logger, load_manifest, number, println  # type: ignore
 except Exception:
     pass
 
@@ -431,6 +432,9 @@ def main() -> None:
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
+
+    # Build a sh script with the command line used to launch the boundaries module
+    build_sh(sys.argv, TOOL_ID, args.db_dir)
 
     t0 = time.time()
 

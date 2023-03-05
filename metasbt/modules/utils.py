@@ -243,6 +243,28 @@ def bfaction(
     return dist
 
 
+def build_sh(argv: List[str], module: str, outfolder: str) -> None:
+    """
+    Build a sh script with the command line used to launch a module
+
+    :param argv:        List of arguments
+    :param module:      Module ID
+    :param outfolder:   Output folder path
+    """
+
+    with open(os.path.join(outfolder, "{}.sh".format(module)), "w+") as sh:
+        sh.write("#!/bin/bash\n\n")
+
+        # Add metasbt
+        argv.insert(0, "metasbt")
+
+        # Replace the path to the python script with the module ID
+        argv[1] = module
+
+        # Finally build the command line
+        sh.write("{}\n".format(" ".join(argv)))
+
+
 def checkm(
     genomes_paths: List[str],
     tmp_dir: str,
@@ -1462,7 +1484,7 @@ def println(message: str, logger: Optional[Logger] = None, verbose: bool = True)
 
 
 def run(
-    cmdline: List[str, int, float],
+    cmdline: List[Union[str, int, float]],
     stdout: Union[int, TextIO] = sys.stdout,
     stderr: Union[int, TextIO] = sys.stderr,
     silence: bool = False,
