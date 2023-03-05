@@ -77,9 +77,9 @@ def read_params():
         help="Genomes in the database have been organized without a taxonomic structure",
     )
     p.add_argument(
-        "--kingdom",
+        "--superkingdom",
         type=str,
-        help="Consider genomes whose lineage belongs to a specific kingdom",
+        help="Consider genomes whose lineage belongs to a specific superkingdom",
     )
     p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
     p.add_argument(
@@ -264,15 +264,15 @@ def get_lineage_from_path(folder_path: str) -> str:
     """
 
     lineage_list = list()
-    kingdom_found = False
+    superkingdom_found = False
 
     for level in folder_path.split(os.sep):
-        # Search for the kingdom level
+        # Search for the superkingdom level
         if level.startswith("k__"):
-            kingdom_found = True
+            superkingdom_found = True
 
-        # Start rebuilding the lineage form the kingdom
-        if kingdom_found:
+        # Start rebuilding the lineage form the superkingdom
+        if superkingdom_found:
             lineage_list.append(level)
 
     return "|".join(lineage_list)
@@ -285,7 +285,7 @@ def boundaries(
     flat_structure: bool = False,
     max_genomes: Optional[int] = None,
     min_genomes: int = 3,
-    kingdom: Optional[str] = None,
+    superkingdom: Optional[str] = None,
     logger: Optional[Logger] = None,
     verbose: bool = False,
     nproc: int = 1,
@@ -299,7 +299,7 @@ def boundaries(
     :param output:          Path to the output table file with boundaries
     :param flat_structure:  Genomes in the database have been organized without a taxonomic structure
     :param min_genomes:     Consider clusters with at least this number of genomes
-    :param kingdom:         Retrieve genomes that belong to a specific kingdom
+    :param superkingdom:    Retrieve genomes that belong to a specific superkingdom
     :param logger:          Logger object
     :param verbose:         Print messages on screen
     :param nproc:           Make the process parallel when possible
@@ -315,8 +315,8 @@ def boundaries(
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
         file.write("# timestamp: {}\n".format(datetime.today().strftime("%Y%m%d")))
         file.write("# --db-dir {}\n".format(db_dir))
-        if kingdom:
-            file.write("# --kingdom {}\n".format(kingdom))
+        if superkingdom:
+            file.write("# --superkingdom {}\n".format(superkingdom))
         file.write("# --min-genomes {}\n".format(min_genomes))
         if max_genomes:
             file.write("# --max-genomes {}\n".format(max_genomes))
@@ -365,9 +365,9 @@ def boundaries(
 
     else:
         # Genomes have been taxonomically organized
-        target_dir = db_dir if not kingdom else os.path.join(db_dir, "k__{}".format(kingdom))
+        target_dir = db_dir if not superkingdom else os.path.join(db_dir, "k__{}".format(superkingdom))
         levels = ["species", "genus", "family", "order", "class", "phylum"]
-        if not kingdom:
+        if not superkingdom:
             levels.append("kingdom")
 
         # Iterate over the taxonomic levels
@@ -391,10 +391,10 @@ def boundaries(
                         nproc=nproc,
                     )
 
-        if kingdom:
-            # Also define boundaries for the specified kingdom
+        if superkingdom:
+            # Also define boundaries for the specified superkingdom
             define_boundaries(
-                os.path.join(db_dir, kingdom),
+                os.path.join(db_dir, superkingdom),
                 "kingdom",
                 tmp_dir,
                 output,
@@ -417,7 +417,7 @@ def main() -> None:
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Check whether the database folder exists
-    target_dir = args.db_dir if not args.kingdom else os.path.join(args.db_dir, "k__{}".format(args.kingdom))
+    target_dir = args.db_dir if not args.superkingdom else os.path.join(args.db_dir, "k__{}".format(args.superkingdom))
     if not os.path.isdir(target_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
 
@@ -445,7 +445,7 @@ def main() -> None:
         flat_structure=args.flat_structure,
         max_genomes=args.max_genomes,
         min_genomes=args.min_genomes,
-        kingdom=args.kingdom,
+        superkingdom=args.superkingdom,
         logger=logger,
         verbose=args.verbose,
         nproc=args.nproc,

@@ -132,7 +132,7 @@ metasbt index --db-dir ~/myindex \
               --estimate-filter-size \
               --increase-filter-size 5.0 \
               --estimate-kmer-size \
-              --kingdom Bacteria \
+              --superkingdom Bacteria \
               --dereplicate \
               --similarity 100.0 \
               --completeness 50.0 \
@@ -146,13 +146,11 @@ metasbt index --db-dir ~/myindex \
               --verbose
 ```
 
-In case you would like to create a database from a specific set of genomes available on your file system, you may use the `--input-list` instead of the `--kingdom` option. It should point to a table file with the list of file paths to the input genomes on the first column and an optional second column with the full taxonomic labels of the input genomes in a tab-separated values format.
+In case you would like to create a database from a specific set of genomes available on your file system, you may use the `--input-list` instead of the `--superkingdom` option. It should point to a table file with the list of file paths to the input genomes on the first column and an optional second column with the full taxonomic labels of the input genomes in a tab-separated values format.
 
 > **Note**:
 > you may want to get rid of the taxonomic organization of genomes by specifying the `--flat-structure` option that will consider all the input genomes together for the generation of a single sequence bloom tree.
 > Please note that the `--flat-structure` option is not compatible with the `update` module for updating the database with new genomes. Thus, in case you will need to update the sequence bloom tree, there are no other options than building the database from scratch with the new set of genomes.
-
-> :warning: _Please note that this module makes use of the `ncbi-genome-download` external dependency to retrieve genomes under a specific Kingdom. However, this tool limits the Eukaryotes genomes to Fungi only. Thus, in case you specify `--kingdom Eukaryota`, you may expect to retrieve and index Fungi genomes only._
 
 #### Available options
 
@@ -172,7 +170,7 @@ In case you would like to create a database from a specific set of genomes avail
 | `--increase-filter-size`                  | `0.0`   |           | Increase the estimated filter size by the specified percentage. This is used in conjunction with the `--estimate-filter-size` argument only. It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes |
 | `--input-list`                            |         |           | Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz) |
 | `--jellyfish-threads`                     | `1`     |           | Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances |
-| `--kingdom`                               |         |           | Consider genomes whose lineage belongs to a specific kingdom (i.e., `Archaea`, `Bacteria`, `Eukaryota`, and `Viruses`) |
+| `--kingdom`                               |         |           | Consider genomes whose lineage belongs to a specific kingdom. It is optional and must be provided in conjunction with --superkingdom |
 | `--kmer-len`                              |         |           | This is the length of the kmers used for building bloom filters |
 | `--limit-estimation-number`               |         |           | Limit the number of genomes per group to be considered as input for kitsune and ntCard. It overrides --limit-estimation-percentage in case of a number > 0 |
 | `--limit-estimation-percentage`           | `100.0` |           | Percentage on the total number of genomes per group to be considered as input for kitsune and ntCard |
@@ -185,6 +183,7 @@ In case you would like to create a database from a specific set of genomes avail
 | `--parallel`                              | `1`     |           | Maximum number of processors to process each NCBI tax ID in parallel |
 | `--pplacer-threads`                       | `1`     |           | Maximum number of threads for pplacer. This is required to maximise the CheckM performances |
 | `--similarity`                            | `100.0` |           | Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. This is used exclusively in conjunction with the `--dereplicate` argument |
+| `--superkingdom`                          |         |           | Consider genomes whose lineage belongs to a specific superkingdom if --input-list is not provided |
 | `--tmp-dir`                               |         | ⚑         | Path to the temporary folder |
 | `--verbose`                               | `False` |           | Print results on screen |
 | `--version`                               |         |           | Print current module version and exit |
@@ -216,7 +215,7 @@ metasbt boundaries --db-dir ~/myindex \
 | `--db-dir`               |         | ⚑         | Database directory with the taxonomically organised sequence bloom trees |
 | `--flat-structure`       | `False` |           | Genomes in the database have been organized without a taxonomic structure |
 | `--help`                 |         |           | Print the list of arguments and exit |
-| `--kingdom`              |         |           | Consider genomes whose lineage belongs to a specific kingdom |
+| `--superkingdom`         |         |           | Consider genomes whose lineage belongs to a specific superkingdom |
 | `--log`                  |         |           | Path to the log file |
 | `--max-genomes`          |         |           | Maximum number of genomes per cluster to be considered for computing boundaries. Genomes are selected randomly in case the size of clusters is greater than this number. This must be greater than or equals to --min-genomes |
 | `--min-genomes`          | `3`     |           | Consider clusters with a minimum number of genomes only |
