@@ -309,15 +309,15 @@ def checkm(
                             "checkm",
                             "lineage_wf",
                             "-t",
-                            str(nproc),
+                            nproc,
                             "-x",
                             file_extension,
                             "--pplacer_threads",
-                            str(pplacer_threads),
+                            pplacer_threads,
                             "--tab_table",
                             "-f",
                             table_path,
-                            str(bins_folder),
+                            bins_folder,
                             run_dir,
                         ],
                         stdout=subprocess.DEVNULL,
@@ -1414,13 +1414,13 @@ def optimal_k(
                 "--filenames",
                 inputlist.name,
                 "-kl",
-                str(kl),
+                kl,
                 "--canonical",
                 "--fast",
                 "-n",
-                str(nproc),
+                nproc,
                 "-t",
-                str(threads),
+                threads,
                 "-o",
                 outres.name,
                 "--closely_related" if closely_related else ""
@@ -1462,7 +1462,7 @@ def println(message: str, logger: Optional[Logger] = None, verbose: bool = True)
 
 
 def run(
-    cmdline: List[str],
+    cmdline: List[str, int, float],
     stdout: Union[int, TextIO] = sys.stdout,
     stderr: Union[int, TextIO] = sys.stderr,
     silence: bool = False,
@@ -1479,6 +1479,9 @@ def run(
     # Check whether ther is something to run
     if cmdline:
         try:
+            # Cast everything to string in cmdline
+            cmdline = [str(cmd) for cmd in cmdline]
+
             # In case of silence
             if silence:
                 # Redirect the stdout and stderr to /dev/null
