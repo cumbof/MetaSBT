@@ -5,7 +5,7 @@ Unit tests for modules/utils.py
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 8, 2023"
+__date__ = "Mar 5, 2023"
 
 import errno
 import hashlib
@@ -102,6 +102,23 @@ class TestUtils(unittest.TestCase):
 
         with self.subTest():
             self.assertIs(compression, None)
+
+    def test_validate_url(self):
+        """
+        Test the utils.validate_url() function
+        """
+
+        # URL to the NCBI GenBank Assembly Summary table
+        assembly_summary_url = "https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt"
+
+        # Define a malformed URL
+        malformed_url = "http://test"
+
+        with self.subTest():
+            self.assertTrue(utils.validate_url(assembly_summary_url))
+
+        with self.subTest():
+            self.assertFalse(utils.validate_url(malformed_url))
 
 
 if __name__ == "__main__":
