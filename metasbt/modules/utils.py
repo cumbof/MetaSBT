@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 5, 2023"
+__date__ = "Mar 6, 2023"
 
 import argparse as ap
 import errno
@@ -362,7 +362,7 @@ def cluster(
     profiles_dir: str,
     tmpdir: str,
     outpath: str,
-    unknown_label: str = "MSBT",
+    cluster_prefix: str = "MSBT",
     nproc: int = 1,
 ) -> Dict[str, str]:
     """
@@ -374,7 +374,7 @@ def cluster(
     :param profiles_dir:        Path to the temporary folder with the genomes profiles defined by the profile module
     :param tmpdir:              Path to the temporary folder for building bloom filters
     :param outpath:             Path to the output file with the new assignments
-    :param unknown_label:       Prefix label of the newly defined clusters
+    :param cluster_prefix:      Prefix of clusters numerical identifiers
     :param nproc:               Make bfdistance parallel
     :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
     """
@@ -392,25 +392,12 @@ def cluster(
     if not os.path.isdir(profiles_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), profiles_dir)
 
-    # Retrieve both the kmer length, filter size, and unknown counter from the manifest file
+    # Retrieve the kmer length, filter size, and clusters counter from the manifest file
     manifest = load_manifest(manifest_filepath)
 
-    try:
-        # --kmer-len and --filter-size must be in manifest
-        kmer_len = manifest["kmer_len"]
-        filter_size = manifest["filter_size"]
-
-        # This could be the first time --unknown-counter appears in manifest
-        unknown_counter_manifest = manifest["unknown_counter"] if "unknown_counter" in manifest else 0
-
-        # Check whether the kmer length and the filter size have been successfully retrieved
-        if kmer_len == 0 or filter_size == 0:
-            raise Exception('Unable to retrieve "--kmer-len" and "--filter-size" in {}'.format(manifest_filepath))
-
-    except Exception as ex:
-        raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
-            ex.__traceback__
-        )
+    kmer_len = manifest["kmer_len"]
+    filter_size = manifest["filter_size"]
+    clusters_counter_manifest = manifest["clusters_counter"]
 
     # Retrieve the list of input genomes
     genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
@@ -421,8 +408,8 @@ def cluster(
         for level in taxonomy.split("|"):
             levels_in_boundaries.add(level)
 
-    # Initialise variable for counting the unknown clusters
-    unknown_counter = unknown_counter_manifest
+    # Start counting new clusters
+    clusters_counter = clusters_counter_manifest
 
     # Define the list of taxonomic levels for sorting profiles
     levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
@@ -529,11 +516,10 @@ def cluster(
                 assigned_levels = len(assignment)
 
                 for pos in range(assigned_levels, len(levels)):
-                    # Create new clusters
-                    assignment.append("{}__{}{}".format(levels[pos][0], unknown_label, unknown_counter))
+                    clusters_counter += 1
 
-                    # Increment the unknown counter
-                    unknown_counter += 1
+                    # Create new clusters
+                    assignment.append("{}__{}{}".format(levels[pos][0], cluster_prefix, clusters_counter))
 
                 # Compose the assigned (partial) label
                 assigned_label = "|".join(assignment)
@@ -559,45 +545,44 @@ def cluster(
                         # Also assign these genomes to the same taxonomy assigned to the current genome
                         assigned_taxa[assigned_label].append(genomes_list[j])
 
-    # Update the manifest with the new unknown counter
-    if unknown_counter > unknown_counter_manifest:
-        if "unknown_counter" not in manifest:
-            # Append the --unknown-counter info to the manifest file
-            with open(manifest_filepath, "a+") as manifest_file:
-                manifest_file.write("--unknown-counter {}\n".format(unknown_counter))
+    # Update the manifest with the new clusters counter
+    if clusters_counter > clusters_counter_manifest:
+        # Load the manifest file
+        with open(manifest_filepath) as manifest_file:
+            manifest_lines = manifest_file.readlines()
 
-        else:
-            # Load the manifest file
-            with open(manifest_filepath) as manifest_file:
-                manifest_lines = manifest_file.readlines()
+        # Update the --clusters-counter info
+        with open(manifest_filepath, "w+") as manifest_file:
+            for line in manifest_lines:
+                line = line.strip()
+                if line:
+                    line_split = line.split(" ")
+                    if line_split[0] == "--clusters-counter":
+                        line_split[-1] = str(clusters_counter)
+                    manifest_file.write("{}\n".format(" ".join(line_split)))
 
-            # Update the --unknown-counter info
-            with open(manifest_filepath, "w+") as manifest_file:
-                for line in manifest_lines:
-                    line = line.strip()
-                    if line:
-                        line_split = line.split(" ")
-                        if line_split[0] == "--unknown-counter":
-                            line_split[-1] = str(unknown_counter)
-                        manifest_file.write("{}\n".format(" ".join(line_split)))
-
-    # Mapping genome - taxonomy
+    # Mapping genome -> taxonomy, cluster
     assignment = dict()
 
     # Dumpt the new assignments to the output file
     with open(outpath, "w+") as out:
         # Add header line
-        out.write("# Genome\tAssignment\n")
+        out.write("# Genome\tAssignment\tCluster ID\n")
 
         for taxonomy in sorted(assigned_taxa.keys()):
             for genome_path in sorted(assigned_taxa[taxonomy]):
                 # Get genome name
                 _, genome, _, _ = get_file_info(genome_path)
 
-                out.write("{}\t{}\n".format(genome, taxonomy))
+                cluster_id = taxonomy.split("|")[-1][3:]
+
+                out.write("{}\t{}\t{}\n".format(genome, taxonomy, cluster_id))
 
                 # Take track of mapping genome - taxonomy
-                assignment[genome_path] = taxonomy
+                assignment[genome_path] = {
+                    "taxonomy": taxonomy,
+                    "cluster": cluster_id
+                }
 
     return assignment
 
@@ -772,6 +757,41 @@ def filter_checkm_tables(
                         line_count += 1
 
     return genomes
+
+
+def get_bf_density(filepath: str) -> float:
+    """
+    Retrieve the bloom filter density
+
+    :param filepath:    Path to the bloom filter file
+    :return:            Density of the bloom filter
+    """
+
+    density = 0.0
+
+    with tempfile.NamedTemporaryFile() as dumpbf:
+        # Retrieve bloom filter density
+        run(
+            [
+                "howdesbt",
+                "dumpbf",
+                filepath,
+                "--show:density",
+            ],
+            stdout=dumpbf,
+            stderr=dumpbf,
+        )
+
+        try:
+            # Get the result
+            density = float(open(dumpbf.name, "rt").readline().strip().split(" ")[-1])
+        
+        except Exception as ex:
+            raise Exception("An error has occurred while retrieving bloom filter density:\n{}".format(filepath)).with_traceback(
+                ex.__traceback__
+            )
+    
+    return density
 
 
 def get_boundaries(
