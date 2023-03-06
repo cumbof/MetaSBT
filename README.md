@@ -156,6 +156,7 @@ In case you would like to create a database from a specific set of genomes avail
 
 | Option                                    | Default | Mandatory | Description  |
 |:------------------------------------------|:--------|:---------:|:-------------|
+| `--cluster-prefix`                        | `MSBT`  |           | Prefix of clusters numerical identifiers |
 | `--completeness`                          | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
 | `--contamination`                         | `100.0` |           | Maximum contamination percentage allowed for input genomes |
 | `--cleanup`                               | `False` |           | Remove temporary data at the end of the pipeline |
@@ -315,6 +316,7 @@ sh ./scripts/uniform_inputs.sh ~/mygenomes fa.gz fna.gz
 |:-------------------------|:--------|:---------:|:-------------|
 | `--boundaries`           |         | ⚑         | Path to the output table produced by the `boundaries` module |
 | `--boundary-uncertainty` | `0.0`   |           | Define the percentage of kmers to enlarge and reduce boundaries |
+| `--cluster-prefix`       | `MSBT`  |           | Prefix of clusters numerical identifiers |
 | `--completeness`         | `0.0`   |           | Minimum completeness percentage allowed for input genomes |
 | `--contamination`        | `100.0` |           | Maximum contamination percentage allowed for input genomes |
 | `--cleanup`              | `False` |           | Remove temporary data at the end of the pipeline |
