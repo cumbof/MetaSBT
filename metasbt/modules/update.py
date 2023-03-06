@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 4, 2023"
+__date__ = "Mar 6, 2023"
 
 import argparse as ap
 import errno
@@ -88,6 +88,13 @@ def read_params():
         default=0.0,
         dest="boundary_uncertainty",
         help="Define the percentage of kmers to enlarge and reduce boundaries",
+    )
+    p.add_argument(
+        "--cluster-prefix",
+        type=str,
+        default="MSBT",
+        dest="cluster_prefix",
+        help="Prefix of clusters numerical identifiers",
     )
     p.add_argument(
         "--completeness",
@@ -187,12 +194,6 @@ def read_params():
         required=True,
         choices=["MAGs", "references"],
         help="Define the nature of the input genomes",
-    )
-    p.add_argument(
-        "--unknown-label",
-        type=str,
-        default="MSBT",
-        help="Prefix label of the newly defined clusters",
     )
     p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
     p.add_argument(
@@ -593,7 +594,7 @@ def update(
     contamination: float = 100.0,
     dereplicate: bool = False,
     similarity: float = 100.0,
-    unknown_label: str = "MSBT",
+    cluster_prefix: str = "MSBT",
     logger: Optional[Logger] = None,
     verbose: bool = False,
     nproc: int = 1,
@@ -617,7 +618,7 @@ def update(
     :param contamination:           Threshold on the CheckM contamination
     :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
     :param similarity:              Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param unknown_label:           Prefix label of the newly defined clusters
+    :param cluster_prefix:          Prefix of clusters numerical identifiers
     :param logger:                  Logger object
     :param verbose:                 Print messages on screen
     :param nproc:                   Make the process parallel when possible
@@ -640,10 +641,14 @@ def update(
     try:
         kmer_len = manifest["kmer_len"]
         filter_size = manifest["filter_size"]
+        clusters_counter = manifest["clusters_counter"]
 
         # Check whether the kmer length and the filter size have been successfully retrieved
         if kmer_len == 0 or filter_size == 0:
             raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
+
+        if cluster_counter == 0:
+            raise Exception("There is nothing to update here!")
 
     except Exception as ex:
         raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
@@ -895,7 +900,7 @@ def update(
             os.path.join(tmp_dir, "profiling"),
             howdesbt_tmp_dir,
             os.path.join(db_dir, "assignments.txt"),
-            unknown_label=unknown_label,
+            cluster_prefix=cluster_prefix,
             nproc=nproc,
         )
 
@@ -904,7 +909,7 @@ def update(
             _, genome_name, _, compressed = get_file_info(genome_path)
 
             # Create the new cluster folder in the database
-            tax_dir = os.path.join(db_dir, assignments[genome_path].replace("|", os.sep))
+            tax_dir = os.path.join(db_dir, assignments[genome_path]["taxonomy"].replace("|", os.sep))
             tax_genomes_dir = os.path.join(tax_dir, "genomes")
             os.makedirs(tax_genomes_dir, exist_ok=True)
 
@@ -930,9 +935,15 @@ def update(
                         checkm_file.write("{}\n".format(checkm_header))
 
                     checkm_file.write("{}\n".format(checkm_data[genome_name]))
+            
+            # Also initialize the metadata table with the cluster ID
+            metadata_filepath = os.path.join(tax_dir, "metadata.tsv")
+            if not os.path.isfile(metadata_filepath):
+                with open(metadata_filepath, "w+") as metadata_file:
+                    metadata_file.write("# Cluster ID: {}".format(assignments[genome_name]["cluster"]))
 
             # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
-            rebuild.append(assignments[genome_name])
+            rebuild.append(assignments[genome_name]["taxonomy"])
 
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
@@ -1028,7 +1039,7 @@ def main() -> None:
         contamination=args.contamination,
         dereplicate=args.dereplicate,
         similarity=args.similarity,
-        unknown_label=args.unknown_label,
+        cluster_prefix=args.cluster_prefix,
         logger=logger,
         verbose=args.verbose,
         nproc=args.nproc,
