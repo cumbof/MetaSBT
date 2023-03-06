@@ -4,13 +4,14 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 4, 2023"
+__date__ = "Mar 5, 2023"
 
 import argparse as ap
 import errno
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,6 @@ from logging import Logger
 from logging.config import dictConfig
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
-from urllib.parse import urlparse
 
 import numpy as np  # type: ignore
 
@@ -1542,15 +1542,13 @@ def validate_url(url: str) -> bool:
     :return:    True if validated, False otherwise
     """
 
-    try:
-        validation = urlparse(url)
-        return all(
-            [
-                validation.scheme in ["file", "http", "https", "ftp"],
-                validation.netloc,
-                validation.path
-            ]
-        )
-    
-    except Exception:
-        return False
+    regex = re.compile(
+        r'^(?:http|ftp)s?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain
+        r'localhost|'  # localhost
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # or ip
+        r'(?::\d+)?' # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE
+    )
+
+    return re.match(regex, url) is not None
