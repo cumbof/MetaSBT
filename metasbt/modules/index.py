@@ -6,9 +6,10 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 4, 2023"
+__date__ = "Mar 6, 2023"
 
 import argparse as ap
+import copy
 import gzip
 import hashlib
 import math
@@ -112,6 +113,13 @@ def read_params():
             "Sequence Bloom Tree for each taxonomic level"
         ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "--cluster-prefix",
+        type=str,
+        default="MSBT",
+        dest="cluster_prefix",
+        help="Prefix of clusters numerical identifiers",
     )
     p.add_argument(
         "--completeness",
@@ -598,6 +606,8 @@ def organize_data(
     db_dir: str,
     tax_label: str,
     tax_id: str,
+    cluster_id: int = 1,
+    cluster_prefix: str = "MSBT",
     metadata: Optional[List[Dict[str, str]]] = None,
     checkm_tables: Optional[list] = None,
     flat_structure: bool = False,
@@ -609,6 +619,8 @@ def organize_data(
     :param db_dir:          Path to the database folder
     :param tax_label:       Full taxonomic label
     :param tax_id:          NCBI tax ID
+    :param cluster_id:      Numberical cluster ID
+    :param cluster_prefix:  Cluster prefix
     :param metadata:        List of dictionaries with genomes information
     :param checkm_tables:   List with paths to the CheckM output tables
     :param flat_structure:  Organize genomes in the same folder without any taxonomic organization
@@ -639,9 +651,12 @@ def organize_data(
             # Add the genome to the full list of genomes in database
             genomes_paths.append(os.path.join(genomes_dir, os.path.basename(genome_path)))
 
-    # Move the metadata table to the taxonomy folder
-    if metadata:
-        with open(os.path.join(tax_dir, "metadata.tsv"), "w+") as metafile:
+    # Create the metadata table in the taxonomy folder
+    with open(os.path.join(tax_dir, "metadata.tsv"), "w+") as metafile:
+        if not flat_structure:
+            metafile.write("# Cluster ID: {}{}".format(cluster_prefix, cluster_id))
+
+        if metadata:
             header_list = list(metadata[0].keys())
             metafile.write("# {}\n".format("\t".join(header_list)))
 
@@ -679,9 +694,11 @@ def organize_data(
 def process_input_genomes(
     genomes_list: list,
     taxonomic_label: str,
+    cluster_id: int,
     db_dir: str,
     tmp_dir: str,
     kmer_len: int,
+    cluster_prefix: str = "MSBT",
     nproc: int = 1,
     pplacer_threads: int = 1,
     completeness: float = 0.0,
@@ -698,9 +715,11 @@ def process_input_genomes(
 
     :param genomes_list:        List of input genome file paths
     :param taxonomic_label:     Taxonomic label of the input genomes
+    :param cluster_id:          Numberical cluster ID
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
     :param kmer_len:            Length of the kmers
+    :param cluster_prefix:      Cluster prefix
     :param nproc:               Make the process parallel when possible
     :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
     :param completeness:        Threshold on the CheckM completeness
@@ -785,6 +804,8 @@ def process_input_genomes(
         db_dir,
         taxonomic_label,
         tax_id,
+        cluster_id=cluster_id,
+        cluster_prefix=cluster_prefix,
         metadata=None,
         checkm_tables=checkm_tables,
         flat_structure=flat_structure,
@@ -797,9 +818,11 @@ def process_tax_id(
     tax_id: str,
     tax_label: str,
     genomes_info: List[Dict[str, str]],
+    cluster_id: int,
     db_dir: str,
     tmp_dir: str,
     kmer_len: int,
+    cluster_prefix: str = "MSBT",
     limit_genomes: float = numpy.Inf,
     max_genomes: float = numpy.Inf,
     min_genomes: float = 1.0,
@@ -821,9 +844,11 @@ def process_tax_id(
     :param tax_id:              NCBI tax ID of a species
     :param tax_label:           Full taxonomic label
     :param genomes_info:        List of dictionaries with genomes information
+    :param cluster_id:          Numberical cluster ID
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
     :param kmer_len:            Length of the kmers
+    :param cluster_prefix:      Cluster prefix
     :param limit_genomes:       Limit the number of genomes per species
     :param max_genomes:         Consider species with this number of genomes at most
     :param min_genomes:         Consider species with a minimum number of genomes
@@ -949,6 +974,8 @@ def process_tax_id(
             db_dir,
             tax_label,
             tax_id,
+            cluster_id=cluster_id,
+            cluster_prefix=cluster_prefix,
             metadata=genomes_info,
             checkm_tables=checkm_tables,
             flat_structure=flat_structure,
@@ -1044,6 +1071,7 @@ def index(
     superkingdom: str,
     tmp_dir: str,
     kingdom: Optional[str] = None,
+    cluster_prefix: str = "MSBT",
     kmer_len: Optional[int] = None,
     filter_size: Optional[int] = None,
     flat_structure: bool = False,
@@ -1076,6 +1104,7 @@ def index(
     :param superkingdom:                Retrieve genomes that belong to a specific superkingdom
     :param tmp_dir:                     Path to the temporary folder
     :param kingdom:                     Kingdom
+    :param cluster_prefix:              Prefix of clusters numerical identifiers
     :param kmer_len:                    Length of the kmers
     :param filter_size:                 Size of the bloom filters
     :param flat_structure:              Do not taxonomically organize genomes
@@ -1149,6 +1178,7 @@ def index(
             db_dir=db_dir,
             tmp_dir=tmp_dir,
             kmer_len=kmer_len,
+            cluster_prefix=cluster_prefix,
             nproc=nproc,
             pplacer_threads=pplacer_threads,
             completeness=completeness,
@@ -1203,6 +1233,7 @@ def index(
             db_dir=db_dir,
             tmp_dir=tmp_dir,
             kmer_len=kmer_len,
+            cluster_prefix=cluster_prefix,
             limit_genomes=limit_genomes,
             max_genomes=max_genomes,
             min_genomes=min_genomes,
@@ -1220,12 +1251,20 @@ def index(
 
         printline("Processing clusters")
 
-        # Define the length of the progress bar
-        pbar_len = 0
+        # Reshape tax_ids and tax_labels according to the assembly summary
+        for txid in copy.deepcopy(tax_ids):
+            if txid not in assembly_summary:
+                tax_pos = tax_ids.index(txid)
 
-        for txid in tax_ids:
-            if txid in assembly_summary:
-                pbar_len += 1
+                # Delete a tax ID
+                del tax_ids[tax_pos]
+                del tax_labels[tax_pos]
+        
+        # Define the length of the progress bar
+        pbar_len = len(tax_ids)
+
+    # Define a cluster counter
+    clusters_counter = pbar_len
 
     # Take track of all the genomes paths
     genomes_paths = list()
@@ -1240,10 +1279,10 @@ def index(
             jobs = [
                 pool.apply_async(
                     process_partial,
-                    args=(taxonomy2genomes[taxonomy], taxonomy),
+                    args=(taxonomy2genomes[taxonomy], taxonomy, pos + 1),
                     callback=progress,
                 )
-                for taxonomy in taxonomy2genomes
+                for pos, taxonomy in enumerate(taxonomy2genomes)
             ]
 
         else:
@@ -1251,7 +1290,7 @@ def index(
             jobs = [
                 pool.apply_async(
                     process_partial,
-                    args=(tax_id, tax_labels[pos], assembly_summary[tax_id]),
+                    args=(tax_id, tax_labels[pos], assembly_summary[tax_id], pos + 1),
                     callback=progress,
                 )
                 for pos, tax_id in enumerate(tax_ids) if tax_id in assembly_summary
@@ -1269,6 +1308,10 @@ def index(
     # Define the manifest file path
     # This is used in case the --filter-size and/or --kmer-len must be estimated
     manifest_filepath = os.path.join(db_dir, "manifest.txt")
+
+    # Add cluster counter
+    with open(manifest_filepath, "a+") as manifest:
+        manifest.write("--clusters-counter {}\n".format(clusters_counter))
 
     # Limited set of genomes in case of --estimate-kmer-size and/or --estimate-filter-size
     # The set is limited to the number of genomes specified with --limit-estimation-number or limit_estimation_percentage
@@ -1522,6 +1565,7 @@ def main() -> None:
         args.superkingdom,
         args.tmp_dir,
         kingdom=args.kingdom,
+        cluster_prefix=args.cluster_prefix,
         kmer_len=args.kmer_len,
         filter_size=args.filter_size,
         flat_structure=args.flat_structure,
