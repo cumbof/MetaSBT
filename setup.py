@@ -37,6 +37,7 @@ setuptools.setup(
         "ncbitax2lin>=2.3.2",
         "numpy>=1.22.3",
         "requests>=2.28.0",
+        "tabulate>=0.9.0",
         "thesmuggler>=1.0.1",
         "tqdm>=4.38.0",
     ],
