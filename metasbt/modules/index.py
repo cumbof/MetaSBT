@@ -654,7 +654,7 @@ def organize_data(
     # Create the metadata table in the taxonomy folder
     with open(os.path.join(tax_dir, "metadata.tsv"), "w+") as metafile:
         if not flat_structure:
-            metafile.write("# Cluster ID: {}{}".format(cluster_prefix, cluster_id))
+            metafile.write("# Cluster ID: {}{}\n".format(cluster_prefix, cluster_id))
 
         if metadata:
             header_list = list(metadata[0].keys())
