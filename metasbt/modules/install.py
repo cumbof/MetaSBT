@@ -159,7 +159,7 @@ def main() -> None:
 
         elif validate_url(args.hub):
             # Retrieve the list of pre-computed MetaSBT databases
-            db_table_filepath = download(args.hub, tmpdir.name)
+            db_table_filepath = download(args.hub, tmpdir)
         
         else:
             raise Exception("Please enter a valid file path or URL with --hub")
