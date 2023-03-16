@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 6, 2023"
+__date__ = "Mar 16, 2023"
 
 import argparse as ap
 import errno
@@ -647,7 +647,7 @@ def update(
         if kmer_len == 0 or filter_size == 0:
             raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
 
-        if cluster_counter == 0:
+        if clusters_counter == 0:
             raise Exception("There is nothing to update here!")
 
     except Exception as ex:
