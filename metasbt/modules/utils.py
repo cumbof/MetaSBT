@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 6, 2023"
+__date__ = "Mar 16, 2023"
 
 import argparse as ap
 import errno
@@ -1455,15 +1455,16 @@ def optimal_k(
                 "kopt",
                 "--filenames",
                 inputlist.name,
-                "-kl",
+                "--k-max",
                 kl,
                 "--canonical",
                 "--fast",
-                "-n",
+                "--nproc",
                 nproc,
-                "-t",
+                "--threads",
                 threads,
-                "-o",
+                "--in-memory",
+                "--output",
                 outres.name,
                 "--closely_related" if closely_related else ""
             ],
@@ -1475,7 +1476,7 @@ def optimal_k(
 
         try:
             # Try to retrieve the optimal k
-            return int(outcontent.split(" ")[-1])
+            return int(out_content.split(" ")[-1])
 
         except Exception as ex:
             raise Exception("An error has occurred while running kitsune kopt:\n{}".format(out_content)).with_traceback(
