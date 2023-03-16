@@ -15,7 +15,8 @@ A scalable framework for automatically indexing microbial genomes and accurately
   - [`profile`: characterizing genomes and metagenome-assembled genomes](https://github.com/cumbof/MetaSBT#3-profile-characterizing-genomes-and-metagenome-assembled-genomes)
   - [`update`: updating the database](https://github.com/cumbof/MetaSBT#4-update-updating-the-database)
   - [`report`: building the database snapshot report](https://github.com/cumbof/MetaSBT#5-report-building-the-database-snapshot-report)
-- [Unlocking unknown species profiling with `kraken2`](https://github.com/cumbof/MetaSBT#unlocking-unknown-species-profiling-with-kraken2)
+- [Installing public pre-built databases](https://github.com/cumbof/MetaSBT#installing-public-pre-built-databases)
+- [Unlocking quantitative profiling of unknown species with `kraken2`](https://github.com/cumbof/MetaSBT#unlocking-quantitative-profiling-of-unknown-species-with-kraken2)
 - [Integrating `MetaSBT` in `Galaxy`](https://github.com/cumbof/MetaSBT#integrating-metasbt-in-galaxy)
 - [Credits](https://github.com/cumbof/MetaSBT#credits)
 - [Contributing](https://github.com/cumbof/MetaSBT#contributing)
@@ -354,7 +355,30 @@ The output file is a table that will contain the number of MAGs and reference ge
 | `--output-file`          | ⚑         | Path to the output table |
 | `--version`              |           | Print current module version and exit |
 
-## Unlocking unknown species profiling with `kraken2`
+## Installing public pre-built databases
+
+We maintain a series of public pre-built ready-to-use `MetaSBT` databases that can be easily retrieved with the `install` module. It allows to list all the available public databases whose metadata are maintained separately in the [MetaSBT-DBs](https://github.com/cumbof/MetaSBT-DBs) repository, in addition to installing them on your system. Databases are nothing else than non-compressed tarballs (files with `.tar` extension) that contain taxonomically organized bloom filter sketches of genomes which composes the Sequence Bloom Trees of thousands of microbial species.
+
+The `install` module can be used as follow:
+
+```bash
+metasbt install --database Viruses \
+                --database-version 20230316 \
+                --install-in ~/MetaSBT-DBs/
+```
+
+#### Available options
+
+| Option                   | Mandatory | Description  |
+|:-------------------------|:---------:|:-------------|
+| `--database`             |           | Select a database |
+| `--database-version`     |           | Select a database version. Use the most updated one by default |
+| `--hub`                  |           | Path to a local or remote table with a list of MetaSBT databases. Use the databases table in the MetaSBT-DBs repository by default |
+| `--install-in`           |           | Install a database in a specific location |
+| `--list-databases`       |           | List all the available MetaSBT databases and exit |
+| `--version`              |           | Print current module version and exit |
+
+## Unlocking quantitative profiling of unknown species with `kraken2`
 
 TBA
 
