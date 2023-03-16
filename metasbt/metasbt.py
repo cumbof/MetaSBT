@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 8, 2023"
+__date__ = "Mar 16, 2023"
 
 import argparse as ap
 import errno
@@ -245,6 +245,14 @@ def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False
                     'Please run "{} --resolve-dependencies" to verify the availability of all the required dependencies'
                 ).format(dependency, TOOL_ID.lower())
             )
+
+    println(
+        (
+            "\n[WARNING] Please note that the versions of verified software dependencies and "
+            "those required by {} could not match. This could lead to unexpected errors"
+        ).format(TOOL_ID),
+        verbose=verbose
+    )
 
     if howdesbt:
         # Check whether the advanced bfoperate command is available with the current HowDeSBT installation
