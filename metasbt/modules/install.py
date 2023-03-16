@@ -13,6 +13,7 @@ import os
 import shutil
 import tarfile
 import tempfile
+import sys
 
 from tabulate import tabulate
 
@@ -20,7 +21,7 @@ from tabulate import tabulate
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import download  # type: ignore  # isort: skip
+    from utils import download, validate_url  # type: ignore  # isort: skip
 except Exception:
     pass
 
