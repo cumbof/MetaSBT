@@ -280,7 +280,7 @@ def main() -> None:
     print("Fixing absolute paths")
 
     # kingdom, phylum, class, order, family, genus, species
-    taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s_"]
+    taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
     
     for subdir, _, _ in os.walk(os.path.join(args.install_in, os.path.splitext(os.path.basename(tarball_filepath))[0])):
         dirname = os.path.basename(subdir)
