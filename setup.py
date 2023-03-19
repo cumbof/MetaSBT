@@ -34,6 +34,7 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:main"]},
     install_requires=[
+        "kitsune>=1.3.3",
         "ncbitax2lin>=2.3.2",
         "numpy>=1.22.3",
         "requests>=2.28.0",
