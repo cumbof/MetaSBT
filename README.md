@@ -95,7 +95,7 @@ In this last case, remember to check that the following external software depend
 
 - [checkm](https://github.com/Ecogenomics/CheckM) (version >=1.2.0)[^2]
 - [howdesbt](https://github.com/medvedevgroup/HowDeSBT) (version >=2.00.13)[^3]
-- [kitsune](https://github.com/natapol/kitsune) (version >=1.3.2)[^4]
+- [kitsune](https://github.com/natapol/kitsune) (version >=1.3.3)[^4]
 - [ncbitax2lin](https://github.com/zyxue/ncbitax2lin) (version >=2.3.2)
 - [ntcard](https://github.com/bcgsc/ntCard) (version >=1.2.2)[^5]
 - [pip](https://pip.pypa.io/) (version >=21.2.4)
