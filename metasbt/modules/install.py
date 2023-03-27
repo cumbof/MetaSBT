@@ -5,9 +5,10 @@ Install a pre-computed MetaSBT database locally
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 9, 2023"
+__date__ = "Mar 27, 2023"
 
 import argparse as ap
+import errno
 import math
 import os
 import shutil
@@ -55,6 +56,12 @@ def read_params():
         "--database",
         type=str,
         help="Select a database",
+    )
+    p.add_argument(
+        "--database-file",
+        type=os.path.abspath,
+        dest="database_file",
+        help="Path to a local database tarball",
     )
     p.add_argument(
         "--database-version",
@@ -151,101 +158,111 @@ def main() -> None:
     # Load command line parameters
     args = read_params()
 
-    databases = dict()
+    if not args.database_file:
+        databases = dict()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if os.path.isfile(args.hub):
-            # Check whether the hub with the list of databases exists locally
-            db_table_filepath = args.hub
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if os.path.isfile(args.hub):
+                # Check whether the hub with the list of databases exists locally
+                db_table_filepath = args.hub
 
-        elif validate_url(args.hub):
-            # Retrieve the list of pre-computed MetaSBT databases
-            db_table_filepath = download(args.hub, tmpdir)
+            elif validate_url(args.hub):
+                # Retrieve the list of pre-computed MetaSBT databases
+                db_table_filepath = download(args.hub, tmpdir)
+            
+            else:
+                raise Exception("Please enter a valid file path or URL with --hub")
+
+            with open(db_table_filepath) as db_table:
+                header = list()
+
+                for line in db_table:
+                    line = line.strip()
+                    if line:
+                        if line.startswith("#"):
+                            header = line[1:].strip().split("\t")
+
+                        else:
+                            line_split = line.split("\t")
+
+                            # Read databases information
+                            if line_split[header.index("id")] not in databases:
+                                databases[line_split[header.index("id")]] = list()
+
+                            # id, version, tarball link, and info link
+                            db_version = {
+                                value: line_split[pos] for pos, value in enumerate(header)
+                            }
+                            
+                            databases[line_split[header.index("id")]].append(db_version)
+
+        if not databases:
+            raise Exception("No databases available!")
+
+        if args.list_databases:
+            # Print the list of databases and exit
+            table = [["ID", "Version", "References", "MAGs", "Size", "Info"]]
+
+            for db in databases:
+                for db_version in sorted(databases[db], key=lambda v: int(v["version"])):
+                    table.append(
+                        [
+                            db,
+                            db_version["version"],
+                            db_version["references"],
+                            db_version["mags"],
+                            db_version["size"],
+                            db_version["info"]
+                        ]
+                    )
+
+            print(tabulate(table, headers="firstrow", tablefmt="fancy_grid"))
+
+            sys.exit(os.EX_OK)
+
+        if not args.database or args.database not in databases:
+            raise Exception("No database available!")
+
+        if not args.database_version:
+            print("Warning: using the most updated version of {}".format(args.database))
+
+            args.database_version = 0
+
+            for db in databases[args.database]:
+                # Search for the most updated version
+                if db["version"] > args.database_version:
+                    args.database_version = db["version"]
+
+                    # Keep track of the link to the tarball
+                    tarball_url = db["tarball"]
+
+                    # Also keep track of the tarball size
+                    tarball_size = db["size"]
         
         else:
-            raise Exception("Please enter a valid file path or URL with --hub")
+            tarball_url = None
+            tarball_size = None
 
-        with open(db_table_filepath) as db_table:
-            header = list()
+            for db in databases[args.database]:
+                # Search for a specific version
+                if db["version"] == args.database_version:
+                    tarball_url = db["tarball"]
 
-            for line in db_table:
-                line = line.strip()
-                if line:
-                    if line.startswith("#"):
-                        header = line[1:].strip().split("\t")
+                    tarball_size = db["size"]
 
-                    else:
-                        line_split = line.split("\t")
+                    break
 
-                        # Read databases information
-                        if line_split[header.index("id")] not in databases:
-                            databases[line_split[header.index("id")]] = list()
+        if not tarball_url:
+            raise Exception("Unable to find version \"{}\" for database ID \"{}\"".format(args.database_version, args.database))
 
-                        # id, version, tarball link, and info link
-                        db_version = {
-                            value: line_split[pos] for pos, value in enumerate(header)
-                        }
-                        
-                        databases[line_split[header.index("id")]].append(db_version)
-
-    if not databases:
-        raise Exception("No databases available!")
-
-    if args.list_databases:
-        # Print the list of databases and exit
-        table = [["ID", "Version", "References", "MAGs", "Size", "Info"]]
-
-        for db in databases:
-            for db_version in sorted(databases[db], key=lambda v: int(v["version"])):
-                table.append(
-                    [
-                        db,
-                        db_version["version"],
-                        db_version["references"],
-                        db_version["mags"],
-                        db_version["size"],
-                        db_version["info"]
-                    ]
-                )
-
-        print(tabulate(table, headers="firstrow", tablefmt="fancy_grid"))
-
-        sys.exit(os.EX_OK)
-
-    if not args.database or args.database not in databases:
-        raise Exception("No database available!")
-
-    if not args.database_version:
-        print("Warning: using the most updated version of {}".format(args.database))
-
-        args.database_version = 0
-
-        for db in databases[args.database]:
-            # Search for the most updated version
-            if db["version"] > args.database_version:
-                args.database_version = db["version"]
-
-                # Keep track of the link to the tarball
-                tarball_url = db["tarball"]
-
-                # Also keep track of the tarball size
-                tarball_size = db["size"]
-    
     else:
-        tarball_url = None
-        tarball_size = None
+        if not os.path.isfile(args.database_file):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.database_file)
 
-        for db in databases[args.database]:
-            # Search for a specific version
-            if db["version"] == args.database_version:
-                tarball_url = db["tarball"]
+        tarball_filepath = args.database_file
 
-                tarball_size = db["size"]
-
-                break
-
-    if not tarball_url:
-        raise Exception("Unable to find version \"{}\" for database ID \"{}\"".format(args.database_version, args.database))
+        # Get file size in bytes
+        tarball_size = "{}B".format(os.path.getsize(args.database_file))
 
     if not args.install_in:
         # Use the current working directory in case of no --install-in
@@ -259,17 +276,20 @@ def main() -> None:
     tarball_size_bytes = convert_size(float(tarball_size[:-2]), tarball_size[-2:], "B")
     
     # Databases are uncompressed tarballs, so they are approximately the same size as their extracted content
-    # Consider twice the space since we are going to download and extract the tarball
-    if free_space_bytes < tarball_size_bytes * 2:
-        raise Exception("Not enough space to download and extract the selected database")
+    # Consider twice the space in case we have to download and extract the tarball
+    size_factor = 1 if args.database_file else 2
 
-    # Download the specified database
-    print("Downloading database \"{}\" version \"{}\"".format(args.database, args.database_version))
-    print(tarball_url)
-    tarball_filepath = download(tarball_url, args.install_in)
+    if free_space_bytes < tarball_size_bytes * size_factor:
+        raise Exception("Not enough space to install the database")
 
-    if not os.path.isfile(tarball_filepath):
-        raise Exception("Unable to retrieve tarball {}".format(tarball_url))
+    if not args.database_file:
+        # Download the specified database
+        print("Downloading database \"{}\" version \"{}\"".format(args.database, args.database_version))
+        print(tarball_url)
+        tarball_filepath = download(tarball_url, args.install_in)
+
+        if not os.path.isfile(tarball_filepath):
+            raise Exception("Unable to retrieve tarball {}".format(tarball_url))
     
     # Extract the database in --install-in
     with tarfile.open(tarball_filepath, "r") as tf:
