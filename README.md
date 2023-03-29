@@ -371,8 +371,9 @@ metasbt install --database Viruses \
 
 | Option                   | Mandatory | Description  |
 |:-------------------------|:---------:|:-------------|
-| `--database`             |           | Select a database |
-| `--database-version`     |           | Select a database version. Use the most updated one by default |
+| `--database`             |           | Select a database among those available under `--list-databases` |
+| `--database-file`        |           | Path to a local database tarball |
+| `--database-version`     |           | Select a database version. Must be used in conjunction with `--database`. Use the most updated one by default |
 | `--hub`                  |           | Path to a local or remote table with a list of MetaSBT databases. Use the databases table in the MetaSBT-DBs repository by default |
 | `--install-in`           |           | Install a database in a specific location |
 | `--list-databases`       |           | List all the available MetaSBT databases and exit |
