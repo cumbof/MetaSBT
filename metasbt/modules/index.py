@@ -833,7 +833,6 @@ def process_tax_id(
     dereplicate: bool = False,
     similarity: float = 1.0,
     flat_structure: bool = False,
-    filter_criteria: Dict[str, List[str]] = None,
     logger: Optional[Logger] = None,
     verbose: bool = False,
 ) -> List[str]:
@@ -859,7 +858,6 @@ def process_tax_id(
     :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
     :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
     :param flat_structure:      Do not taxonomically organize genomes
-    :param filter_criteria:     Dictionary with genomes filter criteria on assembly summary information
     :param logger:              Logger object
     :param verbose:             Print messages on screen
     :return:                    The list of paths to the genome files
@@ -880,15 +878,8 @@ def process_tax_id(
     genomes_urls = list()
 
     for genome_info in genomes_info:
-        if not genome_info["excluded_from_refseq"].strip() or genome_info["excluded_from_refseq"] in REFERENCE_TAGS:
-            if filter_criteria:
-                # Iterate over filter criteria and check whether current genome matches with them
-                for criteria in filter_criteria:
-                    if genome_info[criteria] in filter_criteria[criteria]:
-                        genomes_urls.append(genome_info["ftp_filepath"])
-            else:
-                # Consider every genome in genomes_info
-                genomes_urls.append(genome_info["ftp_filepath"])
+        if not genome_info["excluded_from_refseq"].strip() or all([ex.strip() in REFERENCE_TAGS for ex in genome_info["excluded_from_refseq"].split(";")]):
+            genomes_urls.append(genome_info["ftp_filepath"])
 
     if len(genomes_urls) > 0:
         if verbose:
@@ -1250,7 +1241,6 @@ def index(
             dereplicate=dereplicate,
             similarity=similarity,
             flat_structure=flat_structure,
-            filter_criteria=None,
             logger=logger,
             verbose=False,
         )
