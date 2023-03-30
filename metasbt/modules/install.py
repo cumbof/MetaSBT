@@ -116,15 +116,15 @@ def convert_size(size: float, in_unit: str, out_unit: str) -> float:
 
     if size == 0.0:
         return 0.0
-    
+
     if in_unit.upper() == out_unit.upper():
         return size
-    
+
     p = math.pow(1024, abs(units.index(in_unit) - units.index(out_unit)))
 
     if units.index(in_unit) < units.index(out_unit):
         return size / p
-    
+
     else:
         return size * p
 
@@ -139,7 +139,7 @@ def fix_paths(filepath: str, main_folder: str, replace_with: str) -> None:
     """
 
     filepaths = list()
-    
+
     with open(filepath) as infile:
         for filepath in infile:
             filepath = filepath.strip()
@@ -169,7 +169,7 @@ def main() -> None:
             elif validate_url(args.hub):
                 # Retrieve the list of pre-computed MetaSBT databases
                 db_table_filepath = download(args.hub, tmpdir)
-            
+
             else:
                 raise Exception("Please enter a valid file path or URL with --hub")
 
@@ -189,11 +189,11 @@ def main() -> None:
                             if line_split[header.index("id")] not in databases:
                                 databases[line_split[header.index("id")]] = list()
 
-                            # id, version, tarball link, and info link
+                            # id, version, references, mags, size, tarball, sha256, and info
                             db_version = {
                                 value: line_split[pos] for pos, value in enumerate(header)
                             }
-                            
+
                             databases[line_split[header.index("id")]].append(db_version)
 
         if not databases:
@@ -238,7 +238,7 @@ def main() -> None:
 
                     # Also keep track of the tarball size
                     tarball_size = db["size"]
-        
+
         else:
             tarball_url = None
             tarball_size = None
@@ -274,7 +274,7 @@ def main() -> None:
 
     # Compare the database size with the free space on disk
     tarball_size_bytes = convert_size(float(tarball_size[:-2]), tarball_size[-2:], "B")
-    
+
     # Databases are uncompressed tarballs, so they are approximately the same size as their extracted content
     # Consider twice the space in case we have to download and extract the tarball
     size_factor = 1 if args.database_file else 2
@@ -290,7 +290,7 @@ def main() -> None:
 
         if not os.path.isfile(tarball_filepath):
             raise Exception("Unable to retrieve tarball {}".format(tarball_url))
-    
+
     # Extract the database in --install-in
     with tarfile.open(tarball_filepath, "r") as tf:
         print("Unpacking tarball into {}".format(args.install_in))
@@ -301,7 +301,7 @@ def main() -> None:
 
     # kingdom, phylum, class, order, family, genus, species
     taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
-    
+
     for subdir, _, _ in os.walk(os.path.join(args.install_in, os.path.splitext(os.path.basename(tarball_filepath))[0])):
         dirname = os.path.basename(subdir)
         if dirname[:3] in taxonomic_levels_prefixes:
