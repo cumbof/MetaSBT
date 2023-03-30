@@ -348,7 +348,12 @@ def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Di
 
     assembly_summary_filepath = os.path.join(folder_path, os.path.basename(assembly_summary_url))
     
-    # Check whether the assemlby summary table already exists
+    # Check whether the assembly table exists and it is GZ compressed
+    if os.path.isfile("{}.gz".format(assembly_summary_filepath)):
+        with open(assembly_summary_filepath, "w+") as file:
+            run(["gzip", "-dc", "{}.gz".format(assembly_summary_filepath)], stdout=file, stderr=file)
+
+    # Check whether the assembly summary table already exists
     # Otherwise, download it
     if not os.path.isfile(assembly_summary_filepath):
         assembly_summary_filepath = download(assembly_summary_url, folder_path)
@@ -391,6 +396,13 @@ def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Di
                     species_info["local_filename"] = os.path.basename(local_filename)
 
                     assembly_summary[species_taxid].append(species_info)
+
+    if not os.path.isfile("{}.gz".format(assembly_summary_filepath)):
+        with open("{}.gz".format(assembly_summary_filepath), "w+") as file:
+            run(["gzip", "-c", assembly_summary_filepath], stdout=file, stderr=file)
+        
+    if os.path.isfile(assembly_summary_filepath):
+        os.unlink(assembly_summary_filepath)
 
     return assembly_summary
 
