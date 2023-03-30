@@ -4,7 +4,8 @@ A scalable framework for automatically indexing microbial genomes and accurately
 
 Please visit the official [wiki](https://github.com/cumbof/MetaSBT/wiki) to get started.
 
-> :warning: _This is still under development and some features may produce errors or unexpected results. You may also want to look at the [Contributing](https://github.com/cumbof/MetaSBT#contributing) and [Support](https://github.com/cumbof/MetaSBT#support) sections in case you will encounter a bug_
+> **Note**
+> Are you interested in using our software and databases, or you want to build your own private database, but you do not have enough computational resources? Get in touch with us, we are always happy to collaborate!
 
 ## Credits
 
@@ -23,9 +24,3 @@ Please, (i) be sure that there are no existing issues/PR concerning the same bug
 If you need support, please open an [Issue](https://github.com/cumbof/MetaSBT/issues) or a new [Discussion](https://github.com/cumbof/MetaSBT/discussions). We will be happy to answer your questions and help you troubleshoot any kind of issue concerning our framework.
 
 Copyright © 2022 [Fabio Cumbo](https://github.com/cumbof), [Daniel Blankenberg](https://github.com/blankenberg). See [LICENSE](https://github.com/cumbof/MetaSBT/blob/main/LICENSE) for additional details.
-
-[^1]: Grüning, Björn, et al. "[Bioconda: sustainable and comprehensive software distribution for the life sciences.](https://doi.org/10.1038/s41592-018-0046-7)" Nature methods 15.7 (2018): 475-476.
-[^2]: Parks, Donovan H., et al. "[CheckM: assessing the quality of microbial genomes recovered from isolates, single cells, and metagenomes.](https://doi.org/10.1101/gr.186072.114)" Genome research 25.7 (2015): 1043-1055.
-[^3]: Harris, Robert S., and Paul Medvedev. "[Improved representation of sequence bloom trees.](https://doi.org/10.1093/bioinformatics/btz662)" Bioinformatics 36.3 (2020): 721-727.
-[^4]: Pornputtapong, Natapol, et al. "[KITSUNE: A Tool for Identifying Empirically Optimal K-mer Length for Alignment-Free Phylogenomic Analysis](https://doi.org/10.3389/fbioe.2020.556413)" Frontiers in Bioengineering and Biotechnology 8 (2020): 556413.
-[^5]: Mohamadi, Hamid, Hamza Khan, and Inanc Birol. "[ntCard: a streaming algorithm for cardinality estimation in genomics data.](https://doi.org/10.1093/bioinformatics/btw832)" Bioinformatics 33.9 (2017): 1324-1330.
