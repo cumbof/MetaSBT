@@ -262,7 +262,7 @@ def build_sh(argv: List[str], module: str, outfolder: str) -> None:
         argv[1] = module
 
         # Finally build the command line
-        sh.write("{}\n".format(" ".join(argv)))
+        sh.write("{}\n".format(" ".join([os.path.abspath(v) if os.path.exists(v) else v  for v in argv])))
 
 
 def checkm(
