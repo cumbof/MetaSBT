@@ -5,7 +5,7 @@ Install a pre-computed MetaSBT database locally
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 27, 2023"
+__date__ = "Mar 30, 2023"
 
 import argparse as ap
 import errno
@@ -62,6 +62,12 @@ def read_params():
         type=os.path.abspath,
         dest="database_file",
         help="Path to a local database tarball",
+    )
+    p.add_argument(
+        "--database-url",
+        type=str,
+        dest="database_url",
+        help="URL to a database tarball",
     )
     p.add_argument(
         "--database-version",
@@ -158,7 +164,7 @@ def main() -> None:
     # Load command line parameters
     args = read_params()
 
-    if not args.database_file:
+    if not args.database_file and not args.database_url:
         databases = dict()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -256,13 +262,29 @@ def main() -> None:
             raise Exception("Unable to find version \"{}\" for database ID \"{}\"".format(args.database_version, args.database))
 
     else:
-        if not os.path.isfile(args.database_file):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.database_file)
+        if args.database_file:
+            if not os.path.isfile(args.database_file):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.database_file)
 
-        tarball_filepath = args.database_file
+            tarball_filepath = args.database_file
 
-        # Get file size in bytes
-        tarball_size = "{}B".format(os.path.getsize(args.database_file))
+            # Get file size in bytes
+            tarball_size = "{}B".format(os.path.getsize(args.database_file))
+
+        elif args.database_url:
+            if not validate_url(args.database_url):
+                raise ValueError("Invalid URL")
+            
+            tarball_url = args.database_url
+
+            # We cannot know the database size from a URL a priori
+            # Assume you have enough space to maintain the tarball and print a warning
+            tarball_size = "1B"
+
+            print("Warning: downloading a database from a URL could lead to quickly running out of storage!")
+
+        else:
+            raise Exception("No database selected")
 
     if not args.install_in:
         # Use the current working directory in case of no --install-in
