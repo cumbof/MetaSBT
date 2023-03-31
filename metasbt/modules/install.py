@@ -73,7 +73,7 @@ def read_params():
         "--database-version",
         type=str,
         dest="database_version",
-        help="Select a database version. Use the most updated one by default",
+        help="Select a database version. Must be used in conjunction with --database. Use the most updated one by default",
     )
     p.add_argument(
         "--hub",
