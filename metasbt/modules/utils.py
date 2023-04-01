@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 16, 2023"
+__date__ = "Apr 1, 2023"
 
 import argparse as ap
 import errno
@@ -647,25 +647,43 @@ def dereplicate_genomes(
     return genomes
 
 
-def download(url: str, folder: str) -> str:
+def download(
+    url: str,
+    folder: str,
+    retries: int = 10,
+    raise_exception: bool = True
+) -> Optional[str]:
     """
     Download a file from URL to the specified folder
 
-    :param url:     Source file URL
-    :param folder:  Target destination folder path
-    :return:        Path to the downloaded file
+    :param url:             Source file URL
+    :param folder:          Target destination folder path
+    :param retries:         Try downloading again in case of errors
+    :param raise_exception: Raise an exception in case of error
+    :return:                Path to the downloaded file
     """
 
     # Check whether the destination folder path exists
     if not os.path.isdir(folder):
         os.makedirs(folder, exist_ok=True)
 
-    # Download file from URL to the destination folder
-    run(
-        ["wget", "-N", url, "-P", folder],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        # Download file from URL to the destination folder
+        run(
+            ["wget", "-N", url, "-P", folder],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            retries=retries,
+        )
+
+    except Exception as e:
+        if raise_exception:
+            raise Exception(
+                "An error has occurred while trying to download {}".format(url)
+            ).with_traceback(e.__traceback__)
+
+        # This file does not seem really important after all
+        return None
 
     return os.path.join(folder, url.split(os.sep)[-1])
 
@@ -1510,45 +1528,58 @@ def run(
     stderr: Union[int, TextIO] = sys.stderr,
     silence: bool = False,
     extended_error: bool = False,
+    retries: int = 1,
 ) -> None:
     """
     Wrapper for the subprocess.check_call function
 
-    :param cmdline: Command line list
-    :param stdout:  Standard output
-    :param stderr:  Standard error
+    :param cmdline:         Command line list
+    :param stdout:          Standard output
+    :param stderr:          Standard error
+    :param silence:         Redirect stdout and stderr to /dev/null
+    :param extended_error:  Raise errors with traceback in case of unexpected exceptions
+    :param retries:         Try running the process again in case of errors
     """
 
     # Check whether ther is something to run
     if cmdline:
-        try:
-            # Cast everything to string in cmdline
-            cmdline = [str(cmd) for cmd in cmdline]
+        while retries > 0:
+            try:
+                # Cast everything to string in cmdline
+                cmdline = [str(cmd) for cmd in cmdline]
 
-            # In case of silence
-            if silence:
-                # Redirect the stdout and stderr to /dev/null
-                stdout = subprocess.DEVNULL
-                stderr = subprocess.DEVNULL
+                # In case of silence
+                if silence:
+                    # Redirect the stdout and stderr to /dev/null
+                    stdout = subprocess.DEVNULL
+                    stderr = subprocess.DEVNULL
 
-            # Run a specific command line and redirect the stdout and stderr
-            # to those specified in input
-            subprocess.check_call(cmdline, stdout=stdout, stderr=stderr)
+                # Run a specific command line and redirect the stdout and stderr
+                # to those specified in input
+                subprocess.check_call(cmdline, stdout=stdout, stderr=stderr)
 
-        except subprocess.CalledProcessError as e:
-            # Define the error message
-            error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(
-                " ".join(cmdline)
-            )
+                # At this point, the execution of the command did not raise any exception
+                # Set retries to 0
+                retries = 0
 
-            if extended_error:
-                # Extend the error message
-                error_message += (
-                    "If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
-                    "We would be happy to answer your questions and help you troubleshoot any kind of issue with our framework.\n"
-                )
+            except subprocess.CalledProcessError as e:
+                if retries == 1:
+                    # Define the error message
+                    error_message = "\nAn error has occurred while running the following command:\n{}\n\n".format(
+                        " ".join(cmdline)
+                    )
 
-            raise Exception(error_message).with_traceback(e.__traceback__)
+                    if extended_error:
+                        # Extend the error message
+                        error_message += (
+                            "If you think this is a bug and need support, please open an Issue or a new Discussion on the official GitHub repository.\n"
+                            "We would be happy to answer your questions and help you troubleshoot any kind of issue with our framework.\n"
+                        )
+
+                    raise Exception(error_message).with_traceback(e.__traceback__)
+
+                # Try again
+                retries -= 1
 
     else:
         # There is nothing to run
