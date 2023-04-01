@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Query a specific sequence bloom tree with an input genome or file with a list of sequences, one per line.
-In case of input genomes, results on single sequences are merged together
+Query a specific sequence bloom tree at all the seven taxonomic levels with an input genome 
+or a file with a list of sequences, one per line. In case of an input genomes, results on 
+single sequences are merged together
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -48,7 +49,11 @@ def read_params():
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Query the sequence bloom trees at all the 7 taxonomic levels",
+        description=(
+            "Query a specific sequence bloom tree at all the seven taxonomic levels with an input genome "
+            "or a file with a list of sequences, one per line. In case of an input genomes, results on "
+            "single sequences are merged together"
+        ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -81,7 +86,11 @@ def read_params():
             "In case of genomes, if they contain multiple sequences, results are merged together"
         ),
     )
-    p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
+    p.add_argument(
+        "--log",
+        type=os.path.abspath,
+        help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
+    )
     p.add_argument(
         "--output-dir",
         type=os.path.abspath,
@@ -121,13 +130,18 @@ def read_params():
         required=True,
         help="This is the tree definition file",
     )
-    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
+    p.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print messages and errors on the stdout"
+    )
     p.add_argument(
         "-v",
         "--version",
         action="version",
         version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 

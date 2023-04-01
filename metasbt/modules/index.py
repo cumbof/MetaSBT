@@ -109,77 +109,36 @@ def read_params():
     p = ap.ArgumentParser(
         prog=TOOL_ID,
         description=(
-            "Retrieve complete reference genomes from the NCBI GenBank and build a "
-            "Sequence Bloom Tree for each taxonomic level"
+            "Build a database with a set of genomes indexed with HowDeSBT. "
+            "Genomes are provided as inputs or automatically downloaded from NCBI GenBank"
         ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument(
+
+    # General arguments
+    general_group = p.add_argument_group("General arguments")
+
+    general_group.add_argument(
         "--cluster-prefix",
         type=str,
         default="MSBT",
         dest="cluster_prefix",
         help="Prefix of clusters numerical identifiers",
     )
-    p.add_argument(
-        "--completeness",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=0.0,
-        help="Input genomes must have a minimum completeness percentage before being processed and added to the database",
-    )
-    p.add_argument(
-        "--contamination",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=100.0,
-        help="Input genomes must have a maximum contamination percentage before being processed and added to the database",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--cleanup",
         action="store_true",
         default=False,
         help="Remove temporary data at the end of the pipeline",
     )
-    p.add_argument(
-        "--closely-related",
-        action="store_true",
-        default=False,
-        dest="closely_related",
-        help="For closesly related genomes use this flag",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--db-dir",
         type=os.path.abspath,
         required=True,
         dest="db_dir",
         help="This is the database directory with the taxonomically organised sequence bloom trees",
     )
-    p.add_argument(
-        "--dereplicate",
-        action="store_true",
-        default=False,
-        help="Enable the dereplication of genomes",
-    )
-    p.add_argument(
-        "--estimate-filter-size",
-        action="store_true",
-        default=False,
-        dest="estimate_filter_size",
-        help="Automatically estimate the best bloom filter size with ntCard",
-    )
-    p.add_argument(
-        "--estimate-kmer-size",
-        action="store_true",
-        default=False,
-        dest="estimate_kmer_size",
-        help="Automatically estimate the optimal kmer size with kitsune",
-    )
-    p.add_argument(
-        "--filter-size",
-        type=number(int, minv=10000),
-        dest="filter_size",
-        help="This is the size of the bloom filters",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--flat-structure",
         action="store_true",
         default=False,
@@ -189,18 +148,7 @@ def read_params():
             "This will lead to the creation of a single sequence bloom tree"
         ),
     )
-    p.add_argument(
-        "--increase-filter-size",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=0.0,
-        dest="increase_filter_size",
-        help=(
-            "Increase the estimated filter size by the specified percentage. "
-            "This is used in conjunction with the --estimate-filter-size argument only. "
-            "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes"
-        ),
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--input-list",
         type=os.path.abspath,
         dest="input_list",
@@ -209,14 +157,7 @@ def read_params():
             "Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz)"
         ),
     )
-    p.add_argument(
-        "--jellyfish-threads",
-        type=number(int, minv=1, maxv=os.cpu_count()),
-        default=1,
-        dest="jellyfish_threads",
-        help="Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--kingdom",
         type=str,
         help=(
@@ -224,29 +165,33 @@ def read_params():
             "It is optional and must be provided in conjunction with --superkingdom"
         ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--kmer-len",
         type=number(int, minv=4),
         dest="kmer_len",
         help="This is the length of the kmers used for building bloom filters",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--limit-estimation-number",
         type=number(int, minv=1),
         dest="limit_estimation_number",
         help=(
             "Limit the number of genomes per group to be considered as input for kitsune and ntCard. "
+            "Must be used in conjunction with --estimate-kmer-size and/or --estimate-filter-size. "
             "It overrides --limit-estimation-percentage in case of a number > 0"
         ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--limit-estimation-percentage",
         type=number(float, minv=sys.float_info.min, maxv=100.0),
         default=100.0,
         dest="limit_estimation_percentage",
-        help="Percentage on the total number of genomes per group to be considered as input for kitsune and ntCard",
+        help=(
+            "Percentage on the total number of genomes per group to be considered as input for kitsune and ntCard. "
+            "Must be used in conjunction with --estimate-kmer-size and/or --estimate-filter-size"
+        ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--limit-genomes",
         type=number(int, minv=1),
         default=numpy.Inf,
@@ -257,15 +202,12 @@ def read_params():
             "The number of genomes per species is not limited by default"
         ),
     )
-    p.add_argument(
-        "--limit-kmer-size",
-        type=number(int, minv=4),
-        default=32,
-        dest="limit_kmer_size",
-        help="Limit the estimation of the optimal kmer size with kitsune to this value at most",
+    general_group.add_argument(
+        "--log",
+        type=os.path.abspath,
+        help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
     )
-    p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
-    p.add_argument(
+    general_group.add_argument(
         "--max-genomes",
         type=number(int, minv=1),
         default=numpy.Inf,
@@ -275,7 +217,7 @@ def read_params():
             "There is not a maximum number of genomes per species by default"
         ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--min-genomes",
         type=number(int, minv=1),
         default=1,
@@ -285,26 +227,78 @@ def read_params():
             "There is not a minimum number of genomes per species by default"
         ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--nproc",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         help="This argument refers to the number of processors used for parallelizing the pipeline when possible",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--parallel",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         help="Maximum number of processors to process each NCBI tax ID in parallel",
     )
-    p.add_argument(
+    general_group.add_argument(
+        "--superkingdom",
+        type=str,
+        choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
+        help="Consider genomes whose lineage belongs to a specific superkingdom if --input-list is not provided",
+    )
+    general_group.add_argument(
+        "--tmp-dir",
+        type=os.path.abspath,
+        required=True,
+        dest="tmp_dir",
+        help="Path to the folder for storing temporary data",
+    )
+    general_group.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print messages and errors on the stdout"
+    )
+    general_group.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
+    )
+
+    # Group of arguments for CheckM
+    qc_group = p.add_argument_group("CheckM: Quality control")
+
+    qc_group.add_argument(
+        "--completeness",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=0.0,
+        help="Input genomes must have a minimum completeness percentage before being processed and added to the database",
+    )
+    qc_group.add_argument(
+        "--contamination",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=100.0,
+        help="Input genomes must have a maximum contamination percentage before being processed and added to the database",
+    )
+    qc_group.add_argument(
         "--pplacer-threads",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         dest="pplacer_threads",
         help="Maximum number of threads for pplacer. This is required to maximise the CheckM performances",
     )
-    p.add_argument(
+
+    # Group of arguments for the dereplication
+    dereplication_group = p.add_argument_group("Dereplication of genomes")
+    
+    dereplication_group.add_argument(
+        "--dereplicate",
+        action="store_true",
+        default=False,
+        help="Enable the dereplication of genomes",
+    )
+    dereplication_group.add_argument(
         "--similarity",
         type=number(float, minv=0.0, maxv=1.0),
         default=1.0,
@@ -313,27 +307,67 @@ def read_params():
             "This is used exclusively in conjunction with the --dereplicate argument"
         ),
     )
-    p.add_argument(
-        "--superkingdom",
-        type=str,
-        choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
-        help="Consider genomes whose lineage belongs to a specific superkingdom if --input-list is not provided",
+
+    # Group of arguments for estimating the bloom filter size
+    filter_size_group = p.add_argument_group("Bloom filter size")
+
+    filter_size_group.add_argument(
+        "--estimate-filter-size",
+        action="store_true",
+        default=False,
+        dest="estimate_filter_size",
+        help="Automatically estimate the best bloom filter size with ntCard",
     )
-    p.add_argument(
-        "--tmp-dir",
-        type=os.path.abspath,
-        required=True,
-        dest="tmp_dir",
-        help="Path to the folder for storing temporary data",
+    filter_size_group.add_argument(
+        "--filter-size",
+        type=number(int, minv=10000),
+        dest="filter_size",
+        help="This is the size of the bloom filters",
     )
-    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
-    p.add_argument(
-        "-v",
-        "--version",
-        action="version",
-        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
+    filter_size_group.add_argument(
+        "--increase-filter-size",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=0.0,
+        dest="increase_filter_size",
+        help=(
+            "Increase the estimated filter size by the specified percentage. "
+            "This is used in conjunction with the --estimate-filter-size argument only. "
+            "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes"
+        ),
     )
+
+    # Group of arguments for estimating the optimal kmer size
+    kitsune_group = p.add_argument_group("Kitsune: Estimation of the optimal kmer size")
+
+    kitsune_group.add_argument(
+        "--closely-related",
+        action="store_true",
+        default=False,
+        dest="closely_related",
+        help="For closesly related genomes use this flag",
+    )
+    kitsune_group.add_argument(
+        "--estimate-kmer-size",
+        action="store_true",
+        default=False,
+        dest="estimate_kmer_size",
+        help="Automatically estimate the optimal kmer size with kitsune",
+    )
+    kitsune_group.add_argument(
+        "--jellyfish-threads",
+        type=number(int, minv=1, maxv=os.cpu_count()),
+        default=1,
+        dest="jellyfish_threads",
+        help="Maximum number of threads for Jellyfish. This is required to maximise the kitsune performances",
+    )
+    kitsune_group.add_argument(
+        "--limit-kmer-size",
+        type=number(int, minv=4),
+        default=32,
+        dest="limit_kmer_size",
+        help="Limit the estimation of the optimal kmer size with kitsune to this value at most",
+    )
+
     return p.parse_args()
 
 

@@ -73,61 +73,47 @@ def read_params():
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Update a database with new genomes",
+        description="Update a specific database with a new set of reference genomes or metagenome-assembled genomes",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument(
+
+    # General arguments
+    general_group = p.add_argument_group("General arguments")
+
+    general_group.add_argument(
         "--boundaries",
         type=os.path.abspath,
         required=True,
         help="Path to the output table produced by the boundaries module",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--boundary-uncertainty",
         type=number(float, minv=0.0, maxv=100.0),
         default=0.0,
         dest="boundary_uncertainty",
         help="Define the percentage of kmers to enlarge and reduce boundaries",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--cluster-prefix",
         type=str,
         default="MSBT",
         dest="cluster_prefix",
         help="Prefix of clusters numerical identifiers",
     )
-    p.add_argument(
-        "--completeness",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=0.0,
-        help="Input genomes must have a minimum completeness percentage before being processed and added to the database",
-    )
-    p.add_argument(
-        "--contamination",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=100.0,
-        help="Input genomes must have a maximum contamination percentage before being processed and added to the database",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--cleanup",
         action="store_true",
         default=False,
         help="Remove temporary data at the end of the pipeline",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--db-dir",
         type=os.path.abspath,
         required=True,
         dest="db_dir",
         help="This is the database directory with the taxonomically organised sequence bloom trees",
     )
-    p.add_argument(
-        "--dereplicate",
-        action="store_true",
-        default=False,
-        help="Enable the dereplication of genomes",
-    )
-    p.add_argument(
+    general_group.add_argument(
         "--extension",
         type=str,
         required=True,
@@ -137,34 +123,99 @@ def read_params():
             "All the input genomes must have the same file extension before running this module"
         ),
     )
-    p.add_argument(
+    general_group.add_argument(
         "--input-list",
         type=os.path.abspath,
         required=True,
         dest="input_list",
         help="This file contains the list of paths to the new genomes that will be added to the database",
     )
-    p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
-    p.add_argument(
+    general_group.add_argument(
+        "--log",
+        type=os.path.abspath,
+        help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
+    )
+    general_group.add_argument(
         "--nproc",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         help="This argument refers to the number of processors used for parallelizing the pipeline when possible",
     )
-    p.add_argument(
+    general_group.add_argument(
         "--parallel",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         help="Maximum number of processors to process input genomes in parallel",
     )
-    p.add_argument(
+    general_group.add_argument(
+        "--taxa",
+        type=os.path.abspath,
+        help=(
+            "Input file with the mapping between input genome IDs and their taxonomic label. "
+            'This is used in case of reference genomes only "--type=references"'
+        ),
+    )
+    general_group.add_argument(
+        "--tmp-dir",
+        type=os.path.abspath,
+        required=True,
+        dest="tmp_dir",
+        help="Path to the folder for storing temporary data",
+    )
+    general_group.add_argument(
+        "--type",
+        type=str,
+        required=True,
+        choices=["MAGs", "references"],
+        help="Define the nature of the input genomes",
+    )
+    general_group.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print messages and errors on the stdout"
+    )
+    general_group.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
+    )
+
+    # Group of arguments for CheckM
+    qc_group = p.add_argument_group("CheckM: Quality control")
+
+    qc_group.add_argument(
+        "--completeness",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=0.0,
+        help="Input genomes must have a minimum completeness percentage before being processed and added to the database",
+    )
+    qc_group.add_argument(
+        "--contamination",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=100.0,
+        help="Input genomes must have a maximum contamination percentage before being processed and added to the database",
+    )
+    qc_group.add_argument(
         "--pplacer-threads",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         dest="pplacer_threads",
         help="Maximum number of threads for pplacer. This is required to maximise the CheckM performances",
     )
-    p.add_argument(
+
+    # Group of arguments for the dereplication
+    dereplication_group = p.add_argument_group("Dereplication of genomes")
+
+    dereplication_group.add_argument(
+        "--dereplicate",
+        action="store_true",
+        default=False,
+        help="Enable the dereplication of genomes",
+    )
+    dereplication_group.add_argument(
         "--similarity",
         type=number(float, minv=0.0, maxv=100.0),
         default=100.0,
@@ -173,36 +224,7 @@ def read_params():
             "This is used exclusively in conjunction with the --dereplicate argument"
         ),
     )
-    p.add_argument(
-        "--taxa",
-        type=os.path.abspath,
-        help=(
-            "Input file with the mapping between input genome IDs and their taxonomic label. "
-            'This is used in case of reference genomes only "--type=references"'
-        ),
-    )
-    p.add_argument(
-        "--tmp-dir",
-        type=os.path.abspath,
-        required=True,
-        dest="tmp_dir",
-        help="Path to the folder for storing temporary data",
-    )
-    p.add_argument(
-        "--type",
-        type=str,
-        required=True,
-        choices=["MAGs", "references"],
-        help="Define the nature of the input genomes",
-    )
-    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
-    p.add_argument(
-        "-v",
-        "--version",
-        action="version",
-        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
-    )
+
     return p.parse_args()
 
 

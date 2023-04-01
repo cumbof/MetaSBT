@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Define cluster-specific boundaries as the minimum and maximum number of common kmers among all the genomes under a specific cluster
+Define taxonomy-specific boundaries as the minimum and maximum number of kmers in common 
+between all the genomes under a specific cluster
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -53,7 +54,10 @@ def read_params():
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Define taxonomy-specific boundaries based on kmers for the definition of new clusters",
+        description=(
+            "Define taxonomy-specific boundaries as the minimum and maximum number of kmers in common "
+            "between all the genomes under a specific cluster"
+        ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -81,7 +85,11 @@ def read_params():
         type=str,
         help="Consider genomes whose lineage belongs to a specific superkingdom",
     )
-    p.add_argument("--log", type=os.path.abspath, help="Path to the log file")
+    p.add_argument(
+        "--log",
+        type=os.path.abspath,
+        help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
+    )
     p.add_argument(
         "--max-genomes",
         type=number(int, minv=3),
@@ -118,13 +126,18 @@ def read_params():
         dest="tmp_dir",
         help="Path to the folder for storing temporary data",
     )
-    p.add_argument("--verbose", action="store_true", default=False, help="Print results on screen")
+    p.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Print messages and errors on the stdout"
+    )
     p.add_argument(
         "-v",
         "--version",
         action="version",
         version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 

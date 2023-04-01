@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create the report table for a specific database
+Create a database report table
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -45,7 +45,7 @@ def read_params():
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Build the database report table",
+        description="Create a database report table",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -80,7 +80,7 @@ def read_params():
         "--version",
         action="version",
         version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 

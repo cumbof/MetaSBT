@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Install a pre-computed MetaSBT database locally
+Install pre-computed MetaSBT databases locally
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -49,7 +49,7 @@ def read_params():
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Install a pre-computed MetaSBT database locally",
+        description="Install pre-computed MetaSBT databases locally",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -99,7 +99,7 @@ def read_params():
         "--version",
         action="version",
         version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
-        help='Print the current "{}" version and exit'.format(TOOL_ID),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
