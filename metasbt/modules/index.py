@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 16, 2023"
+__date__ = "Apr 1, 2023"
 
 import argparse as ap
 import copy
@@ -921,9 +921,9 @@ def process_tax_id(
         genomes = list()
 
         for genome_url in genomes_urls:
-            genome_filepath = download(genome_url, tmp_genomes_dir)
+            genome_filepath = download(genome_url, tmp_genomes_dir, raise_exception=False)
 
-            if integrity_check(genome_filepath):
+            if genome_filepath and integrity_check(genome_filepath):
                 genomes.append(genome_filepath)
 
         if verbose:
