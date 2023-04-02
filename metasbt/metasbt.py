@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 16, 2023"
+__date__ = "Apr 1, 2023"
 
 import argparse as ap
 import errno
@@ -104,7 +104,22 @@ def read_params():
         dest="resolve_dependencies",
         help="Check whether all the external software dependencies are available on your system",
     )
-    p.add_argument("--tests", action="store_true", default=False, help="List all available tests")
+    p.add_argument(
+        "-t",
+        "--test",
+        type=str,
+        dest="test",
+        help=(
+            "Run a unit test among those reported with --tests. "
+            "Type \"metasbt --test all\" for running all the available unit tests at once"
+        ),
+    )
+    p.add_argument(
+        "--tests",
+        action="store_true",
+        default=False,
+        help="List all the available unit tests",
+    )
     p.add_argument(
         "-v",
         "--version",
@@ -120,19 +135,23 @@ def check_for_software_updates() -> None:
     Check for new releases
     """
 
-    response = requests.get(RELEASES_API_URL)
+    try:
+        response = requests.get(RELEASES_API_URL)
 
-    if response.status_code == 200:
-        # Load the response in dictionary
-        data = response.json()
+        if response.status_code == 200:
+            # Load the response in dictionary
+            data = response.json()
 
-        if "tag_name" in data:
-            if "v{}".format(__version__) != data["tag_name"]:
-                println("A new release is available!")
-                println("{}\n".format(REPOSITORY_URL))
+            if "tag_name" in data:
+                if "v{}".format(__version__) != data["tag_name"]:
+                    println("A new release is available!")
+                    println("{}\n".format(REPOSITORY_URL))
+    
+    except requests.ConnectionError:
+        pass
 
 
-def get_modules(dirpath: str) -> List[str]:
+def get_modules(dirpath: str, test: bool = False) -> List[str]:
     """
     Return the list of modules under the specified directory
 
@@ -149,8 +168,8 @@ def get_modules(dirpath: str) -> List[str]:
     packages = pkgutil.walk_packages(path=[dirpath])
 
     for module_info in packages:
-        # Manually exclude utils
-        if module_info.name != "utils":
+        # Exclude utils in case test if False
+        if test or (module_info.name != "utils" and not test):
             # Take track of the available modules
             modules_list.append(module_info.name)
 
@@ -204,7 +223,7 @@ def print_tests() -> None:
 
     # Unit tests are defined into python files
     # Use the get_modules() function to retrieve the list of unit tests
-    tests_list = get_modules(TESTS_DIR)
+    tests_list = get_modules(TESTS_DIR, test=True)
 
     if not tests_list:
         raise Exception("No tests available!")
@@ -213,6 +232,34 @@ def print_tests() -> None:
 
     for test_id in sorted(tests_list):
         println("\t{}".format(test_id))
+
+
+def run_test(test: str) -> None:
+    """
+    Run unit tests
+
+    :param test:    Test name among those reported with --tests
+                    Use the wildcard "all" for runnig all the available tests at once
+    """
+
+    # Retrieve the list of the available unit tests
+    tests_list = get_modules(TESTS_DIR, test=True)
+
+    if test.lower() != "all" and test not in tests_list:
+        raise ValueError("There are no unit tests for \"{}\"".format(test))
+
+    unit_tests = tests_list if test.lower() == "all" else [test]
+
+    for unit_test in unit_tests:
+        try:
+            println("Running unit tests: {}".format(unit_test))
+
+            # Run the specified module or unit test
+            run([sys.executable, os.path.join(TESTS_DIR, "{}.py".format(unit_test))])
+
+        except Exception as ex:
+            # Print the exception and run the next unit test
+            println(str(ex))
 
 
 def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False, verbose: bool = True) -> None:
@@ -357,7 +404,7 @@ def main() -> None:
             modules_list = get_modules(MODULES_DIR)
 
             # Load the list of available tests
-            tests_list = get_modules(TESTS_DIR)
+            tests_list = get_modules(TESTS_DIR, test=True)
 
             # Take track of all the external software dependencies
             dependencies = list()
@@ -377,6 +424,10 @@ def main() -> None:
         elif args.tests:
             # Print the list of available unit tests
             print_tests()
+        
+        elif args.test:
+            # Run a unit test among those reported with --tests
+            run_test(args.test)
 
         else:
             # Check for software updates
@@ -385,53 +436,28 @@ def main() -> None:
             # Load the list of available modules
             modules_list = get_modules(MODULES_DIR)
 
-            # Load the list of available tests
-            # Use the get_modules() function to retrieve the list of unit tests
-            tests_list = get_modules(TESTS_DIR)
-
             # Check whether the provided command is available among modules and unit tests
             cmd_found = False
 
-            # Check whether the provided command is a test
-            is_a_test = False
-
-            # Modules or tests root folder name
-            subpath = None
-
             for unknown_arg in unknown:
-                # Check whether current command is a module or a unit test
-                cmd_basepath = None
-
                 if unknown_arg in modules_list:
-                    # Current command is a module
-                    cmd_basepath = MODULES_DIR
-                    subpath = "modules"
-
-                elif unknown_arg in tests_list:
-                    # Current command is a unit test
-                    cmd_basepath = TESTS_DIR
-                    is_a_test = True
-                    subpath = "tests"
-
-                if cmd_basepath:
                     # Build the command line
                     cmd_line = [
                         sys.executable,
-                        os.path.join(cmd_basepath, "{}.py".format(unknown_arg)),
+                        os.path.join(MODULES_DIR, "{}.py".format(unknown_arg)),
                     ]
 
                     # Import module or unit test
-                    module = importlib.import_module("{}.{}.{}".format(TOOL_ID.lower(), subpath, unknown_arg))
+                    module = importlib.import_module("{}.{}.{}".format(TOOL_ID.lower(), "modules", unknown_arg))
 
                     # Resolve external software dependencies
                     resolve_dependencies(module.DEPENDENCIES, stop_unavailable=True, verbose=False)
 
-                    if not is_a_test:
-                        # Fix paths to the input files and folders
-                        for pos in range(len(unknown)):
-                            if unknown[pos] in module.FILES_AND_FOLDERS:
-                                # Always use absolute paths
-                                unknown[pos + 1] = os.path.abspath(unknown[pos + 1])
+                    # Fix paths to the input files and folders
+                    for pos in range(len(unknown)):
+                        if unknown[pos] in module.FILES_AND_FOLDERS:
+                            # Always use absolute paths
+                            unknown[pos + 1] = os.path.abspath(unknown[pos + 1])
 
                     # Expand the command line with all the input arguments
                     cmd_line.extend(unknown)
@@ -451,18 +477,17 @@ def main() -> None:
                     break
 
             if cmd_found:
-                if not is_a_test:
-                    # Print citations and credits
-                    println("Thanks for using {}!\n".format(TOOL_ID))
-                    print_citations()
-                    println(
-                        "Remember to star the {} repository on GitHub to stay updated on its development and new features:".format(
-                            TOOL_ID
-                        )
+                # Print citations and credits
+                println("Thanks for using {}!\n".format(TOOL_ID))
+                print_citations()
+                println(
+                    "Remember to star the {} repository on GitHub to stay updated on its development and new features:".format(
+                        TOOL_ID
                     )
-                    println("https://github.com/cumbof/{}\n".format(TOOL_ID))
+                )
+                println("https://github.com/cumbof/{}\n".format(TOOL_ID))
             else:
-                raise Exception("Unrecognised module or test")
+                raise Exception("Unrecognised module \"{}\"".format(unknown_arg))
 
 
 if __name__ == "__main__":
