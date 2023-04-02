@@ -5,7 +5,7 @@ Install pre-computed MetaSBT databases locally
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 30, 2023"
+__date__ = "Apr 1, 2023"
 
 import argparse as ap
 import errno
@@ -147,17 +147,28 @@ def fix_paths(filepath: str, main_folder: str, replace_with: str) -> None:
     filepaths = list()
 
     with open(filepath) as infile:
-        for filepath in infile:
-            filepath = filepath.strip()
-            if filepath:
-                filepath_split = filepath.split(os.sep)
-                up_to_idx = filepath_split.index(main_folder)
-                filepaths.append(os.path.join(replace_with, os.sep.join(filepath_split[up_to_idx:])))
+        for line in infile:
+            line = line.strip()
+            if line:
+                # In case of sbt files, count the number of stars before the file path
+                stars = line.count("*")
+
+                line_split = line.split(os.sep)
+                up_to_idx = line_split.index(main_folder)
+                
+                # Define the new file path
+                # Also prepend the stars in case of sbt files
+                filepaths.append(
+                    "{}{}".format(
+                        "*"*stars,
+                        os.path.join(replace_with, os.sep.join(line_split[up_to_idx:]))
+                    )
+                )
 
     # This overrides the original file
     with open(filepath, "w+") as infile:
-        for filepath in filepaths:
-            infile.write("{}\n".format(filepath))
+        for line in filepaths:
+            infile.write("{}\n".format(line))
 
 
 def main() -> None:
