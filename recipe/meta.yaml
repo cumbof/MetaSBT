@@ -30,7 +30,6 @@ requirements:
     - numpy >=1.22.3
     - python
     - tabulate >=0.9.0
-    - thesmuggler >=1.0.1
     - tqdm >=4.38.0
     - wget >=1.21.3
 
@@ -39,7 +38,7 @@ test:
     - metasbt
   commands:
     - pip check
-    - metasbt --version
+    - metasbt --test all
   requires:
     - pip
 
