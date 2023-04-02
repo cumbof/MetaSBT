@@ -75,7 +75,8 @@ class TestUtils(unittest.TestCase):
             _, genome_filename, _, _ = utils.get_file_info(genome_filepath, check_supported=True, check_exists=True)
 
             # Compute the SHA-256 hash
-            sha256_hash = hashlib.sha256(open(genome_filepath, "rb").read()).hexdigest()
+            with open(genome_filepath, "rb") as genome_file:
+                sha256_hash = hashlib.sha256(genome_file.read()).hexdigest()
 
         with self.subTest():
             self.assertEqual(genome_filename, "GCA_000005845.2_ASM584v2_genomic")
