@@ -10,10 +10,9 @@ __date__ = "Mar 5, 2023"
 import errno
 import hashlib
 import os
+import sys
 import tempfile
 import unittest
-
-from thesmuggler import smuggle
 
 # Define the module name
 TOOL_ID = "test_utils"
@@ -34,8 +33,11 @@ UTILS_FILEPATH = os.path.join(MODULES_DIR, "utils.py")
 if not os.path.isfile(UTILS_FILEPATH):
     raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), UTILS_FILEPATH)
 
-# Load utils
-utils = smuggle(UTILS_FILEPATH)
+# This is required to import the functions we need to test
+sys.path.append(MODULES_DIR)
+
+# Finally import the module
+import utils
 
 
 class TestUtils(unittest.TestCase):
