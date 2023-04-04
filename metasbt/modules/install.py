@@ -22,7 +22,7 @@ from tabulate import tabulate
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import download, validate_url  # type: ignore  # isort: skip
+    from utils import download, validate_url, run  # type: ignore  # isort: skip
 except Exception:
     pass
 
@@ -344,6 +344,12 @@ def main() -> None:
                 os.path.splitext(os.path.basename(tarball_filepath))[0],
                 args.install_in
             )
+
+            # Gunzip the bloom filter representation of this taxonomic level
+            bf_filepath = os.path.join(subdir, "{}.bf.gz".format(dirname))
+            
+            with open(os.path.splitext(bf_filepath)[0], "w+") as bf_file:
+                run(["gzip", "-dc", bf_filepath], stdout=bf_file, stderr=bf_file)
 
             # Edit the HowDeSBT index file
             fix_paths(
