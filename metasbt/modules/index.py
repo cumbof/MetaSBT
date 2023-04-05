@@ -390,7 +390,7 @@ def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Di
     # Check whether the assembly summary table already exists
     # Otherwise, download it
     if not os.path.isfile(assembly_summary_filepath):
-        assembly_summary_filepath = download(assembly_summary_url, folder_path)
+        assembly_summary_filepath = download(url=assembly_summary_url, folder=folder_path)
 
     # Raise an exception in case the assembly_summary_genbank.txt file does not exist
     if not os.path.isfile(assembly_summary_filepath):
@@ -450,7 +450,7 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     :return:                The nodes.dmp and names.dmp file paths
     """
 
-    taxdump = download(taxdump_url, folder_path)
+    taxdump = download(url=taxdump_url, folder=folder_path)
 
     # Raise an exception in case the taxdump.tar.gz file does not exist
     if not os.path.isfile(taxdump):
@@ -955,7 +955,7 @@ def process_tax_id(
         genomes = list()
 
         for genome_url in genomes_urls:
-            genome_filepath = download(genome_url, tmp_genomes_dir, raise_exception=False)
+            genome_filepath = download(url=genome_url, folder=tmp_genomes_dir, raise_exception=False)
 
             if genome_filepath and integrity_check(genome_filepath):
                 genomes.append(genome_filepath)

@@ -648,33 +648,54 @@ def dereplicate_genomes(
 
 
 def download(
-    url: str,
-    folder: str,
+    url: Optional[str] = None,
+    urls: Optional[List[str]] = None,
+    folder: str = os.getcwd(),
     retries: int = 10,
     raise_exception: bool = True
-) -> Optional[str]:
+) -> Optional[Union[str, List[str]]]:
     """
     Download a file from URL to the specified folder
 
     :param url:             Source file URL
+    :param urls:            List with source file URLs
     :param folder:          Target destination folder path
     :param retries:         Try downloading again in case of errors
     :param raise_exception: Raise an exception in case of error
-    :return:                Path to the downloaded file
+    :return:                Path or list of paths to the downloaded files
     """
+
+    if not urls and not urls:
+        raise ValueError("No URLs provided")
 
     # Check whether the destination folder path exists
     if not os.path.isdir(folder):
         os.makedirs(folder, exist_ok=True)
 
     try:
-        # Download file from URL to the destination folder
-        run(
-            ["wget", "-N", url, "-P", folder],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            retries=retries,
-        )
+        if url:
+            # Download file from URL to the destination folder
+            run(
+                ["wget", "-N", url, "-P", folder],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                retries=retries,
+            )
+
+        elif urls:
+            with tempfile.NamedTemporaryFile() as tmpfile:
+                # Dump the list of bloom filter file paths
+                with open(tmpfile.name, "wt") as tmpfile_list:
+                    for url in urls:
+                        tmpfile_list.write("{}\n".format(url))
+
+                # Download a list of files from URL
+                run(
+                    ["wget", "-N", "-i", tmpfile.name, "-P", folder],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    retries=retries,
+                )
 
     except Exception as e:
         if raise_exception:

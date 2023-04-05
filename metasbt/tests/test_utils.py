@@ -65,7 +65,7 @@ class TestUtils(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Download genome into the temporary folder
-            genome_filepath = utils.download(genome_url, tmpdir)
+            genome_filepath = utils.download(url=genome_url, folder=tmpdir)
 
             # Check whether the genome file has been downloaded
             if not os.path.isfile(genome_filepath):

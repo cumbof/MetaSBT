@@ -185,7 +185,7 @@ def main() -> None:
 
             elif validate_url(args.hub):
                 # Retrieve the list of pre-computed MetaSBT databases
-                db_table_filepath = download(args.hub, tmpdir)
+                db_table_filepath = download(url=args.hub, folder=tmpdir)
 
             else:
                 raise Exception("Please enter a valid file path or URL with --hub")
@@ -319,7 +319,7 @@ def main() -> None:
         # Download the specified database
         print("Downloading database \"{}\" version \"{}\"".format(args.database, args.database_version))
         print(tarball_url)
-        tarball_filepath = download(tarball_url, args.install_in)
+        tarball_filepath = download(url=tarball_url, folder=args.install_in)
 
         if not os.path.isfile(tarball_filepath):
             raise Exception("Unable to retrieve tarball {}".format(tarball_url))
