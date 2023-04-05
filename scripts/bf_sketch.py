@@ -13,11 +13,12 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import List
 
 
 def read_params():
     p = ap.ArgumentParser(
-        prog=TOOL_ID,
+        prog="bf_sketch",
         description="Build minimal bloom filter sketches with cluster-specific marker kmers",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
@@ -80,23 +81,19 @@ def build_sketch(bf_filepath: str, bf_bucket: List[str], out_dir: str) -> str:
     # on all the bloom filters in the input bf_bucket
     sum_bf_filepath = os.path.join(out_dir, "{}__sum.bf".format(bf_filename))
 
-    # Path to the bloom filter as the result of the bitwise XOR operator
-    # on the 
-    xor_bf_filepath = os.path.join(out_dir, "{}__xor.bf".format(bf_filename))
-
     # Path to the bloom filter as the result of the NOT operator
-    # on the input bloom filter bf_filepath
+    # on the result of the OR operator on the bloom filters in the bf_bucket
     not_bf_filepath = os.path.join(out_dir, "{}__not.bf".format(bf_filename))
 
-    # Path to the output bloom filter as the result of the bitwise XOR operator
-    # between xor_bf_filepath and not_bf_filepath
+    # Path to the output bloom filter as the result of the bitwise AND operator
+    # between bf_filepath and not_bf_filepath
     diff_bf_filepath = os.path.join(out_dir, "{}.bf".format(bf_filename))
 
     # Given a input node A and a bucket with nodes B, C, and D
     # the following pipeline produces a node X as the result
     # of the following operations:
     # X = A - (B + C + D)
-    # X = (not A) xor (A xor (B or C or D))
+    # X = A and (not (B or C or D))
     try:
         with tempfile.NamedTemporaryFile() as bflist:
             with open(bflist.name, "wt") as bfilters:
@@ -122,28 +119,13 @@ def build_sketch(bf_filepath: str, bf_bucket: List[str], out_dir: str) -> str:
                 stderr=subprocess.DEVNULL
             )
 
-        # Bitwise XOR between the input bloom filter and (sum)
-        # Called (xor1)
-        subprocess.check_call(
-            [
-                "howdesbt",
-                "bfoperate",
-                bf_filepath,
-                sum_bf_filepath,
-                "--xor",
-                "--out={}".format(xor_bf_filepath)
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-
-        # Comlement of the input bloom filter
+        # Comlement NOT of the (sum) bloom filter
         # Called (not)
         subprocess.check_call(
             [
                 "howdesbt",
                 "bfoperate",
-                bf_filepath,
+                sum_bf_filepath,
                 "--not",
                 "--out={}".format(not_bf_filepath)
             ],
@@ -151,14 +133,15 @@ def build_sketch(bf_filepath: str, bf_bucket: List[str], out_dir: str) -> str:
             stderr=subprocess.DEVNULL
         )
 
-        # Output bloom filter as the bitwise xor between (xor1) and (not)
+        # Output bloom filter as the bitwise AND between
+        # the input bloom filter and (not)
         subprocess.check_call(
             [
                 "howdesbt",
                 "bfoperate",
-                xor_bf_filepath,
+                bf_filepath,
                 not_bf_filepath,
-                "--xor",
+                "--and",
                 "--out={}".format(diff_bf_filepath)
             ],
             stdout=subprocess.DEVNULL,
@@ -171,9 +154,6 @@ def build_sketch(bf_filepath: str, bf_bucket: List[str], out_dir: str) -> str:
     # Delete intermediate bloom filters
     if os.path.isfile(sum_bf_filepath):
         os.unlink(sum_bf_filepath)
-
-    if os.path.isfile(xor_bf_filepath):
-        os.unlink(xor_bf_filepath)
 
     if os.path.isfile(not_bf_filepath):
         os.unlink(not_bf_filepath)
@@ -199,7 +179,7 @@ def main() -> None:
         # Get the cluster level
         bf_level_id = os.path.basename(tax_folder)[0]
     
-    elif args.level
+    elif args.level:
         # Get the cluster level
         bf_level_id = args.level[0]
     
@@ -229,3 +209,7 @@ def main() -> None:
             out_file = build_sketch(bf_filepath, bf_bucket, args.out_dir)
 
             print(out_file)
+
+
+if __name__ == "__main__":
+    main()
