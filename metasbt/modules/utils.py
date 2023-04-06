@@ -377,6 +377,7 @@ def cluster(
     :param cluster_prefix:      Prefix of clusters numerical identifiers
     :param nproc:               Make bfdistance parallel
     :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
+                                Also return the list of paths to the unassigned genomes
     """
 
     # Check whether the output file already exists
@@ -413,10 +414,14 @@ def cluster(
 
     # Define the list of taxonomic levels for sorting profiles
     levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
+    level_ids = [lv[0] for lv in levels]
 
     # Keep track of the already assigned genomes
     assigned_taxa: Dict[str, List[str]] = dict()
     assigned_genomes: List[str] = list()
+
+    # Keep track of those genomes that MetaSBT is not able to assign
+    unassigned: List[str] = list()
 
     # Compute pair-wise distance between genomes as the number of common kmers
     # This could take a while
@@ -440,9 +445,10 @@ def cluster(
                         if line:
                             if not line.startswith("#"):
                                 line_split = line.split("\t")
-                                # Key: taxonomic level
-                                # Value: kmers in common with the taxonomic level
-                                level2score[line_split[2]] = int(line_split[3].split("/")[0])
+                                if line_split[1] in levels:
+                                    # Key: taxonomic level
+                                    # Value: kmers in common with the taxonomic level
+                                    level2score[line_split[2]] = int(line_split[3].split("/")[0])
 
                 # Define the assignment
                 assignment: List[str] = list()
@@ -451,9 +457,12 @@ def cluster(
                 # At the end of the loop below, these numbers corresponds to the boundaries of the species
                 last_known_level_mink = -1
 
-                for level in sorted(level2score.keys(), key=lambda lv: levels.index(lv[0])):
+                for level in sorted(level2score.keys(), key=lambda lv: level_ids.index(lv[0])):
                     # Compose the whole taxonomic label up to the current level
                     taxonomy = "{}|{}".format("|".join(assignment), level) if assignment else level
+
+                    # Define min boundary
+                    mink = -1
 
                     # Retrieve the boundaries for the current taxonomy
                     if taxonomy in boundaries:
@@ -470,9 +479,6 @@ def cluster(
                             higher_tax = "|".join(higher_tax.split("|")[:-1])
 
                         if higher_tax in levels_in_boundaries:
-                            # Define min boundary
-                            mink = -1
-
                             while mink < 0 and higher_tax:
                                 # Compute the average minimum common kmers among all the
                                 # genomes in all the taxonomic levels that match this search criteria
@@ -494,13 +500,8 @@ def cluster(
                                     # Keep truncating levels
                                     higher_tax = "|".join(higher_tax.split("|")[:-1])
 
-                            if mink < 0:
-                                # In case computing boundaries for the current taxonomy is not possible
-                                # This should never happen
-                                raise Exception("Unable to assign genome {}".format(genomes[i]))
-
                     # At this point the boudaries are defined
-                    if level2score[level] >= mink:
+                    if level2score[level] >= mink and mink > -1:
                         # In case the score for the current level falls in the boundaries interval
                         # Set the assignment
                         assignment.append(level)
@@ -512,38 +513,43 @@ def cluster(
                         # Does not make sense to continue with the other lower taxonomic level
                         break
 
-                # Fill the assignment with missing levels
-                assigned_levels = len(assignment)
+                if assignment:
+                    # Fill the assignment with missing levels
+                    assigned_levels = len(assignment)
 
-                for pos in range(assigned_levels, len(levels)):
-                    clusters_counter += 1
+                    for pos in range(assigned_levels, len(levels)):
+                        clusters_counter += 1
 
-                    # Create new clusters
-                    assignment.append("{}__{}{}".format(levels[pos][0], cluster_prefix, clusters_counter))
+                        # Create new clusters
+                        assignment.append("{}__{}{}".format(level_ids[pos], cluster_prefix, clusters_counter))
 
-                # Compose the assigned (partial) label
-                assigned_label = "|".join(assignment)
+                    # Compose the assigned (partial) label
+                    assigned_label = "|".join(assignment)
 
-                # Assigne current genome to the defined taxonomy
-                if assigned_label not in assigned_taxa:
-                    assigned_taxa[assigned_label] = list()
-                assigned_taxa[assigned_label].append(genomes_list[i])
+                    # Assigne current genome to the defined taxonomy
+                    if assigned_label not in assigned_taxa:
+                        assigned_taxa[assigned_label] = list()
+                    assigned_taxa[assigned_label].append(genomes_list[i])
 
-                # Mark current genome as assigned
-                assigned_genomes.append(genomes[i])
+                    # Mark current genome as assigned
+                    assigned_genomes.append(genomes[i])
 
-                # Check whether other input genomes look pretty close to the current genome by computing
-                # the number of kmers in common between the current genome and all the other input genomes
-                for j in range(i + 1, len(genomes_list)):
-                    # Kmers in common have been already computed
-                    # It returns a float by default
-                    common = int(bfdistance_intersect[genomes[i]][genomes[j]])
+                    # Check whether other input genomes look pretty close to the current genome by computing
+                    # the number of kmers in common between the current genome and all the other input genomes
+                    for j in range(i + 1, len(genomes_list)):
+                        # Kmers in common have been already computed
+                        # It returns a float by default
+                        common = int(bfdistance_intersect[genomes[i]][genomes[j]])
 
-                    if common >= last_known_level_mink:
-                        # Set the second genome as assigned
-                        assigned_genomes.append(genomes[j])
-                        # Also assign these genomes to the same taxonomy assigned to the current genome
-                        assigned_taxa[assigned_label].append(genomes_list[j])
+                        if common >= last_known_level_mink:
+                            # Set the second genome as assigned
+                            assigned_genomes.append(genomes[j])
+                            # Also assign these genomes to the same taxonomy assigned to the current genome
+                            assigned_taxa[assigned_label].append(genomes_list[j])
+
+                else:
+                    # Unable to assign a taxonomic label to the current genome
+                    unassigned.append(genomes_list[i])
 
     # Update the manifest with the new clusters counter
     if clusters_counter > clusters_counter_manifest:
@@ -584,7 +590,7 @@ def cluster(
                     "cluster": cluster_id
                 }
 
-    return assignment
+    return assignment, unassigned
 
 
 def dereplicate_genomes(
