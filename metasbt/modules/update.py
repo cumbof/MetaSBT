@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 16, 2023"
+__date__ = "Apr 6, 2023"
 
 import argparse as ap
 import errno
@@ -152,7 +152,7 @@ def read_params():
         type=os.path.abspath,
         help=(
             "Input file with the mapping between input genome IDs and their taxonomic label. "
-            'This is used in case of reference genomes only "--type=references"'
+            'This is used in case of reference genomes only "--type references"'
         ),
     )
     general_group.add_argument(
@@ -460,16 +460,11 @@ def profile_and_assign(
                 # In case the input genome is a MAG
                 if closest_common_kmers >= min_bound:
                     # Assign the current genome to the closest lineage
-                    target_genome = os.path.join(
-                        closest_taxadir,
-                        "genomes",
-                        "{}{}".format(genome_name, genome_ext),
-                    )
+                    shutil.copy(genome_path, os.path.join(closest_taxadir, "genomes"))
 
-                    # The input genome is always uncompressed
-                    # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                    run(["gzip", target_genome], silence=True)
-                    target_genome = "{}.gz".format(target_genome)
+                    if not compression:
+                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                        run(["gzip", os.path.join(closest_taxadir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                     # Add the current genome to the list of MAGs
                     with open(mags_filepath, "a+") as file:
@@ -530,16 +525,11 @@ def profile_and_assign(
                             )
 
                         # Assign the current genome to the closest lineage
-                        target_genome = os.path.join(
-                            closest_taxadir,
-                            "genomes",
-                            "{}{}".format(genome_name, genome_ext),
-                        )
+                        shutil.copy(genome_path, os.path.join(closest_taxadir, "genomes"))
 
-                        # The input genome is always uncompressed
-                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", target_genome], silence=True)
-                        target_genome = "{}.gz".format(target_genome)
+                        if not compression:
+                            # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                            run(["gzip", os.path.join(closest_taxadir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                         # Add the current genome to the list of reference genomes
                         with open(references_filepath, "a+") as file:
@@ -568,13 +558,11 @@ def profile_and_assign(
                     os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
 
                     # Assign the current genome to the closest lineage
-                    target_genome = os.path.join(taxdir, "genomes", "{}{}".format(genome_name, genome_ext))
-                    shutil.copy(filepath, target_genome)
+                    shutil.copy(genome_path, os.path.join(taxdir, "genomes"))
 
-                    # The input genome is always uncompressed
-                    # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                    run(["gzip", target_genome], silence=True)
-                    target_genome = "{}.gz".format(target_genome)
+                    if not compression:
+                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                        run(["gzip", os.path.join(taxdir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                     # Add the current genome to the list of reference genomes
                     with open(os.path.join(taxdir, "references.txt"), "a+") as file:
@@ -915,7 +903,7 @@ def update(
         # Cluster genomes according to the boundaries defined by the boundaries module
         # Define a cluster for each taxomomic level
         # Look at the genomes profiles and update or build new clusters
-        assignments = cluster(
+        assignments, not_assigned = cluster(
             unassigned,
             boundaries,
             manifest_filepath,
@@ -925,6 +913,13 @@ def update(
             cluster_prefix=cluster_prefix,
             nproc=nproc,
         )
+
+        if not_assigned:
+            printline("Unable to process {} genomes".format(len(not_assigned)))
+
+            with open(os.path.join(db_dir, "unassigned.txt"), "w+") as unassigned_file:
+                for genome_path in not_assigned:
+                    unassigned_file.write("{}\n".format(get_file_info(genome_path)[1]))
 
         # Iterate over the input genomes
         for genome_path in assignments:
