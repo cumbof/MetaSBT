@@ -15,10 +15,12 @@ import tempfile
 from pathlib import Path
 from typing import List
 
+TOOL_ID = "bf_sketch"
+
 
 def read_params():
     p = ap.ArgumentParser(
-        prog="bf_sketch",
+        prog=TOOL_ID,
         description="Build minimal bloom filter sketches with cluster-specific marker kmers",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
@@ -57,6 +59,13 @@ def read_params():
             "k__Viruses|p__Nucleocytoviricota|c__Pokkesviricetes|o__Chitovirales|f__Poxviridae, "
             "k__Viruses|p__Nucleocytoviricota"
         ),
+    )
+    p.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version='"{}" version {} ({})'.format(TOOL_ID, __version__, __date__),
+        help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
 
