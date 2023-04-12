@@ -47,13 +47,17 @@ howdesbt_wrapper () {
                 GENOME_NAME="${GENOME_NAME%.*}";
              fi
              if [[ ! -f '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf ]]; then
-                gzip -dc ${GENOME_FILEPATH} > '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
-                howdesbt makebf --k='"${KMER_LEN}"' --min=2 --bits='"${FILTER_SIZE}"' --hashes=1 --seed=0,0 \
-                                '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT} \
-                                --out='"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf \
-                                --threads='"$NPROC"' \
-                                >> '"${LEVEL_DIR}"'/howdesbt.log 2>&1;
-                rm '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
+                if [[ -f '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf.gz ]]; then
+                    gunzip '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf.gz ;
+                else
+                    gzip -dc ${GENOME_FILEPATH} > '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
+                    howdesbt makebf --k='"${KMER_LEN}"' --min=2 --bits='"${FILTER_SIZE}"' --hashes=1 --seed=0,0 \
+                                    '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT} \
+                                    --out='"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf \
+                                    --threads='"$NPROC"' \
+                                    >> '"${LEVEL_DIR}"'/howdesbt.log 2>&1;
+                    rm '"${LEVEL_DIR}"'/genomes/${GENOME_NAME}.${GENOME_FORMAT};
+                fi
              fi
              readlink -m '"${LEVEL_DIR}"'/filters/${GENOME_NAME}.bf >> '"${LEVEL_DIR}"'/'"${LEVEL_NAME}"'.txt'
     else
@@ -126,6 +130,9 @@ howdesbt_wrapper () {
         # Remove the union.sbt file
         rm -f ${INDEX_DIR}/union.sbt
     fi
+
+    # Compress filters
+    find ${LEVEL_DIR}/filters -type f -iname "*.bf" -follow -exec gzip {} \;
 }
 # Export howdesbt_wrapper to sub-shells
 export -f howdesbt_wrapper
