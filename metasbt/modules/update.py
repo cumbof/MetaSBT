@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 6, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import errno
@@ -28,6 +28,7 @@ import tqdm  # type: ignore
 try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
+        bfaction,
         build_sh,
         checkm,
         cluster,
@@ -460,11 +461,11 @@ def profile_and_assign(
                 # In case the input genome is a MAG
                 if closest_common_kmers >= min_bound:
                     # Assign the current genome to the closest lineage
-                    shutil.copy(genome_path, os.path.join(closest_taxadir, "genomes"))
+                    shutil.copy(genome_path, os.path.join(closest_taxadir, "strains", "genomes"))
 
                     if not compression:
                         # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", os.path.join(closest_taxadir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
+                        run(["gzip", os.path.join(closest_taxadir, "strains", "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                     # Add the current genome to the list of MAGs
                     with open(mags_filepath, "a+") as file:
@@ -525,11 +526,11 @@ def profile_and_assign(
                             )
 
                         # Assign the current genome to the closest lineage
-                        shutil.copy(genome_path, os.path.join(closest_taxadir, "genomes"))
+                        shutil.copy(genome_path, os.path.join(closest_taxadir, "strains", "genomes"))
 
                         if not compression:
                             # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                            run(["gzip", os.path.join(closest_taxadir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
+                            run(["gzip", os.path.join(closest_taxadir, "strains", "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                         # Add the current genome to the list of reference genomes
                         with open(references_filepath, "a+") as file:
@@ -557,12 +558,15 @@ def profile_and_assign(
                     taxdir = os.path.join(db_dir, taxalabel.replace("|", os.sep))
                     os.makedirs(os.path.join(taxdir, "genomes"), exist_ok=True)
 
+                    # Also create the strains folder
+                    os.makedirs(os.path.join(taxdir, "strains", "genomes"), exist_ok=True)
+
                     # Assign the current genome to the closest lineage
-                    shutil.copy(genome_path, os.path.join(taxdir, "genomes"))
+                    shutil.copy(genome_path, os.path.join(taxdir, "strains", "genomes"))
 
                     if not compression:
                         # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", os.path.join(taxdir, "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
+                        run(["gzip", os.path.join(taxdir, "strains", "genomes", "{}{}".format(genome_name, genome_ext))], silence=True)
 
                     # Add the current genome to the list of reference genomes
                     with open(os.path.join(taxdir, "references.txt"), "a+") as file:
@@ -834,12 +838,11 @@ def update(
                 known_taxa.append(taxonomies[genome_name])
 
                 # Copy the input genome file to the genomes folder
-                unknown_taxonomy_genomes_folder = os.path.join(unknown_taxonomy_path, "genomes")
-                shutil.copy(genome_path, unknown_taxonomy_genomes_folder)
+                shutil.copy(genome_path, os.path.join(unknown_taxonomy_path, "strains", "genomes"))
 
                 # In case the input genome is not Gzip compressed
                 if not compression:
-                    gzip_genome_filepath = os.path.join(unknown_taxonomy_genomes_folder, os.path.basename(genome_path))
+                    gzip_genome_filepath = os.path.join(unknown_taxonomy_path, "strains", "genomes", os.path.basename(genome_path))
                     run(["gzip", gzip_genome_filepath], silence=True)
 
                 # Also update the list of reference genomes
@@ -898,7 +901,7 @@ def update(
 
         # Define a temporary folder for building bloom filters
         # This already exists in case the dereplication step has been executed
-        howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt")
+        howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt_unassigned")
 
         # Cluster genomes according to the boundaries defined by the boundaries module
         # Define a cluster for each taxomomic level
@@ -927,15 +930,17 @@ def update(
 
             # Create the new cluster folder in the database
             tax_dir = os.path.join(db_dir, assignments[genome_path]["taxonomy"].replace("|", os.sep))
-            tax_genomes_dir = os.path.join(tax_dir, "genomes")
-            os.makedirs(tax_genomes_dir, exist_ok=True)
+            os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
+
+            # Also create the strains folder
+            os.makedirs(os.path.join(tax_dir, "strains", "genomes"), exist_ok=True)
 
             # Copy the input genome into the genomes folder of the new cluster
-            shutil.copy(genome_path, tax_genomes_dir)
+            shutil.copy(genome_path, os.path.join(tax_dir, "strains", "genomes"))
 
             # In case the input genome is not gzip compressed
             if not compressed:
-                gzip_genome_filepath = os.path.join(tax_genomes_dir, os.path.basename(genome_path))
+                gzip_genome_filepath = os.path.join(tax_dir, "strains", "genomes", os.path.basename(genome_path))
                 run(["gzip", gzip_genome_filepath], silence=True)
 
             # Also update the mags.txt file
@@ -965,7 +970,10 @@ def update(
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
 
-    if rebuild:
+    if not rebuild:
+        printline("No lineages have been updated")
+
+    else:
         printline("Updating the database")
         # Extract the taxonomic levels from the list of taxa that must be rebuilt
         # Process all the species first, then all the genera, and so on up to the kingdom level
@@ -983,28 +991,92 @@ def update(
 
             # Rebuild the sequence bloom trees
             for taxonomy in taxalist:
+                build_cluster = True
+
                 printline("\t{}".format(taxonomy))
                 tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
 
-                # Remove the old index if it exists
-                if os.path.isdir(os.path.join(tax_dir, "index")):
-                    shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
+                if taxonomy.split("|")[-1].startswith("s__"):
+                    # In case the taxonomy is complete at the species level
+                    # Load manifest
+                    strains_manifest = load_manifest(os.path.join(tax_dir, "strains", "manifest.txt"))
+                    
+                    # Remove the old index
+                    if os.path.isdir(os.path.join(tax_dir, "strains", "index")):
+                        shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
 
-                # Also remove the copy of the root node if it exists
-                if os.path.isfile(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir)))):
-                    os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
+                    # Rebuild the strains SBT first
+                    # Use the species-specific bloom filter size in manifest
+                    howdesbt(
+                        os.path.join(tax_dir, "strains"),
+                        kmer_len=kmer_len,
+                        filter_size=strains_manifest["filter_size"],
+                        nproc=nproc,
+                        flat_structure=True,
+                    )
 
-                # Rebuild the index with HowDeSBT
-                howdesbt(
-                    tax_dir,
-                    kmer_len=kmer_len,
-                    filter_size=filter_size,
-                    nproc=nproc,
-                    flat_structure=False,
-                )
+                    # Select the representative genomes
+                    selected_genomes = list()
 
-    else:
-        printline("No lineages have been updated")
+                    # Get the bloom filters file paths
+                    bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
+
+                    # Compute the theta distance between genomes
+                    bfdistance_theta = bfaction(
+                        bf_filepaths,
+                        os.path.join(tmp_dir, "howdesbt_strains"),
+                        kmer_len,
+                        filter_size=strains_manifest["filter_size"],
+                        nproc=nproc,
+                        action="bfdistance",
+                        mode="theta"
+                    )
+
+                    # Sum the distances to get the final score
+                    bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
+
+                    # Sort genomes according to the sum of their distances with all the other genomes
+                    sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+
+                    # First and last genomes are those that minimize and maximize the distance with all the other genomes
+                    selected_genomes.append(sorted_genomes[0])
+                    selected_genomes.append(sorted_genomes[-1])
+
+                    # Also select a genome in the middles of min and max distances
+                    selected_genomes.append(sorted_genomes[int(len(sorted_genomes) / 2)])
+
+                    # Get the list of previously selected representative genomes
+                    previously_selected_genomes = [
+                        get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters").glob("*.bf.gz"))
+                    ]
+
+                    if len(set(selected_genomes).difference(set(previously_selected_genomes))) > 0:
+                        # In case the representative genomes of the species did not change
+                        # Remove the taxonomy from the rebuild list
+                        rebuild.remove(taxonomy)
+                        build_cluster = False
+
+                if build_cluster:
+                    # Remove the old index if it exists
+                    if os.path.isdir(os.path.join(tax_dir, "index")):
+                        shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
+
+                    # Remove filters
+                    if os.path.isdir(os.path.join(tax_dir, "filters")):
+                        shutil.rmtree(os.path.join(tax_dir, "filters"), ignore_errors=True)
+
+                    # Also remove the copy of the root node if it exists
+                    if os.path.isfile(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir)))):
+                        os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
+
+                    # Rebuild the index with HowDeSBT
+                    howdesbt(
+                        tax_dir,
+                        kmer_len=kmer_len,
+                        filter_size=filter_size,
+                        nproc=nproc,
+                        flat_structure=False,
+                    )
 
 
 def main() -> None:
