@@ -22,7 +22,7 @@ from tabulate import tabulate
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import download, validate_url, run  # type: ignore  # isort: skip
+    from utils import download, run, validate_url  # type: ignore  # isort: skip
 except Exception:
     pass
 
@@ -350,6 +350,8 @@ def main() -> None:
             
             with open(os.path.splitext(bf_filepath)[0], "w+") as bf_file:
                 run(["gzip", "-dc", bf_filepath], stdout=bf_file, stderr=bf_file)
+
+            os.unlink(bf_filepath)
 
             # Edit the HowDeSBT index file
             fix_paths(
