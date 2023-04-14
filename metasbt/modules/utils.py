@@ -416,12 +416,6 @@ def cluster(
     # Retrieve the list of input genomes
     genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
 
-    # Extract all the levels from the taxonomic labels in boundaries
-    levels_in_boundaries = set()
-    for taxonomy in boundaries:
-        for level in taxonomy.split("|"):
-            levels_in_boundaries.add(level)
-
     # Start counting new clusters
     clusters_counter = clusters_counter_manifest
 
@@ -451,7 +445,8 @@ def cluster(
             # Check whether the profile exists
             if os.path.isfile(profile):
                 # Load levels and scores
-                level2score = dict()
+                level2match = dict()
+
                 with open(profile) as file:
                     for line in file:
                         line = line.strip()
@@ -461,72 +456,41 @@ def cluster(
                                 if line_split[1] in levels:
                                     # Key: taxonomic level
                                     # Value: kmers in common with the taxonomic level
-                                    level2score[line_split[2]] = int(line_split[3].split("/")[0])
+                                    level2match[line_split[1]] = {
+                                        "taxonomy": line_split[2],
+                                        "common_kmers": int(line_split[3].split("/")[0])
+                                    }
 
-                # Define the assignment
-                assignment: List[str] = list()
+                                if line_split[1] == "genome":
+                                    # Override the species level with strains info
+                                    level2match["species"] = {
+                                        "taxonomy": "|".join(line_split[2].split("|")[:-1]),
+                                        "common_kmers": int(line_split[3].split("/")[0])
+                                    }
 
-                # Keep track of the boundary for the last identified level
-                # At the end of the loop below, these numbers corresponds to the boundaries of the species
-                last_known_level_mink = -1
+                assigned_taxonomy = None
 
-                for level in sorted(level2score.keys(), key=lambda lv: level_ids.index(lv[0])):
-                    # Compose the whole taxonomic label up to the current level
-                    taxonomy = "{}|{}".format("|".join(assignment), level) if assignment else level
+                last_known_level_mink = 0
 
-                    # Define min boundary
-                    mink = -1
+                # From the species up to the kingdom level
+                for level in reversed(levels):
+                    # Get level boundaries
+                    mink, _ = get_level_boundaries(boundaries, level2match[level]["taxonomy"])
+                
+                    if level2match[level]["common_kmers"] >= mink and mink > 0:
+                        assigned_taxonomy = level2match[level]["taxonomy"]
 
-                    # Retrieve the boundaries for the current taxonomy
-                    if taxonomy in boundaries:
-                        # Search in the boundaries dictionary
-                        mink = boundaries[taxonomy]["min_kmers"]
-
-                    else:
-                        # In case the taxonomy does not appear in the boundaries dictionary
-                        # Come back to the higher level and search for it
-                        higher_tax = "|".join(taxonomy.split("|")[:-1])
-
-                        while higher_tax not in levels_in_boundaries and higher_tax:
-                            # Keep truncating levels if they do not appear in the boudaries dictionary
-                            higher_tax = "|".join(higher_tax.split("|")[:-1])
-
-                        if higher_tax in levels_in_boundaries:
-                            while mink < 0 and higher_tax:
-                                # Compute the average minimum common kmers among all the
-                                # genomes in all the taxonomic levels that match this search criteria
-                                all_mink: List[int] = list()
-
-                                for tax in boundaries:
-                                    # In case the current taxonomy in boundaries contain the specific taxonomic level
-                                    tax_level = "|{}__".format(taxonomy.split("|")[-1][0])
-
-                                    if higher_tax in tax and tax_level in tax:
-                                        # Keep track of the boundaries for computing the avarage values
-                                        all_mink.append(boundaries[tax]["min_kmers"])
-
-                                if all_mink:
-                                    # Compute the boundaries
-                                    mink = int(math.ceil(sum(all_mink) / len(all_mink)))
-
-                                else:
-                                    # Keep truncating levels
-                                    higher_tax = "|".join(higher_tax.split("|")[:-1])
-
-                    # At this point the boudaries are defined
-                    if level2score[level] >= mink and mink > -1:
-                        # In case the score for the current level falls in the boundaries interval
-                        # Set the assignment
-                        assignment.append(level)
-
-                        # Keep track of the boundary for this last identified level
                         last_known_level_mink = mink
 
-                    else:
-                        # Does not make sense to continue with the other lower taxonomic level
                         break
 
-                if assignment:
+                if not assigned_taxonomy:
+                    # Unable to assign a taxonomic label to the current genome
+                    unassigned.append(genomes_list[i])
+                
+                else:
+                    assignment = assigned_taxonomy.split("|")
+
                     # Fill the assignment with missing levels
                     assigned_levels = len(assignment)
 
@@ -537,12 +501,13 @@ def cluster(
                         assignment.append("{}__{}{}".format(level_ids[pos], cluster_prefix, clusters_counter))
 
                     # Compose the assigned (partial) label
-                    assigned_label = "|".join(assignment)
+                    assigned_taxonomy = "|".join(assignment)
 
-                    # Assigne current genome to the defined taxonomy
-                    if assigned_label not in assigned_taxa:
-                        assigned_taxa[assigned_label] = list()
-                    assigned_taxa[assigned_label].append(genomes_list[i])
+                    # Assigne current genome to the taxonomy
+                    if assigned_taxonomy not in assigned_taxa:
+                        assigned_taxa[assigned_taxonomy] = list()
+                    
+                    assigned_taxa[assigned_taxonomy].append(genomes_list[i])
 
                     # Mark current genome as assigned
                     assigned_genomes.append(genomes[i])
@@ -558,11 +523,7 @@ def cluster(
                             # Set the second genome as assigned
                             assigned_genomes.append(genomes[j])
                             # Also assign these genomes to the same taxonomy assigned to the current genome
-                            assigned_taxa[assigned_label].append(genomes_list[j])
-
-                else:
-                    # Unable to assign a taxonomic label to the current genome
-                    unassigned.append(genomes_list[i])
+                            assigned_taxa[assigned_taxonomy].append(genomes_list[j])
 
     # Update the manifest with the new clusters counter
     if clusters_counter > clusters_counter_manifest:
@@ -981,10 +942,12 @@ def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], ta
 
     # Try searching for boundaries again with a redefined taxonomic label
     retry = False
+
     while minv == 0 and maxv == 0:
         taxonomic_boundaries = dict()
+
         if not retry:
-            if taxonomy in taxonomic_boundaries:
+            if taxonomy in boundaries:
                 # Exact search of the current taxonomic label in boundaries
                 taxonomic_boundaries[taxonomy] = boundaries[taxonomy]
 
