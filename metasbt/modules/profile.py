@@ -207,6 +207,7 @@ def profile_genome(
     expand: bool = False,
     stop_at: Optional[str] = None,
     output_prefix: Optional[str] = None,
+    best_uncertainty: float = 5.0,
     logger: Optional[Logger] = None,
     verbose: bool = False,
 ) -> None:
@@ -214,16 +215,17 @@ def profile_genome(
     Query the input genome against a specific tree
     Also expand the query to the lower taxonomic levels if requested
 
-    :param input_file:      Path to the input file with query genome
-    :param input_id:        Unique identifier of the input file
-    :param tree:            Path to the tree definition file
-    :param output_dir:      Path to the output folder
-    :param threhsold:       Query threshold
-    :param expand:          Expand the query to the lower taxonomic levels
-    :param stop_at:         Stop expanding the query at a specific taxonomic level
-    :param output_prefix:   Prefix of the output files with profiles
-    :param logger:          Logger object
-    :param verbose:         Print messages on screen as alternative to the logger
+    :param input_file:          Path to the input file with query genome
+    :param input_id:            Unique identifier of the input file
+    :param tree:                Path to the tree definition file
+    :param output_dir:          Path to the output folder
+    :param threhsold:           Query threshold
+    :param expand:              Expand the query to the lower taxonomic levels
+    :param stop_at:             Stop expanding the query at a specific taxonomic level
+    :param output_prefix:       Prefix of the output files with profiles
+    :param best_uncertainty:    Consider this uncertainty percentage when selecting the best matches
+    :param logger:              Logger object
+    :param verbose:             Print messages on screen as alternative to the logger
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -233,28 +235,37 @@ def profile_genome(
     printline("Input file: {}".format(input_file))
     printline("Input ID: {}".format(input_id))
 
-    # Define the lineage
-    lineage = dict()
-    # Also define the closest genome
-    closest_genome = ""
-    closest_genome_common_kmers = 0
-    closest_genome_total_kmers = 0
-    closest_genome_score = 0.0
+    matches_dir = os.path.join(output_dir, input_id)
+    os.makedirs(matches_dir, exist_ok=True)
 
-    while os.path.isfile(tree):
-        printline("Querying {}".format(tree))
+    # Best matches and their scores
+    best_matches = dict()
+
+    # Path to the trees for keeping querying the database
+    next_trees = [tree]
+
+    while next_trees:
+        curr_tree = next_trees.pop(0)
+        
+        printline("Querying {}".format(curr_tree))
 
         # Retrieve the taxonomic level name from the tree file path
-        id_dir = os.path.dirname(tree)
+        id_dir = os.path.dirname(curr_tree)
         level_dir = os.path.dirname(id_dir)
         level = os.path.basename(level_dir)
 
-        if level == "strains":
-            level_dir = os.path.dirname(level_dir)
-            level = os.path.basename(level_dir)
+        levels = [level_dir.split(os.sep).index(level) for level in level_dir.split(os.sep) if level.startswith("k__")]
+        curr_taxonomy = ""
+
+        if levels:
+            kingdom_index = levels[-1]
+            curr_taxonomy = "|".join(level_dir.split(os.sep)[kingdom_index:])
+
+        if level.startswith("s__"):
+            curr_tree = os.path.join(level_dir, "strains", "index", "index.detbrief.sbt")
 
         # Define the output file path
-        output_file = os.path.join(output_dir, "{}__{}__matches.txt".format(output_prefix, level))
+        output_file = os.path.join(matches_dir, "{}__{}__matches.txt".format(output_prefix, level))
 
         # There is no need to run HowDeSBT in case of clusters with only one node/genome
         # The result is the same of profiling the higher level
@@ -268,7 +279,7 @@ def profile_genome(
                     "query",
                     "--sort",
                     "--distinctkmers",
-                    "--tree={}".format(tree),
+                    "--tree={}".format(curr_tree),
                     "--threshold={}".format(threshold),
                     input_file,
                 ],
@@ -287,61 +298,58 @@ def profile_genome(
                     if line:
                         if not line.startswith("#") and not line.startswith("*"):
                             line_split = line.split(" ")
-                            if line_split[0] not in matches_kmers:
-                                matches_kmers[line_split[0]] = {"common": 0, "total": 0}
+
+                            node = line_split[0]
+                            if level.startswith("s__"):
+                                node = "t__{}".format(node)
+
+                            if node not in matches_kmers:
+                                matches_kmers[node] = {"common": 0, "total": 0}
+
                             # Update the number of common and total kmers for the current sequence
                             hits = line_split[1].split("/")
-                            matches_kmers[line_split[0]]["common"] += int(hits[0])
-                            matches_kmers[line_split[0]]["total"] += int(hits[1])
-
+                            matches_kmers[node]["common"] += int(hits[0])
+                            matches_kmers[node]["total"] += int(hits[1])
+            
             # Search for the best match
-            # The best match is defined as the genome with more kmers in common with the input sequence
-            best_match = ""
-            best_kmers = 0
-            for match in matches_kmers:
-                if matches_kmers[match]["common"] > best_kmers:
-                    best_kmers = matches_kmers[match]["common"]
-                    best_match = match
+            # The best match is defined as the genome with the highest number of kmers in common with the input sequence
+            best_match = sorted(matches_kmers.keys(), key=lambda match: matches_kmers[match]["common"])[-1]
+            best_kmers = matches_kmers[best_match]["common"]
 
-            # Retrieve the score of the best match
-            best_score = round(best_kmers / matches_kmers[best_match]["total"], 2)
+            # Define a threshold on the best number of common kmers
+            common_kmers_threshold = int((best_kmers * best_uncertainty) / 100.0)
+
+            # Get the best matches
+            curr_best_matches = {"{}{}".format("{}|".format(curr_taxonomy) if curr_taxonomy else "", match): matches_kmers[match]
+                                 for match in matches_kmers if matches_kmers[match]["common"] >= common_kmers_threshold}
+
+            best_matches.update(curr_best_matches)
 
             if level.startswith("s__"):
                 # There is nothing to query after the species tree
-                closest_genome = best_match
-                closest_genome_common_kmers = best_kmers
-                closest_genome_total_kmers = matches_kmers[best_match]["total"]
-                closest_genome_score = best_score
-
                 break
 
-            else:
-                # Update the lineage
-                lineage[best_match] = {
-                    "common": best_kmers,
-                    "total": matches_kmers[best_match]["total"],
-                    "score": best_score,
-                }
+            # Stop querying trees
+            if not expand:
+                # In case --expand is not provided
+                break
 
-                # Stop querying trees
-                if not expand:
-                    # In case --expand is not provided
+            elif expand and stop_at:
+                if stop_at[0] == level[0] and level != "strains":
+                    # In case both --expand and --stop_at are provided
+                    # and the taxonomic level specified with --stop_at is reached
+                    # Compare the first character of the current taxonomic level and the one specified with --stop_at
                     break
 
-                elif expand and stop_at:
-                    if stop_at[0] == level[0]:
-                        # In case both --expand and --stop_at are provided
-                        # and the taxonomic level specified with --stop_at is reached
-                        # Compare the first character of the current taxonomic level and the one specified with --stop_at
-                        break
-
-                # Keep querying in case of --expand
-                tree = os.path.join(
-                    level_dir,
-                    best_match,
-                    "strains" if best_match.startswith("s__") else "",
-                    "index",
-                    "index.detbrief.sbt"
+            # Keep querying in case of --expand
+            for match in curr_best_matches:
+                next_trees.append(
+                    os.path.join(
+                        level_dir,
+                        match,
+                        "index",
+                        "index.detbrief.sbt"
+                    )
                 )
 
     # Define the output profile path
@@ -361,67 +369,53 @@ def profile_genome(
                 )
             )
 
-    # Reconstruct the lineage
-    if lineage:
-        # Print the closest lineage
-        printline("Closest lineage: {}".format("|".join(lineage.keys())))
+    if best_matches:
+        for level in [
+            "kingdom",
+            "phylum",
+            "class",
+            "order",
+            "family",
+            "genus",
+            "species",
+            "t__",
+        ]:
+            best_level_matches = list(
+                filter(
+                    lambda match: match.split("|")[-1].startswith("{}__".format(level[0])),
+                    best_matches.keys()
+                )
+            )
 
-        # Print scores
-        printline("Listing scores")
-        for lin in lineage:
-            printline("{}: {}".format(lin, lineage[lin]["score"]))
+            best_level_match = sorted(
+                best_level_matches,
+                key=lambda match: round(best_matches[match]["common"] / best_matches[match]["total"], 2)
+            )[-1]
 
-            # Expand the level ID to the full level name
-            level_name = ""
-            for tx_level in [
-                "kingdom",
-                "phylum",
-                "class",
-                "order",
-                "family",
-                "genus",
-                "species",
-            ]:
-                if lin[0] == tx_level[0]:
-                    level_name = tx_level
-                    break
+            best_level_match_score = round(best_matches[best_level_match]["common"] / best_matches[best_level_match]["total"], 2)
+
+            printline(
+                "Closest {}: {} (score {})".format(
+                    level if not level.startswith("t") else "genome",
+                    best_level_match,
+                    best_level_match_score,
+                )
+            )
 
             # Report the characterisation to the output file
             with open(output_profile, "a+") as output:
                 output.write(
                     "{}\t{}\t{}\t{}\t{}\n".format(
                         input_id,  # ID of the input query
-                        level_name,  # Taxonomic level name
-                        lin,  # Lineage
+                        level if not level.startswith("t") else "genome",  # Taxonomic level name
+                        best_level_match,  # Lineage
                         "{}/{}".format(
-                            lineage[lin]["common"],  # Number of kmers in common
-                            lineage[lin]["total"],  # Total number of kmers in query
+                            best_matches[best_level_match]["common"],  # Number of kmers in common
+                            best_matches[best_level_match]["total"],  # Total number of kmers in query
                         ),
-                        lineage[lin]["score"],  # Score
+                        best_level_match_score,  # Score
                     )
                 )
-
-    # Show the closest genome in case the input is a species tree
-    # or the query has been expanded
-    if closest_genome:
-        # Print the closest genome and its score
-        printline("Closest genome: {}".format(closest_genome))
-        printline("Closest genome score: {}".format(closest_genome_score))
-
-        # Report the closest genome to the output file
-        with open(output_profile, "a+") as output:
-            output.write(
-                "{}\t{}\t{}\t{}\t{}\n".format(
-                    input_id,  # ID of the input query
-                    "genome",  # Genome level
-                    closest_genome,  # Closest genome in the database
-                    "{}/{}".format(
-                        closest_genome_common_kmers,  # Number of kmers in common
-                        closest_genome_total_kmers,
-                    ),  # Total number of kmers in query
-                    closest_genome_score,  # Score
-                )
-            )
 
     printline("Output: {}".format(output_profile))
 
