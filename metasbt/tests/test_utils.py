@@ -18,7 +18,10 @@ import unittest
 TOOL_ID = "test_utils"
 
 # Define the list of dependencies
-DEPENDENCIES = ["wget"]
+DEPENDENCIES = [
+    "ntcard",
+    "wget"
+]
 
 # Define the test root directory
 TESTS_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -83,6 +86,32 @@ class TestUtils(unittest.TestCase):
 
         with self.subTest():
             self.assertEqual(sha256_hash, sha256_hash_precomp)
+
+    def test_estimate_bf_size(self):
+        """
+        Test the utils.estimate_bf_size() function
+        """
+
+        # Link to the E. coli K-12 reference genome from NCBI GenBank
+        genome_url = "http://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/005/845/GCA_000005845.2_ASM584v2/GCA_000005845.2_ASM584v2_genomic.fna.gz"
+
+        # Bloom filter size
+        filter_size = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Download genome into the temporary folder
+            genome_filepath = utils.download(url=genome_url, folder=tmpdir)
+
+            # Run ntCard for estimating the number of unique kmers in the input genome
+            filter_size = utils.estimate_bf_size(
+                [genome_filepath],
+                kmer_len=21,
+                prefix="genome",
+                tmp_dir=tmpdir,
+                nproc=1
+            )
+
+        self.assertTrue(filter_size > 0)
 
     def test_get_file_info(self):
         """
