@@ -652,7 +652,7 @@ def download(
     :return:                Path or list of paths to the downloaded files
     """
 
-    if not urls and not urls:
+    if not url and not urls:
         raise ValueError("No URLs provided")
 
     # Check whether the destination folder path exists
