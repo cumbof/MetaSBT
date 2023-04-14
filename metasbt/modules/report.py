@@ -5,7 +5,7 @@ Create a database report table
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 6, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import datetime
@@ -161,7 +161,7 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "genomes", "{}.fna.gz".format(line))):
                                     mags_list.append(line)
 
                 # Do the same with the references.txt file
@@ -170,7 +170,7 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "genomes", "{}.fna.gz".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "genomes", "{}.fna.gz".format(line))):
                                     references_list.append(line)
                 
                 if not mags_list and not references_list:
