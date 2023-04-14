@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 1, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import errno
@@ -63,7 +63,7 @@ def bfaction(
     nproc: int = 1,
     action: str = "bfdistance",
     mode: str = "theta",
-) -> float:
+) -> Union[Dict[str, Dict[str, float]], Dict[str, int]]:
     """
     bfdistance and bfoperate wrapper
 
@@ -110,7 +110,13 @@ def bfaction(
 
     if not filter_size:
         # Estimate the bloom filter size with ntCard
-        filter_size = estimate_bf_size(genomes, kmer_len, os.path.join(tmpdir, "genomes"), tmpdir, nproc=nproc)
+        filter_size = estimate_bf_size(
+            genomes,
+            kmer_len=kmer_len,
+            prefix="genomes",
+            tmp_dir=tmpdir,
+            nproc=nproc
+        )
 
     # Take track of all the bloom filter file paths
     bf_files = list()
@@ -386,7 +392,6 @@ def cluster(
 
     # Also check whether the input files already exist
     # Otherwise, raise an exception
-
     if not os.path.isfile(manifest_filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
 
@@ -397,8 +402,16 @@ def cluster(
     manifest = load_manifest(manifest_filepath)
 
     kmer_len = manifest["kmer_len"]
-    filter_size = manifest["filter_size"]
     clusters_counter_manifest = manifest["clusters_counter"]
+
+    # Estimate the proper bloom filter size for the set of unassigned genomes
+    filter_size = estimate_bf_size(
+        genomes_list,
+        kmer_len=kmer_len,
+        prefix="genomes",
+        tmp_dir=tmpdir,
+        nproc=nproc
+    )
 
     # Retrieve the list of input genomes
     genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
@@ -637,13 +650,20 @@ def dereplicate_genomes(
             _, genome1, _, _ = get_file_info(genomes[i])
             _, genome2, _, _ = get_file_info(genomes[j])
 
-            if bfdistance_theta[genome1][genome2] >= similarity:
-                # Take track of excluded genomes
-                filtered_genomes.append(genomes[i])
+            excluded = None
 
+            if bfdistance_theta[genome1][genome2] >= similarity:
+                filtered_genomes.append(genomes[i])
+                excluded = genomes[i]
+            
+            if bfdistance_theta[genome2][genome1] >= similarity:
+                filtered_genomes.append(genomes[j])
+                excluded = genomes[j]
+
+            if excluded:
                 # Also take note if the excluded genomes in the filtered file
                 with open(filtered_genomes_filepath, "a+") as f:
-                    f.write("{}\n".format(genomes[i]))
+                    f.write("{}\n".format(excluded))
 
                 break
 
@@ -715,7 +735,13 @@ def download(
     return os.path.join(folder, url.split(os.sep)[-1])
 
 
-def estimate_bf_size(genomes: str, kmer_len: int, prefix: str, tmp_dir: str, nproc: int = 1) -> int:
+def estimate_bf_size(
+    genomes: str,
+    kmer_len: int = 21,
+    prefix: str = "genomes",
+    tmp_dir: str = os.getcwd(),
+    nproc: int = 1
+) -> int:
     """
     Estimate the bloom filter size with ntCard
 
@@ -726,6 +752,9 @@ def estimate_bf_size(genomes: str, kmer_len: int, prefix: str, tmp_dir: str, npr
     :param nproc:       Make it parallel
     :return:            The estimated bloom filter size
     """
+
+    if not os.path.isdir(tmp_dir):
+        os.makedirs(tmp_dir, exist_ok=True)
 
     with tempfile.NamedTemporaryFile() as genomes_file:
         # Dump the list of genome file paths
@@ -749,7 +778,7 @@ def estimate_bf_size(genomes: str, kmer_len: int, prefix: str, tmp_dir: str, npr
     f1 = 0
 
     # Read the ntCard output hist file
-    with open("{}_k{}.hist".format(prefix, kmer_len)) as histfile:
+    with open(os.path.join(tmp_dir, "{}_k{}.hist".format(prefix, kmer_len))) as histfile:
         F0_found = False
         f1_found = False
         for line in histfile:
@@ -1089,17 +1118,28 @@ def howdesbt(
                     with open("{}.gz".format(bf_filepath), "w+") as file:
                         run(["gzip", "-c", bf_filepath], stdout=file, stderr=file)
 
-                    # Increment the genomes counter
-                    how_many += 1
-
                 elif os.path.isfile("{}.gz".format(bf_filepath)):
                     # Uncompress the bloom filter file
                     with open(bf_filepath, "w+") as file:
                         run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
 
-                # Take track of the current bloom filter file path
-                with open(level_list, "a+") as file:
-                    file.write("{}\n".format(bf_filepath))
+        filters_folder = os.path.join(level_dir, "filters")
+
+        if os.path.isdir(filters_folder):
+            # Take track of the bloom filter files
+            with open(level_list, "w+") as level_list_file:
+                for bf_filepath in Path(filters_folder).glob("*.bf.gz"):
+                    _, bf_name, _, _ = get_file_info(bf_filepath, check_supported=False, check_exists=False)
+
+                    if not os.path.isfile(os.path.join(filters_folder, "{}.bf".format(bf_name))):
+                        # Uncompress the bloom filter file
+                        with open(os.path.join(filters_folder, "{}.bf".format(bf_name)), "w+") as file:
+                            run(["gzip", "-dc", bf_filepath], stdout=file, stderr=file)
+
+                    level_list_file.write("{}\n".format(bf_filepath))
+
+                    # Increment the genomes counter
+                    how_many += 1
 
     else:
         # Find all the other taxonomic levels
