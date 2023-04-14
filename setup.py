@@ -70,7 +70,9 @@ setuptools.setup(
     },
     python_requires=">=3.8",
     scripts=[
+        "bf_sketch.py",
         "scripts/esearch_txid.sh",
+        "get_ncbi_genomes.py",
         "scripts/howdesbt_index.sh",
         "scripts/uniform_inputs.sh",
     ],
