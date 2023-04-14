@@ -6,7 +6,7 @@ between all the genomes under a specific cluster
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Mar 4, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import errno
@@ -195,17 +195,24 @@ def define_boundaries(
             for line in references:
                 line = line.strip()
                 if line:
-                    genome_path = os.path.join(
-                        os.path.dirname(str(references_path)),
-                        "filters",
-                        "{}.bf.gz".format(line),
-                    )
-
                     if level_id == "species":
-                        samples[line] = [genome_path]
+                        samples[line] = [
+                            os.path.join(
+                                os.path.dirname(str(references_path)),
+                                "strains",
+                                "filters",
+                                "{}.bf.gz".format(line),
+                            )
+                        ]
 
                     else:
-                        samples[next_level].append(genome_path)
+                        samples[next_level].append(
+                            os.path.join(
+                                os.path.dirname(str(references_path)),
+                                "filters",
+                                "{}.bf.gz".format(line),
+                            )
+                        )
 
                     references_count += 1
 
@@ -391,6 +398,15 @@ def boundaries(
                 if os.path.isdir(str(level_dir)):
                     printline("Processing {}".format(get_lineage_from_path(str(level_dir))))
 
+                    # Load the species manifest in case of the species level
+                    species_manifest = dict()
+
+                    if level == "species":
+                        # Load the manifest file under the strains folder
+                        # Use the species-specific bloom filter size
+                        species_manifest_filepath = os.path.join(str(level_dir), "strains", "manifest.txt")
+                        species_manifest = load_manifest(species_manifest_filepath)
+
                     # Define boundaries for the current taxonomic level
                     define_boundaries(
                         str(level_dir),
@@ -398,7 +414,7 @@ def boundaries(
                         tmp_dir,
                         output,
                         manifest["kmer_len"],
-                        manifest["filter_size"],
+                        species_manifest["filter_size"] if species_manifest else manifest["filter_size"],
                         max_genomes=max_genomes,
                         min_genomes=min_genomes,
                         nproc=nproc,
