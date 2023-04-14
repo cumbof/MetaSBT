@@ -382,29 +382,12 @@ def profile_and_assign(
                             "score": float(line_split[4]),
                         }
 
-        # Discard the genome if it is too similar with the closest genome according to the similarity score
-        # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
-        # a MAG with a high number of overlapped kmers according to the similarity score
         closest_genome: Dict[str, Any] = profile_data["genome"]
 
-        # Reconstruct the full lineage of the closest taxa
-        closest_taxa_list: List[str] = list()
-        closest_common_kmers = 0
-        closest_score = 0.0
-        for level in [
-            "kingdom",
-            "phylum",
-            "class",
-            "order",
-            "family",
-            "genus",
-            "species",
-        ]:
-            closest_taxa_list.append(profile_data[level]["taxonomy"])
-            if level == "species":
-                closest_common_kmers = profile_data[level]["common_kmers"]
-                closest_score = profile_data[level]["score"]
-        closest_taxa = "|".join(closest_taxa_list)
+        # Get the closest species
+        closest_taxa = "|".join(profile_data["genome"]["taxonomy"].split("|")[:-1])
+        closest_common_kmers = profile_data["genome"]["common_kmers"]
+        closest_score = profile_data["genome"]["score"]
 
         printline("Closest lineage: {} (score {})".format(closest_taxa, closest_score))
         printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_genome["score"]))
@@ -426,8 +409,13 @@ def profile_and_assign(
 
         # Check whether the input genome must be discarded
         skip_genome = False
+
         if dereplicate and closest_genome["score"] * 100.0 >= similarity:
+            # Discard the genome if it is too similar with the closest genome according to the similarity score
+            # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
+            # a MAG with a high number of overlapped kmers according to the similarity score
             printline("Dereplicating genome")
+
             if input_type == "MAGs":
                 # In case the input genome is a MAG
                 if closest_genome["taxonomy"] in references:
