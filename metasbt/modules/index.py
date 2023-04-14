@@ -6,10 +6,11 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 1, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import copy
+import errno
 import gzip
 import hashlib
 import math
@@ -33,6 +34,7 @@ import tqdm  # type: ignore
 try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
+        bfaction,
         build_sh,
         checkm,
         dereplicate_genomes,
@@ -681,6 +683,11 @@ def organize_data(
     genomes_dir = os.path.join(tax_dir, "genomes")
     os.makedirs(genomes_dir, exist_ok=True)
 
+    if not flat_structure:
+        # Create the strains folder
+        genomes_dir = os.path.join(tax_dir, "strains", "genomes")
+        os.makedirs(genomes_dir, exist_ok=True)
+
     references_path = "references.txt" if not flat_structure else "genomes_{}.txt".format(tax_id)
     with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
         # Move the processed genomes to the taxonomy folder
@@ -1108,6 +1115,111 @@ def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structu
     return genomes_sub
 
 
+def estimate_bf_size_and_howdesbt(
+    strains_dir: str,
+    tmp_dir: str,
+    kmer_len: int = 21,
+    prefix: str = "genomes",
+    limit_number: Optional[int] = None,
+    limit_percentage: float = 100.0,
+    increase_filter_size: float = 0.0,
+    nproc: int = 1,
+) -> None:
+    """
+    Wrapper around ntCard and HowDeSBT for building strains SBTs with species-specific bloom filter sizes
+    The structure is always flat here
+
+    :param strains_dir:              Path to the strains folder
+    :param tmp_dir:                 Path to the temporary folder
+    :param kmer_len:                Kmer size
+    :param prefix:                  Prefix of the ntCard output histogram file
+    :param limit_number:            Maximum number of genomes as input for ntCard
+    :param limit_percentage:        Maximum number of genomes as input for ntCard (in percentage)
+    :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
+    :param nproc:                   Make ntCard and HowDeSBT parallel
+    """
+
+    genomes_dir = os.path.join(strains_dir, "genomes")
+
+    if not os.path.isdir(genomes_dir):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genomes_dir)
+
+    genomes_paths = [str(path) for path in Path(genomes_dir).glob("*.fna.gz")]
+
+    # Define a subset of genomes
+    genomes_paths_sub = get_sublist(
+        genomes_paths,
+        limit_number=limit_number,
+        limit_percentage=limit_percentage,
+        flat_structure=True
+    )
+
+    # Estimate the bloom filter size
+    filter_size = estimate_bf_size(
+        genomes_paths_sub,
+        kmer_len=kmer_len,
+        prefix=prefix,
+        tmp_dir=tmp_dir,
+        nproc=nproc,
+    )
+
+    # Increment the estimated bloom filter size
+    increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
+    filter_size += increment
+
+    # Run HowDeSBT
+    howdesbt(
+        strains_dir,
+        kmer_len=kmer_len,
+        filter_size=filter_size,
+        nproc=nproc,
+        flat_structure=True,
+    )
+
+    # Define the manifest file
+    with open(os.path.join(strains_dir, "manifest.txt"), "w+") as manifest:
+        manifest.write("--kmer-len {}\n".format(kmer_len))
+        manifest.write("--filter-size {}\n".format(filter_size))
+
+    # Select the representative genomes
+    selected_genomes = list()
+
+    if len(genomes_paths) <= 3:
+        # 3 is the maximum number of selected species
+        # as it is also the minimum number of genomes for computing boundaries
+        selected_genomes = genomes_paths
+
+    else:
+        # Get the bloom filters file paths
+        bf_filepaths = [str(path) for path in Path(os.path.join(strains_dir, "filters")).glob("*.bf.gz")]
+
+        # Compute the theta distance between genomes
+        bfdistance_theta = bfaction(
+            bf_filepaths,
+            os.path.join(tmp_dir, "howdesbt"),
+            kmer_len,
+            filter_size=filter_size,
+            nproc=nproc,
+            action="bfdistance",
+            mode="theta"
+        )
+
+        # Sum the distances to get the final score
+        bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
+
+        # Sort genomes according to the sum of their distances with all the other genomes
+        sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+
+        # First and last genomes are those that minimize and maximize the distance with all the other genomes
+        selected_genomes.append(sorted_genomes[0])
+        selected_genomes.append(sorted_genomes[-1])
+
+        # Also select a genome in the middles of min and max distances
+        selected_genomes.append(sorted_genomes[int(len(sorted_genomes) / 2)])
+
+    return strains_dir, selected_genomes
+
+
 def index(
     db_dir: str,
     input_list: str,
@@ -1406,9 +1518,9 @@ def index(
         # Estimate the bloom filter size
         filter_size = estimate_bf_size(
             genomes_paths_sub,
-            kmer_len,
-            os.path.join(tmp_dir, "genomes"),
-            tmp_dir,
+            kmer_len=kmer_len,
+            prefix="genomes",
+            tmp_dir=tmp_dir,
             nproc=nproc,
         )
 
@@ -1446,15 +1558,56 @@ def index(
                 "phylum",
                 "kingdom",
             ]:
-                folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0]))]
+                folders = [str(path) for path in Path(db_dir).glob("**/{}__*".format(level[0])) if os.path.isdir(str(path))]
                 printline("Running HowDeSBT at the {} level ({} clusters)".format(level, len(folders)))
+
+                if level == "species":
+                    estimate_bf_size_and_howdesbt_partial = partial(
+                        estimate_bf_size_and_howdesbt,
+                        kmer_len=kmer_len,
+                        prefix="genomes",
+                        limit_number=limit_estimation_number,
+                        limit_percentage=limit_estimation_percentage,
+                        increase_filter_size=increase_filter_size,
+                        nproc=nproc,
+                    )
+
+                    # Establish a species-specific bloom filter size
+                    # Run howdesbt in flat mode
+                    # Search for genomes that minimize and maximize the genetic distance versus all the other genomes in the same cluster
+                    # Use only these genomes to build the species tree
+                    with mp.Pool(processes=parallel) as strains_pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
+                        # Wrapper around the update function of tqdm
+                        def progress(*args):
+                            pbar.update()
+                        
+                        # Process strains
+                        jobs = [
+                            strains_pool.apply_async(
+                                estimate_bf_size_and_howdesbt_partial,
+                                args=(os.path.join(species_dir, "strains"), os.path.join(species_dir, "strains", "tmp"),),
+                                callback=progress
+                            )
+                            for species_dir in folders
+                        ]
+
+                        for job in jobs:
+                            strains_dir, selected_genomes = job.get()
+                            species_dir = os.sep.join(strains_dir.split(os.sep)[:-1])
+
+                            # Populate the genomes folder at the species level with the selected genomes
+                            for genome in selected_genomes:
+                                os.symlink(
+                                    os.path.join(strains_dir, "genomes", "{}.fna.gz".format(genome)),
+                                    os.path.join(species_dir, "genomes")
+                                )
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
                     # Wrapper around the update function of tqdm
                     def progress(*args):
                         pbar.update()
 
-                    # Process the NCBI tax IDs
+                    # Process clusters under a specific taxonomic level
                     jobs = [
                         pool.apply_async(howdesbt_partial, args=(level_dir,), callback=progress)
                         for level_dir in folders
