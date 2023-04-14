@@ -7,7 +7,7 @@ single sequences are merged together
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Feb 8, 2023"
+__date__ = "Apr 13, 2023"
 
 import argparse as ap
 import errno
@@ -249,6 +249,10 @@ def profile_genome(
         level_dir = os.path.dirname(id_dir)
         level = os.path.basename(level_dir)
 
+        if level == "strains":
+            level_dir = os.path.dirname(level_dir)
+            level = os.path.basename(level_dir)
+
         # Define the output file path
         output_file = os.path.join(output_dir, "{}__{}__matches.txt".format(output_prefix, level))
 
@@ -332,7 +336,13 @@ def profile_genome(
                         break
 
                 # Keep querying in case of --expand
-                tree = os.path.join(level_dir, best_match, "index", "index.detbrief.sbt")
+                tree = os.path.join(
+                    level_dir,
+                    best_match,
+                    "strains" if best_match.startswith("s__") else "",
+                    "index",
+                    "index.detbrief.sbt"
+                )
 
     # Define the output profile path
     output_profile = os.path.join(output_dir, "{}__profiles.tsv".format(output_prefix))
