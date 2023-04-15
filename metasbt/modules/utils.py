@@ -59,6 +59,7 @@ def bfaction(
     genomes: List[str],
     tmpdir: str,
     kmer_len: int,
+    min_occurrences: int = 2,
     filter_size: Optional[int] = None,
     nproc: int = 1,
     action: str = "bfdistance",
@@ -67,15 +68,16 @@ def bfaction(
     """
     bfdistance and bfoperate wrapper
 
-    :param genomes:     List with paths to the genome or bloom filter files
-    :param tmpdir:      Path to the temporary folder with bloom filters
-    :param kmer_len:    Kmer length
-    :param filter_size: Bloom filter size
-    :param nproc:       Make it parallel
-    :param action:      "bfoperate" or "bfdistance"
-    :param mode:        bfoperate modes: "and", "or", "xor", "eq", and "not"
-                        bfdistance modes: "hamming", "intersect", "union", and "theta"
-    :return:            Dictionary with the result of bfdistance or bfoperate
+    :param genomes:             List with paths to the genome or bloom filter files
+    :param tmpdir:              Path to the temporary folder with bloom filters
+    :param kmer_len:            Kmer length
+    :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
+    :param filter_size:         Bloom filter size
+    :param nproc:               Make it parallel
+    :param action:              "bfoperate" or "bfdistance"
+    :param mode:                bfoperate modes: "and", "or", "xor", "eq", and "not"
+                                bfdistance modes: "hamming", "intersect", "union", and "theta"
+    :return:                    Dictionary with the result of bfdistance or bfoperate
     """
 
     # Define supported actions
@@ -113,6 +115,7 @@ def bfaction(
         filter_size = estimate_bf_size(
             genomes,
             kmer_len=kmer_len,
+            min_occurrences=min_occurrences,
             prefix="genomes",
             tmp_dir=tmpdir,
             nproc=nproc
@@ -369,6 +372,7 @@ def cluster(
     tmpdir: str,
     outpath: str,
     cluster_prefix: str = "MSBT",
+    min_occurrences: int = 2,
     nproc: int = 1,
 ) -> Dict[str, str]:
     """
@@ -381,6 +385,7 @@ def cluster(
     :param tmpdir:              Path to the temporary folder for building bloom filters
     :param outpath:             Path to the output file with the new assignments
     :param cluster_prefix:      Prefix of clusters numerical identifiers
+    :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
     :param nproc:               Make bfdistance parallel
     :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
                                 Also return the list of paths to the unassigned genomes
@@ -408,6 +413,7 @@ def cluster(
     filter_size = estimate_bf_size(
         genomes_list,
         kmer_len=kmer_len,
+        min_occurrences=min_occurrences,
         prefix="genomes",
         tmp_dir=tmpdir,
         nproc=nproc
@@ -699,6 +705,7 @@ def download(
 def estimate_bf_size(
     genomes: str,
     kmer_len: int = 21,
+    min_occurrences: int = 2,
     prefix: str = "genomes",
     tmp_dir: str = os.getcwd(),
     nproc: int = 1
@@ -706,16 +713,16 @@ def estimate_bf_size(
     """
     Estimate the bloom filter size with ntCard
 
-    :param genomes:     List of paths to the genome files
-    :param kmer_len:    Length of the kmers
-    :param prefix:      Prefix of the output histogram file
-    :param tmp_dir:     Path to the temporary folder
-    :param nproc:       Make it parallel
-    :return:            The estimated bloom filter size
+    :param genomes:         List of paths to the genome files
+    :param kmer_len:        Length of the kmers
+    :param min_occurrences: Exclude kmers with a number of occurrences less than this param
+    :param prefix:          Prefix of the output histogram file
+    :param tmp_dir:         Path to the temporary folder
+    :param nproc:           Make it parallel
+    :return:                The estimated bloom filter size
     """
 
-    if not os.path.isdir(tmp_dir):
-        os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
     with tempfile.NamedTemporaryFile() as genomes_file:
         # Dump the list of genome file paths
@@ -729,33 +736,37 @@ def estimate_bf_size(
                 "ntcard",
                 "--kmer={}".format(kmer_len),
                 "--threads={}".format(nproc),
-                "--pref={}".format(prefix),
+                "--pref={}".format(os.path.join(tmp_dir, prefix)),
                 "@{}".format(genomes_file.name),
             ],
             silence=True,
         )
 
+    # Number of distinct kmers
     F0 = 0
-    f1 = 0
+
+    # List with the number of kmers occurring less than min_occurrences
+    fs = list()
 
     # Read the ntCard output hist file
     with open(os.path.join(tmp_dir, "{}_k{}.hist".format(prefix, kmer_len))) as histfile:
-        F0_found = False
-        f1_found = False
         for line in histfile:
             line = line.strip()
             if line:
-                if line.startswith("F0"):
-                    F0 = int(line.split()[-1])
-                    F0_found = True
-                elif line.startswith("1"):
-                    f1 = int(line.split()[-1])
-                    f1_found = True
-                if F0_found and f1_found:
-                    break
+                line_split = line.split()
+
+                if line_split[0] == "F0":
+                    F0 = int(line_split[-1])
+
+                elif isinstance(line_split[0], int):
+                    if int(line_split[0]) < min_occurrences:
+                        fs.append(int(line_split[-1]))
+
+                    else:
+                        break
 
     # Estimate the bloom filter size
-    return F0 - f1
+    return F0 - sum(fs)
 
 
 def filter_checkm_tables(
@@ -986,6 +997,7 @@ def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], ta
 def howdesbt(
     level_dir: str,
     kmer_len: int = 21,
+    min_occurrences: int = 2,
     filter_size: int = 10000,
     nproc: int = 1,
     flat_structure: bool = False,
@@ -996,6 +1008,7 @@ def howdesbt(
 
     :param level_dir:       Path to the taxonomic level folder
     :param kmer_len:        Length of the kmers
+    :param min_occurrences: Exclude kmers with a number of occurrences less than this param
     :param filter_size:     Size of the bloom filters
     :param nproc:           Make it parallel
     :param flat_structure:  Genomes are not taxonomically organized
@@ -1062,7 +1075,7 @@ def howdesbt(
                             "howdesbt",
                             "makebf",
                             "--k={}".format(kmer_len),
-                            "--min=2",
+                            "--min={}".format(min_occurrences),
                             "--bits={}".format(filter_size),
                             "--hashes=1",
                             "--seed=0,0",
@@ -1099,7 +1112,7 @@ def howdesbt(
                         with open(os.path.join(filters_folder, "{}.bf".format(bf_name)), "w+") as file:
                             run(["gzip", "-dc", bf_filepath], stdout=file, stderr=file)
 
-                    level_list_file.write("{}\n".format(bf_filepath))
+                    level_list_file.write("{}\n".format(os.path.join(filters_folder, "{}.bf".format(bf_name))))
 
                     # Increment the genomes counter
                     how_many += 1

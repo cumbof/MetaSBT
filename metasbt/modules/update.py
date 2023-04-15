@@ -644,13 +644,14 @@ def update(
         kmer_len = manifest["kmer_len"]
         filter_size = manifest["filter_size"]
         clusters_counter = manifest["clusters_counter"]
+        min_kmer_occurrences = manifest["min_kmer_occurrences"]
 
         # Check whether the kmer length and the filter size have been successfully retrieved
-        if kmer_len == 0 or filter_size == 0:
-            raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
+        if kmer_len == 0 or filter_size == 0 or min_kmer_occurrences < 2:
+            raise ValueError("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
 
         if clusters_counter == 0:
-            raise Exception("There is nothing to update here!")
+            raise ValueError("There is nothing to update here!")
 
     except Exception as ex:
         raise Exception("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath)).with_traceback(
@@ -902,6 +903,7 @@ def update(
             howdesbt_tmp_dir,
             os.path.join(db_dir, "assignments.txt"),
             cluster_prefix=cluster_prefix,
+            min_occurrences=min_kmer_occurrences,
             nproc=nproc,
         )
 
@@ -998,6 +1000,7 @@ def update(
                     howdesbt(
                         os.path.join(tax_dir, "strains"),
                         kmer_len=kmer_len,
+                        min_occurrences=min_kmer_occurrences,
                         filter_size=strains_manifest["filter_size"],
                         nproc=nproc,
                         flat_structure=True,
@@ -1014,6 +1017,7 @@ def update(
                         bf_filepaths,
                         os.path.join(tmp_dir, "howdesbt_strains"),
                         kmer_len,
+                        min_occurrences=min_kmer_occurrences,
                         filter_size=strains_manifest["filter_size"],
                         nproc=nproc,
                         action="bfdistance",
@@ -1038,11 +1042,30 @@ def update(
                         get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters").glob("*.bf.gz"))
                     ]
 
-                    if len(set(selected_genomes).difference(set(previously_selected_genomes))) > 0:
+                    add_selected_genomes = set(selected_genomes).difference(set(previously_selected_genomes))
+                    remove_selected_genomes = set(previously_selected_genomes).difference(set(selected_genomes))
+
+                    if len(remove_selected_genomes) > 0:
                         # In case the representative genomes of the species did not change
                         # Remove the taxonomy from the rebuild list
                         rebuild.remove(taxonomy)
                         build_cluster = False
+
+                        # Remove old representatives
+                        for genome_path in Path(os.path.join(tax_dir, "genomes")).glob("*.gz"):
+                            _, genome_name, _, _ = get_file_info(str(genome_path))
+
+                            if genome_name in remove_selected_genomes:
+                                os.unlink(str(genome_path))
+
+                                os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
+                        
+                        # Add new representatives
+                        for genome_path in Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz"):
+                            _, genome_name, _, _ = get_file_info(str(genome_path))
+
+                            if genome_name in add_selected_genomes:
+                                os.symlink(str(genome_path), os.path.join(tax_dir, "genomes", os.path.basename(str(genome_path))))
 
                 if build_cluster:
                     # Remove the old index if it exists
@@ -1061,6 +1084,7 @@ def update(
                     howdesbt(
                         tax_dir,
                         kmer_len=kmer_len,
+                        min_occurrences=min_kmer_occurrences,
                         filter_size=filter_size,
                         nproc=nproc,
                         flat_structure=False,

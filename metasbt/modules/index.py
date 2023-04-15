@@ -337,6 +337,16 @@ def read_params():
             "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes"
         ),
     )
+    filter_size_group.add_argument(
+        "--min-kmer-occurrences",
+        type=number(int, minv=0),
+        default=2,
+        dest="min_kmer_occurrences",
+        help=(
+            "Minimum number of occurrences of kmers to be considered for estimating the bloom filter size "
+            "and for building the bloom filter files"
+        ),
+    )
 
     # Group of arguments for estimating the optimal kmer size
     kitsune_group = p.add_argument_group("Kitsune: Estimation of the optimal kmer size")
@@ -1119,6 +1129,7 @@ def estimate_bf_size_and_howdesbt(
     strains_dir: str,
     tmp_dir: str,
     kmer_len: int = 21,
+    min_kmer_occurrences: int = 2,
     prefix: str = "genomes",
     limit_number: Optional[int] = None,
     limit_percentage: float = 100.0,
@@ -1132,11 +1143,13 @@ def estimate_bf_size_and_howdesbt(
     :param strains_dir:             Path to the strains folder
     :param tmp_dir:                 Path to the temporary folder
     :param kmer_len:                Kmer size
+    :param min_kmer_occurrences:    Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
     :param prefix:                  Prefix of the ntCard output histogram file
     :param limit_number:            Maximum number of genomes as input for ntCard
     :param limit_percentage:        Maximum number of genomes as input for ntCard (in percentage)
     :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
     :param nproc:                   Make ntCard and HowDeSBT parallel
+    :return:                        Strains folder path and list of selected representative genomes
     """
 
     genomes_dir = os.path.join(strains_dir, "genomes")
@@ -1160,6 +1173,7 @@ def estimate_bf_size_and_howdesbt(
     filter_size = estimate_bf_size(
         genomes_paths_sub,
         kmer_len=kmer_len,
+        min_occurrences=min_kmer_occurrences,
         prefix=prefix,
         tmp_dir=tmp_dir,
         nproc=nproc,
@@ -1173,6 +1187,7 @@ def estimate_bf_size_and_howdesbt(
     howdesbt(
         strains_dir,
         kmer_len=kmer_len,
+        min_occurrences=min_kmer_occurrences,
         filter_size=filter_size,
         nproc=nproc,
         flat_structure=True,
@@ -1189,7 +1204,7 @@ def estimate_bf_size_and_howdesbt(
     if len(genomes_paths) <= 3:
         # 3 is the maximum number of selected species
         # as it is also the minimum number of genomes for computing boundaries
-        selected_genomes = genomes_paths
+        selected_genomes = [get_file_info(genome_path)[1] for genome_path in genomes_paths]
 
     else:
         # Get the bloom filters file paths
@@ -1200,6 +1215,7 @@ def estimate_bf_size_and_howdesbt(
             bf_filepaths,
             os.path.join(tmp_dir, "howdesbt"),
             kmer_len,
+            min_occurrences=min_kmer_occurrences,
             filter_size=filter_size,
             nproc=nproc,
             action="bfdistance",
@@ -1237,6 +1253,7 @@ def index(
     min_genomes: float = 1.0,
     estimate_filter_size: bool = True,
     increase_filter_size: float = 0.0,
+    min_kmer_occurrences: int = 2,
     estimate_kmer_size: bool = True,
     limit_estimation_number: Optional[int] = None,
     limit_estimation_percentage: float = 100.0,
@@ -1270,6 +1287,7 @@ def index(
     :param min_genomes:                 Consider species with a minimum number of genomes
     :param estimate_filter_size:        Run ntCard to estimate the most appropriate bloom filter size
     :param increase_filter_size:        Increase the estimated bloom filter size by the specified percentage
+    :param min_kmer_occurrences:        Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
     :param estimate_kmer_size:          Run kitsune to estimate the best kmer size
     :param limit_estimation_number:     Number of genomes per group as input for kitsune and ntCard
     :param limit_estimation_percentage: Percentage on the total number of genomes per group as input for kitsune and ntCard
@@ -1467,6 +1485,7 @@ def index(
 
     # Add cluster counter
     with open(manifest_filepath, "a+") as manifest:
+        manifest.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
         manifest.write("--clusters-counter {}\n".format(clusters_counter))
 
     # Limited set of genomes in case of --estimate-kmer-size and/or --estimate-filter-size
@@ -1521,6 +1540,7 @@ def index(
         filter_size = estimate_bf_size(
             genomes_paths_sub,
             kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
             prefix="genomes",
             tmp_dir=tmp_dir,
             nproc=nproc,
@@ -1544,6 +1564,7 @@ def index(
         howdesbt_partial = partial(
             howdesbt,
             kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
             filter_size=filter_size,
             nproc=nproc,
             flat_structure=flat_structure,
@@ -1601,7 +1622,7 @@ def index(
                             for genome in selected_genomes:
                                 os.symlink(
                                     os.path.join(strains_dir, "genomes", "{}.fna.gz".format(genome)),
-                                    os.path.join(species_dir, "genomes")
+                                    os.path.join(species_dir, "genomes", "{}.fna.gz".format(genome))
                                 )
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
@@ -1771,6 +1792,7 @@ def main() -> None:
         min_genomes=args.min_genomes,
         estimate_filter_size=args.estimate_filter_size,
         increase_filter_size=args.increase_filter_size,
+        min_kmer_occurrences=args.min_kmer_occurrences,
         estimate_kmer_size=args.estimate_kmer_size,
         limit_estimation_number=args.limit_estimation_number,
         limit_estimation_percentage=args.limit_estimation_percentage,
