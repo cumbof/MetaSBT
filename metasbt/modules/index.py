@@ -1129,7 +1129,7 @@ def estimate_bf_size_and_howdesbt(
     Wrapper around ntCard and HowDeSBT for building strains SBTs with species-specific bloom filter sizes
     The structure is always flat here
 
-    :param strains_dir:              Path to the strains folder
+    :param strains_dir:             Path to the strains folder
     :param tmp_dir:                 Path to the temporary folder
     :param kmer_len:                Kmer size
     :param prefix:                  Prefix of the ntCard output histogram file
@@ -1143,6 +1143,8 @@ def estimate_bf_size_and_howdesbt(
 
     if not os.path.isdir(genomes_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genomes_dir)
+
+    os.makedirs(tmp_dir, exist_ok=True)
 
     genomes_paths = [str(path) for path in Path(genomes_dir).glob("*.fna.gz")]
 
