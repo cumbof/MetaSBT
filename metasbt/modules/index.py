@@ -1195,6 +1195,7 @@ def estimate_bf_size_and_howdesbt(
 
     # Define the manifest file
     with open(os.path.join(strains_dir, "manifest.txt"), "w+") as manifest:
+        manifest.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
         manifest.write("--kmer-len {}\n".format(kmer_len))
         manifest.write("--filter-size {}\n".format(filter_size))
 
