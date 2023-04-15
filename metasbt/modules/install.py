@@ -11,6 +11,7 @@ import argparse as ap
 import errno
 import math
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -306,7 +307,11 @@ def main() -> None:
     _, _, free_space_bytes = shutil.disk_usage(args.install_in)
 
     # Compare the database size with the free space on disk
-    tarball_size_bytes = convert_size(float(tarball_size[:-2]), tarball_size[-2:], "B")
+    tarball_size_bytes = convert_size(
+        float(tarball_size[:-2]),
+        re.compile("[^a-zA-Z]").sub("", tarball_size[-2:]),
+        "B"
+    )
 
     # Databases are uncompressed tarballs, so they are approximately the same size as their extracted content
     # Consider twice the space in case we have to download and extract the tarball
@@ -337,7 +342,8 @@ def main() -> None:
 
     for subdir, _, _ in os.walk(os.path.join(args.install_in, os.path.splitext(os.path.basename(tarball_filepath))[0])):
         dirname = os.path.basename(subdir)
-        if dirname[:3] in taxonomic_levels_prefixes:
+
+        if dirname == os.path.splitext(os.path.basename(tarball_filepath))[0] or dirname[:3] in taxonomic_levels_prefixes:
             # Edit file with the list of paths to the bloom filter files under this taxonomic level
             fix_paths(
                 os.path.join(subdir, "{}.txt".format(dirname)),
@@ -345,13 +351,8 @@ def main() -> None:
                 args.install_in
             )
 
-            # Gunzip the bloom filter representation of this taxonomic level
-            bf_filepath = os.path.join(subdir, "{}.bf.gz".format(dirname))
-            
-            with open(os.path.splitext(bf_filepath)[0], "w+") as bf_file:
-                run(["gzip", "-dc", bf_filepath], stdout=bf_file, stderr=bf_file)
-
-            os.unlink(bf_filepath)
+            # Gunzip the bloom filter representation of this taxonomic level            
+            run(["gzip", "-d", os.path.join(subdir, "{}.bf.gz".format(dirname))])
 
             # Edit the HowDeSBT index file
             fix_paths(
@@ -359,6 +360,23 @@ def main() -> None:
                 os.path.splitext(os.path.basename(tarball_filepath))[0],
                 args.install_in
             )
+
+            if dirname[:3] in taxonomic_levels_prefixes and dirname[0] == "s":
+                # This is the species level
+                # Fix paths and uncompress the bloom filter file in the strains folder
+                fix_paths(
+                    os.path.join(subdir, "strains", "strains.txt"),
+                    os.path.splitext(os.path.basename(tarball_filepath))[0],
+                    args.install_in
+                )
+
+                run(["gzip", "-d", os.path.join(subdir, "strains", "strains.bf.gz")])
+
+                fix_paths(
+                    os.path.join(subdir, "strains", "index", "index.detbrief.sbt"),
+                    os.path.splitext(os.path.basename(tarball_filepath))[0],
+                    args.install_in
+                )
 
 
 if __name__ == "__main__":
