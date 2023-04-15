@@ -5,7 +5,7 @@ Create a MetaSBT database tarball
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__date__ = "Apr 15, 2023"
 
 import argparse as ap
 import errno
@@ -102,6 +102,11 @@ def main() -> None:
                 # Do the same for the genomes folder under strains
                 Path(os.path.join(subdir, "strains", "genomes", "exclude.tag")).touch()
                 remove.append(os.path.join(subdir, "strains", "genomes", "exclude.tag"))
+
+                if os.path.isdir(os.path.join(subdir, "strains", "tmp")):
+                    #Also exclude the tmp folders at the strain level
+                    Path(os.path.join(subdir, "strains", "tmp", "exclude.tag")).touch()
+                    remove.append(os.path.join(subdir, "strains", "tmp", "exclude.tag"))
 
     # Also compress the database main bloom filter
     db_bf_filepath = os.path.join(args.db_dir, "{}.bf".format(os.path.basename(args.db_dir)))
