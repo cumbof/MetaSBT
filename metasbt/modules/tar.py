@@ -77,6 +77,10 @@ def main() -> None:
     if os.path.isfile(args.out_file):
         raise Exception("The output tarball already exists")
 
+    if args.db_dir.endswith(os.sep):
+        # Trim the last char out of the string
+        args.db_dir = args.db_dir[:-1]
+
     # kingdom, phylum, class, order, family, genus, species
     taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
 
@@ -92,40 +96,57 @@ def main() -> None:
             with open("{}.gz".format(bf_filepath), "w+") as bf_file:
                 run(["gzip", "-c", bf_filepath], stdout=bf_file, stderr=bf_file)
 
+            with open(os.path.join(subdir, ".tagignore"), "w+") as exclude_tag:
+                exclude_tag.write("{}.bf\n".format(dirname))
+                exclude_tag.write("howdesbt.log")
+
             remove.append("{}.gz".format(bf_filepath))
+            remove.append(os.path.join(subdir, ".tagignore"))
 
             if dirname[0] == "s":
-                # In case of species level, tag the genomes folders to be excluded from the tarball
-                Path(os.path.join(subdir, "genomes", "exclude.tag")).touch()
-                remove.append(os.path.join(subdir, "genomes", "exclude.tag"))
+                # Compress the bloom filter representation of the strains
+                strains_bf_filepath = os.path.join(subdir, "strains", "strains.bf")
 
-                # Do the same for the genomes folder under strains
-                Path(os.path.join(subdir, "strains", "genomes", "exclude.tag")).touch()
-                remove.append(os.path.join(subdir, "strains", "genomes", "exclude.tag"))
+                with open("{}.gz".format(strains_bf_filepath), "w+") as bf_file:
+                    run(["gzip", "-c", strains_bf_filepath], stdout=bf_file, stderr=bf_file)
 
-                if os.path.isdir(os.path.join(subdir, "strains", "tmp")):
-                    #Also exclude the tmp folders at the strain level
-                    Path(os.path.join(subdir, "strains", "tmp", "exclude.tag")).touch()
-                    remove.append(os.path.join(subdir, "strains", "tmp", "exclude.tag"))
+                with open(os.path.join(subdir, "genomes", ".tagignore"), "a+") as exclude_tag:
+                    exclude_tag.write("*")
 
-    # Also compress the database main bloom filter
+                with open(os.path.join(subdir, "strains", ".tagignore"), "a+") as exclude_tag:
+                    exclude_tag.write("strains.bf\n")
+                    exclude_tag.write("tmp")
+
+                with open(os.path.join(subdir, "strains", "genomes", ".tagignore"), "a+") as exclude_tag:
+                    exclude_tag.write("*")
+
+                remove.append("{}.gz".format(strains_bf_filepath))
+                remove.append(os.path.join(subdir, "genomes", ".tagignore"))
+                remove.append(os.path.join(subdir, "strains", ".tagignore"))
+                remove.append(os.path.join(subdir, "strains", "genomes", ".tagignore"))
+
+    # Also compress the database main bloom filter file
     db_bf_filepath = os.path.join(args.db_dir, "{}.bf".format(os.path.basename(args.db_dir)))
 
     if os.path.isfile(db_bf_filepath):
-        run(["gzip", db_bf_filepath], silence=True)
+        with open("{}.gz".format(db_bf_filepath), "w+") as bf_file:
+            run(["gzip", "-c", db_bf_filepath], stdout=bf_file, stderr=bf_file)
+
+        with open(os.path.join(args.db_dir, ".tagignore"), "w+") as exclude_tag:
+            exclude_tag.write("{}.bf".format(os.path.basename(args.db_dir)))
 
         remove.append("{}.gz".format(db_bf_filepath))
 
     # Create the tarball
-    # Exclude the "genomes" folders and the uncompressed bloom filter files
     run(
         [
             "tar",
-            "--exclude-tag-all='exclude.tag'",
-            "--exclude='*.bf'",
             "-cf",
             args.out_file,
-            args.db_dir
+            "--exclude-ignore=.tagignore",
+            "-C",
+            os.path.dirname(args.db_dir),
+            os.path.basename(args.db_dir)
         ],
         silence=True
     )
