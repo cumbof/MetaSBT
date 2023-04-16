@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__date__ = "Apr 15, 2023"
 
 import argparse as ap
 import errno
@@ -122,6 +122,16 @@ def read_params():
         help=(
             "Specify the input genome files extension. "
             "All the input genomes must have the same file extension before running this module"
+        ),
+    )
+    general_group.add_argument(
+        "--fast-profile",
+        action="store_true",
+        default=False,
+        dest="fast_profile",
+        help=(
+            "Query the tree with the representative genomes at the species level "
+            "instead of the strains tree (fast but low precision in establishing the closest genome)"
         ),
     )
     general_group.add_argument(
@@ -281,6 +291,7 @@ def profile_and_assign(
     tmp_genomes_dir: str,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
+    fast_profile: bool = False,
     taxonomies: Optional[dict] = None,
     dereplicate: bool = False,
     similarity: float = 100.0,
@@ -299,6 +310,8 @@ def profile_and_assign(
     :param tmp_genomes_dir:         Path to the temporary folder for uncompressing input genomes
     :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
+    :param fast_profile:            Query the tree with the representative genomes under the species level instead
+                                    of the strains tree (fast but low precision in establishing the closest genome)
     :param taxonomies:              Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
     :param dereplicate:             Enable dereplication of input genome against genomes in the closest cluster
     :param similarity:              Exclude input genome if its similarity with the closest genome in the database exceed this threshold
@@ -341,26 +354,28 @@ def profile_and_assign(
     # Run the profiler to establish the closest genome and the closest group
     # for each taxonomic level in the tree
     # The profile module is in the same folder of the update module
-    run(
-        [
-            sys.executable,
-            os.path.join(SCRIPT_DIR, "profile.py"),
-            "--input-file",
-            filepath,
-            "--input-id",
-            filepath,
-            "--input-type",
-            "genome",
-            "--tree",
-            os.path.join(db_dir, "index", "index.detbrief.sbt"),
-            "--expand",
-            "--output-dir",
-            os.path.join(tmp_dir, "profiling"),
-            "--output-prefix",
-            genome_name,
-        ],
-        silence=True,
-    )
+    profiler = [
+        sys.executable,
+        os.path.join(SCRIPT_DIR, "profile.py"),
+        "--input-file",
+        filepath,
+        "--input-id",
+        filepath,
+        "--input-type",
+        "genome",
+        "--tree",
+        os.path.join(db_dir, "index", "index.detbrief.sbt"),
+        "--expand",
+        "--output-dir",
+        os.path.join(tmp_dir, "profiling"),
+        "--output-prefix",
+        genome_name,
+    ]
+
+    if fast_profile:
+        profiler.append("--fast")
+
+    run(profiler, silence=True)
 
     # Define the path to the profiler output file
     profile_path = os.path.join(tmp_dir, "profiling", "{}__profiles.tsv".format(genome_name))
@@ -592,6 +607,7 @@ def update(
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
     taxa_map: Optional[str] = None,
+    fast_profile: bool = False,
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
@@ -616,6 +632,8 @@ def update(
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
     :param taxa_map:                Path to the file with the mapping between the input genome names and their taxonomic labels
                                     Used only in case of input reference genomes
+    :param fast_profile:            Query the tree with the representative genomes under the species level instead
+                                    of the strains tree (fast but low precision in establishing the closest genome)
     :param completeness:            Threshold on the CheckM completeness
     :param contamination:           Threshold on the CheckM contamination
     :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
@@ -772,6 +790,7 @@ def update(
         tmp_genomes_dir=tmp_genomes_dir,
         boundaries=boundaries,
         boundary_uncertainty=boundary_uncertainty,
+        fast_profile=fast_profile,
         taxonomies=taxonomies,
         dereplicate=dereplicate,
         similarity=similarity,
@@ -1136,6 +1155,7 @@ def main() -> None:
         boundaries_table,
         boundary_uncertainty=args.boundary_uncertainty,
         taxa_map=args.taxa,
+        fast_profile=args.fast_profile,
         completeness=args.completeness,
         contamination=args.contamination,
         dereplicate=args.dereplicate,
