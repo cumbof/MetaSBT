@@ -6,7 +6,7 @@ between all the genomes under a specific cluster
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__date__ = "Apr 17, 2023"
 
 import argparse as ap
 import errno
@@ -195,24 +195,18 @@ def define_boundaries(
             for line in references:
                 line = line.strip()
                 if line:
+                    genome_path = os.path.join(
+                        os.path.dirname(str(references_path)),
+                        "strains",
+                        "filters",
+                        "{}.bf.gz".format(line),
+                    )
+
                     if level_id == "species":
-                        samples[line] = [
-                            os.path.join(
-                                os.path.dirname(str(references_path)),
-                                "strains",
-                                "filters",
-                                "{}.bf.gz".format(line),
-                            )
-                        ]
+                        samples[line] = [genome_path]
 
                     else:
-                        samples[next_level].append(
-                            os.path.join(
-                                os.path.dirname(str(references_path)),
-                                "filters",
-                                "{}.bf.gz".format(line),
-                            )
-                        )
+                        samples[next_level].append(genome_path)
 
                     references_count += 1
 
