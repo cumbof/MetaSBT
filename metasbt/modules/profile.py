@@ -7,7 +7,7 @@ single sequences are merged together
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 15, 2023"
+__date__ = "Apr 18, 2023"
 
 import argparse as ap
 import errno
@@ -217,7 +217,7 @@ def profile_genome(
     fast: bool = False,
     stop_at: Optional[str] = None,
     output_prefix: Optional[str] = None,
-    best_uncertainty: float = 5.0,
+    best_uncertainty: float = 2.0,
     logger: Optional[Logger] = None,
     verbose: bool = False,
 ) -> None:
@@ -320,26 +320,22 @@ def profile_genome(
 
                             # Update the number of common and total kmers for the current sequence
                             hits = line_split[1].split("/")
+                            
                             matches_kmers[node]["common"] += int(hits[0])
                             matches_kmers[node]["total"] += int(hits[1])
+                            matches_kmers[node]["score"] = round(matches_kmers[node]["common"] / matches_kmers[node]["total"], 2)
             
             # Search for the best match
-            # The best match is defined as the genome with the highest number of kmers in common with the input sequence
-            best_match = sorted(matches_kmers.keys(), key=lambda match: matches_kmers[match]["common"])[-1]
-            best_kmers = matches_kmers[best_match]["common"]
+            # The best match is defined as the genome with the highest score
+            best_match = sorted(matches_kmers.keys(), key=lambda match: matches_kmers[match]["score"])[-1]
+            best_score = matches_kmers[best_match]["score"]
 
-            # Define a threshold on the best number of common kmers
-            common_kmers_threshold = int((best_kmers * best_uncertainty) / 100.0)
+            # Define a threshold on the best score
+            score_threshold = float((best_score * best_uncertainty) / 100.0)
 
             # Get the best matches
             curr_best_matches = {"{}{}".format("{}|".format(curr_taxonomy) if curr_taxonomy else "", match): matches_kmers[match]
-                                 for match in matches_kmers if matches_kmers[match]["common"] >= common_kmers_threshold}
-
-            best_matches.update(curr_best_matches)
-
-            if level.startswith("s__"):
-                # There is nothing to query after the species tree
-                break
+                                 for match in matches_kmers if matches_kmers[match]["score"] >= (best_score - score_threshold)}
 
             # Stop querying trees
             if not expand:
@@ -353,16 +349,61 @@ def profile_genome(
                     # Compare the first character of the current taxonomic level and the one specified with --stop_at
                     break
 
+            selected_best_matches = dict()
+
+            same_level_matches = {
+                match: best_matches[match] for match in best_matches if match.split("|")[-1].startswith(best_match.split("|")[-1][:3])
+            }
+
+            if same_level_matches:
+                same_level_best = sorted(same_level_matches.keys(), key=lambda match: same_level_matches[match]["score"])[-1]
+                same_level_best_score = same_level_matches[same_level_best]["score"]
+                same_level_best_score_threshold = float((same_level_best_score * best_uncertainty) / 100.0)
+
             # Keep querying in case of --expand
             for match in curr_best_matches:
-                next_trees.append(
-                    os.path.join(
-                        level_dir,
-                        match,
-                        "index",
-                        "index.detbrief.sbt"
+                process_match = False
+
+                if not same_level_matches:
+                    selected_best_matches[match] = curr_best_matches[match]
+                    process_match = True
+
+                elif curr_best_matches[match]["score"] >= (same_level_best_score - same_level_best_score_threshold):
+                    selected_best_matches[match] = curr_best_matches[match]
+                    process_match = True
+
+                    if same_level_matches:
+                        curr_best_score_threshold = float((curr_best_matches[match]["score"] * best_uncertainty) / 100.0)
+
+                        if same_level_best_score < (curr_best_matches[match]["score"] - curr_best_score_threshold):
+                            for same_level_match in list(best_matches.keys()):
+                                if same_level_match.split("|")[-1].startswith(best_match.split("|")[-1][:3]):
+                                    del best_matches[same_level_match]
+                                    del same_level_matches[same_level_match]
+
+                if process_match and not level.startswith("s__"):
+                    # Convert match to level path
+                    match_split = match.split("|")
+
+                    if level in match_split:
+                        match_split = match_split[match_split.index(level)+1:]
+
+                    match_partial = os.sep.join(match_split)
+
+                    # Add the path to the tree definition file to the tree bucket
+                    next_trees.append(
+                        os.path.join(
+                            level_dir,
+                            match_partial,
+                            "index",
+                            "index.detbrief.sbt"
+                        )
                     )
-                )
+
+            best_matches.update(selected_best_matches)
+
+            if same_level_matches:
+                best_matches.update(same_level_matches)
 
     # Define the output profile path
     output_profile = os.path.join(output_dir, "{}__profiles.tsv".format(output_prefix))
@@ -399,18 +440,22 @@ def profile_genome(
                 )
             )
 
-            best_level_match = sorted(
-                best_level_matches,
-                key=lambda match: round(best_matches[match]["common"] / best_matches[match]["total"], 2)
-            )[-1]
+            best_level_match = sorted(best_level_matches, key=lambda match: best_matches[match]["score"])[-1]
 
-            best_level_match_score = round(best_matches[best_level_match]["common"] / best_matches[best_level_match]["total"], 2)
+            equally_best = list(
+                filter(
+                    lambda match: best_matches[match]["score"] == best_matches[best_level_match]["score"],
+                    best_level_matches
+                )
+            )
+
+            best_common = sorted(equally_best, key=lambda match: best_matches[match]["common"])[-1]
 
             printline(
                 "Closest {}: {} (score {})".format(
-                    level if not level.startswith("t") else "genome",
-                    best_level_match,
-                    best_level_match_score,
+                    level if not level.startswith("t__") else "genome",
+                    best_common,
+                    best_matches[best_common]["score"],
                 )
             )
 
@@ -420,12 +465,12 @@ def profile_genome(
                     "{}\t{}\t{}\t{}\t{}\n".format(
                         input_id,  # ID of the input query
                         level if not level.startswith("t") else "genome",  # Taxonomic level name
-                        best_level_match,  # Lineage
+                        best_common,  # Lineage
                         "{}/{}".format(
-                            best_matches[best_level_match]["common"],  # Number of kmers in common
-                            best_matches[best_level_match]["total"],  # Total number of kmers in query
+                            best_matches[best_common]["common"],  # Number of kmers in common
+                            best_matches[best_common]["total"],  # Total number of kmers in query
                         ),
-                        best_level_match_score,  # Score
+                        best_matches[best_common]["score"],  # Score
                     )
                 )
 
