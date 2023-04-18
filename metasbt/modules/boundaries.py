@@ -195,20 +195,29 @@ def define_boundaries(
             for line in references:
                 line = line.strip()
                 if line:
-                    genome_path = os.path.join(
-                        os.path.dirname(str(references_path)),
-                        "strains",
-                        "filters",
-                        "{}.bf.gz".format(line),
-                    )
-
                     if level_id == "species":
+                        genome_path = os.path.join(
+                            os.path.dirname(str(references_path)),
+                            "strains",
+                            "filters",
+                            "{}.bf.gz".format(line),
+                        )
+
                         samples[line] = [genome_path]
 
-                    else:
-                        samples[next_level].append(genome_path)
+                        references_count += 1
 
-                    references_count += 1
+                    else:
+                        genome_path = os.path.join(
+                            os.path.dirname(str(references_path)),
+                            "filters",
+                            "{}.bf.gz".format(line),
+                        )
+
+                        if os.path.isfile(genome_path):
+                            samples[next_level].append(genome_path)
+
+                            references_count += 1
 
     # In case the current taxonomic level is not the species level
     if level_id != "species":
