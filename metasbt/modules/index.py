@@ -339,7 +339,7 @@ def read_params():
     )
     filter_size_group.add_argument(
         "--min-kmer-occurrences",
-        type=number(int, minv=0),
+        type=number(int, minv=1),
         default=2,
         dest="min_kmer_occurrences",
         help=(
