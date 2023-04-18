@@ -125,6 +125,10 @@ def main() -> None:
                 remove.append(os.path.join(subdir, "strains", ".tagignore"))
                 remove.append(os.path.join(subdir, "strains", "genomes", ".tagignore"))
 
+    with open(os.path.join(args.db_dir, ".tagignore"), "w+") as exclude_tag:
+        exclude_tag.write("*.log\n")
+        exclude_tag.write("*.sh\n")
+
     # Also compress the database main bloom filter file
     db_bf_filepath = os.path.join(args.db_dir, "{}.bf".format(os.path.basename(args.db_dir)))
 
@@ -132,10 +136,12 @@ def main() -> None:
         with open("{}.gz".format(db_bf_filepath), "w+") as bf_file:
             run(["gzip", "-c", db_bf_filepath], stdout=bf_file, stderr=bf_file)
 
-        with open(os.path.join(args.db_dir, ".tagignore"), "w+") as exclude_tag:
+        with open(os.path.join(args.db_dir, ".tagignore"), "a+") as exclude_tag:
             exclude_tag.write("{}.bf".format(os.path.basename(args.db_dir)))
 
         remove.append("{}.gz".format(db_bf_filepath))
+
+    remove.append(os.path.join(args.db_dir, ".tagignore"))
 
     # Create the tarball
     run(
