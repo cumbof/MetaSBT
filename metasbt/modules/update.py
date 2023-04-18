@@ -665,7 +665,7 @@ def update(
         min_kmer_occurrences = manifest["min_kmer_occurrences"]
 
         # Check whether the kmer length and the filter size have been successfully retrieved
-        if kmer_len == 0 or filter_size == 0 or min_kmer_occurrences < 2:
+        if kmer_len == 0 or filter_size == 0 or min_kmer_occurrences < 1:
             raise ValueError("Unable to retrieve data from the manifest file:\n{}".format(manifest_filepath))
 
         if clusters_counter == 0:
