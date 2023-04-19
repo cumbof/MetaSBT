@@ -600,6 +600,182 @@ def profile_and_assign(
     return to_known_taxa, rebuild, unassigned
 
 
+def build_cluster(
+    taxonomy: str,
+    db_dir: Optional[str] = None,
+    tmp_dir: Optional[str] = None,
+    kmer_len: int = 4,
+    filter_size: int = 2,
+    min_kmer_occurrences: int = 2,
+    nproc: int = 1,
+    logger: Optional[Logger] = None,
+    verbose: bool = False,
+) -> Tuple[str, bool]:
+    """
+    Build a cluster under a specific taxonomic level
+
+    :param taxonomy:                Taxonomic label of the cluster up to a specific taxonomic level
+    :param db_dir:                  Path to the root folder of the MetaSBT database
+    :param tmp_dir:                 Path to the temporary folder
+    :param kmer_len:                Size of the kmers
+    :param min_kmer_occurrences:    Minimum number of kmers occurrences
+    :param nproc:                   Make it parallel
+    :param logger:                  Logger object
+    :param verbose:                 Print messages on the stdout
+    :return:                        The taxonomic label and a boolean flag that is True in case the
+                                    the clusters at the upper taxonomic levels should not be rebuilt
+    """
+
+    # Define a partial println function to avoid specifying logger and verbose
+    # every time the println function is invoked
+    printline = partial(println, logger=logger, verbose=verbose)
+
+    build = True
+    remove_from_rebuild = False
+
+    if verbose:
+        printline("\t{}".format(taxonomy))
+    
+    tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
+
+    if taxonomy.split("|")[-1].startswith("s__"):
+        # In case the taxonomy is complete at the species level
+        # Load manifest
+        strains_manifest_filepath = os.path.join(tax_dir, "strains", "manifest.txt")
+
+        if not os.path.isfile(strains_manifest_filepath):
+            # Estimate a proper bloom filter size
+            strains_filter_size = estimate_bf_size(
+                genomes=list(Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz")),
+                kmer_len=kmer_len,
+                min_occurrences=min_kmer_occurrences,
+                prefix="genomes",
+                tmp_dir=os.path.join(tax_dir, "strains", "tmp"),
+                nproc=nproc,
+            )
+
+            with open(strains_manifest_filepath, "w+") as strains_manifest_file:
+                strains_manifest_file.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
+                strains_manifest_file.write("--kmer-len {}\n".format(kmer_len))
+                strains_manifest_file.write("--filter-size {}\n".format(strains_filter_size))
+
+        strains_manifest = load_manifest(strains_manifest_filepath)
+        
+        # Remove the old index
+        if os.path.isdir(os.path.join(tax_dir, "strains", "index")):
+            shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
+
+        # Rebuild the strains SBT first
+        # Use the species-specific bloom filter size in manifest
+        howdesbt(
+            os.path.join(tax_dir, "strains"),
+            kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
+            filter_size=strains_manifest["filter_size"],
+            nproc=nproc,
+            flat_structure=True,
+        )
+
+        # Select the representative genomes
+        selected_genomes = list()
+
+        # Get the bloom filters file paths
+        bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
+
+        if len(bf_filepaths) <= 3:
+            # 3 is the maximum number of selected species
+            # as it is also the minimum number of genomes for computing boundaries
+            selected_genomes = [
+                get_file_info(bf_path, check_supported=False, check_exists=False)[1] for bf_path in bf_filepaths
+            ]
+
+        else:
+            # Compute the theta distance between genomes
+            bfdistance_theta = bfaction(
+                bf_filepaths,
+                os.path.join(tmp_dir, "howdesbt_strains"),
+                kmer_len,
+                min_occurrences=min_kmer_occurrences,
+                filter_size=strains_manifest["filter_size"],
+                nproc=nproc,
+                action="bfdistance",
+                mode="theta"
+            )
+
+            # Sum the distances to get the final score
+            bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
+
+            # Sort genomes according to the sum of their distances with all the other genomes
+            sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+
+            # First and last genomes are those that minimize and maximize the distance with all the other genomes
+            selected_genomes.append(sorted_genomes[0])
+            selected_genomes.append(sorted_genomes[-1])
+
+            # Also select a genome in the middles of min and max distances
+            selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
+
+        # Get the list of previously selected representative genomes
+        previously_selected_genomes = [
+            get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters")).glob("*.bf.gz")
+        ]
+
+        add_selected_genomes = set(selected_genomes).difference(set(previously_selected_genomes))
+        remove_selected_genomes = set(previously_selected_genomes).difference(set(selected_genomes))                        
+
+        if len(remove_selected_genomes) > 0:
+            # Remove old representatives
+            for genome_path in Path(os.path.join(tax_dir, "genomes")).glob("*.gz"):
+                _, genome_name, _, _ = get_file_info(str(genome_path))
+
+                if genome_name in remove_selected_genomes:
+                    os.unlink(str(genome_path))
+
+                    os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
+        
+        if len(add_selected_genomes) > 0:
+            # Create the genomes folder under the species level in case of a new species
+            os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
+
+            # Add new representatives
+            for genome_path in Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz"):
+                _, genome_name, _, _ = get_file_info(str(genome_path))
+
+                if genome_name in add_selected_genomes:
+                    os.symlink(str(genome_path), os.path.join(tax_dir, "genomes", os.path.basename(str(genome_path))))
+
+        if not add_selected_genomes and not remove_selected_genomes:
+            # In case the representative genomes of the species did not change
+            # Remove the taxonomy from the rebuild list
+            remove_from_rebuild = True
+            build = False
+
+    if build:
+        # Remove the old index if it exists
+        if os.path.isdir(os.path.join(tax_dir, "index")):
+            shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
+
+        # Remove filters
+        if os.path.isdir(os.path.join(tax_dir, "filters")):
+            shutil.rmtree(os.path.join(tax_dir, "filters"), ignore_errors=True)
+
+        # Also remove the copy of the root node if it exists
+        if os.path.isfile(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir)))):
+            os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
+
+        # Rebuild the index with HowDeSBT
+        howdesbt(
+            tax_dir,
+            kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
+            filter_size=filter_size,
+            nproc=nproc,
+            flat_structure=False,
+        )
+
+    return taxonomy, remove_from_rebuild
+
+
 def update(
     input_list: str,
     input_type: str,
@@ -986,6 +1162,10 @@ def update(
 
     else:
         printline("Updating the database")
+
+        level_names = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
+        level_ids = ["k", "p", "c", "o", "f", "g", "s"]
+
         # Extract the taxonomic levels from the list of taxa that must be rebuilt
         # Process all the species first, then all the genera, and so on up to the kingdom level
         for i in range(6, -1, -1):
@@ -1000,147 +1180,41 @@ def update(
                 # Build the partial taxonomic label
                 taxalist.add("|".join(levels[: i + 1]))
 
-            # Rebuild the sequence bloom trees
-            for taxonomy in taxalist:
-                build_cluster = True
+            level_id = list(taxalist)[0][0]
 
-                printline("\t{}".format(taxonomy))
-                tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
+            printline("Rebuilding {}".format(level_names[level_ids.index(level_id)]))
 
-                if taxonomy.split("|")[-1].startswith("s__"):
-                    # In case the taxonomy is complete at the species level
-                    # Load manifest
-                    strains_manifest_filepath = os.path.join(tax_dir, "strains", "manifest.txt")
+            build_cluster_partial = partial(
+                build_cluster,
+                db_dir=db_dir,
+                tmp_dir=tmp_dir,
+                kmer_len=kmer_len,
+                filter_size=filter_size,
+                min_kmer_occurrences=min_kmer_occurrences,
+                nproc=nproc,
+                logger=logger if parallel == 1 else None,
+                verbose=verbose if parallel == 1 else False,
+            )
 
-                    if not os.path.isfile(strains_manifest_filepath):
-                        # Estimate a proper bloom filter size
-                        strains_filter_size = estimate_bf_size(
-                            genomes=list(Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz")),
-                            kmer_len=kmer_len,
-                            min_occurrences=min_kmer_occurrences,
-                            prefix="genomes",
-                            tmp_dir=os.path.join(tax_dir, "strains", "tmp"),
-                            nproc=nproc,
-                        )
+            with mp.Pool(processes=parallel) as pool, tqdm.tqdm(
+                total=len(taxalist), disable=(not verbose or parallel == 1)
+            ) as pbar:
+                # Wrapper around the update function of tqdm
+                def progress(*args):
+                    pbar.update()
 
-                        with open(strains_manifest_filepath, "w+") as strains_manifest_file:
-                            strains_manifest_file.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
-                            strains_manifest_file.write("--kmer-len {}\n".format(kmer_len))
-                            strains_manifest_file.write("--filter-size {}\n".format(strains_filter_size))
+                # Process the input genome files
+                jobs = [
+                    pool.apply_async(build_cluster_partial, args=(taxonomy,), callback=progress)
+                    for taxonomy in taxalist
+                ]
 
-                    strains_manifest = load_manifest(strains_manifest_filepath)
-                    
-                    # Remove the old index
-                    if os.path.isdir(os.path.join(tax_dir, "strains", "index")):
-                        shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
+                # Get results from jobs
+                for job in jobs:
+                    taxonomy, remove_from_rebuild = job.get()
 
-                    # Rebuild the strains SBT first
-                    # Use the species-specific bloom filter size in manifest
-                    howdesbt(
-                        os.path.join(tax_dir, "strains"),
-                        kmer_len=kmer_len,
-                        min_occurrences=min_kmer_occurrences,
-                        filter_size=strains_manifest["filter_size"],
-                        nproc=nproc,
-                        flat_structure=True,
-                    )
-
-                    # Select the representative genomes
-                    selected_genomes = list()
-
-                    # Get the bloom filters file paths
-                    bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
-
-                    if len(bf_filepaths) <= 3:
-                        # 3 is the maximum number of selected species
-                        # as it is also the minimum number of genomes for computing boundaries
-                        selected_genomes = [
-                            get_file_info(bf_path, check_supported=False, check_exists=False)[1] for bf_path in bf_filepaths
-                        ]
-
-                    else:
-                        # Compute the theta distance between genomes
-                        bfdistance_theta = bfaction(
-                            bf_filepaths,
-                            os.path.join(tmp_dir, "howdesbt_strains"),
-                            kmer_len,
-                            min_occurrences=min_kmer_occurrences,
-                            filter_size=strains_manifest["filter_size"],
-                            nproc=nproc,
-                            action="bfdistance",
-                            mode="theta"
-                        )
-
-                        # Sum the distances to get the final score
-                        bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
-
-                        # Sort genomes according to the sum of their distances with all the other genomes
-                        sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
-
-                        # First and last genomes are those that minimize and maximize the distance with all the other genomes
-                        selected_genomes.append(sorted_genomes[0])
-                        selected_genomes.append(sorted_genomes[-1])
-
-                        # Also select a genome in the middles of min and max distances
-                        selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
-
-                    # Get the list of previously selected representative genomes
-                    previously_selected_genomes = [
-                        get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters")).glob("*.bf.gz")
-                    ]
-
-                    add_selected_genomes = set(selected_genomes).difference(set(previously_selected_genomes))
-                    remove_selected_genomes = set(previously_selected_genomes).difference(set(selected_genomes))                        
-
-                    if len(remove_selected_genomes) > 0:
-                        # Remove old representatives
-                        for genome_path in Path(os.path.join(tax_dir, "genomes")).glob("*.gz"):
-                            _, genome_name, _, _ = get_file_info(str(genome_path))
-
-                            if genome_name in remove_selected_genomes:
-                                os.unlink(str(genome_path))
-
-                                os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
-                    
-                    if len(add_selected_genomes) > 0:
-                        # Create the genomes folder under the species level in case of a new species
-                        os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
-
-                        # Add new representatives
-                        for genome_path in Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz"):
-                            _, genome_name, _, _ = get_file_info(str(genome_path))
-
-                            if genome_name in add_selected_genomes:
-                                os.symlink(str(genome_path), os.path.join(tax_dir, "genomes", os.path.basename(str(genome_path))))
-
-                    if not add_selected_genomes and not remove_selected_genomes:
-                        # In case the representative genomes of the species did not change
-                        # Remove the taxonomy from the rebuild list
+                    if remove_from_rebuild:
                         rebuild.remove(taxonomy)
-                        build_cluster = False
-
-                if build_cluster:
-                    # Remove the old index if it exists
-                    if os.path.isdir(os.path.join(tax_dir, "index")):
-                        shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
-
-                    # Remove filters
-                    if os.path.isdir(os.path.join(tax_dir, "filters")):
-                        shutil.rmtree(os.path.join(tax_dir, "filters"), ignore_errors=True)
-
-                    # Also remove the copy of the root node if it exists
-                    if os.path.isfile(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir)))):
-                        os.unlink(os.path.join(tax_dir, "{}.bf".format(os.path.basename(tax_dir))))
-
-                    # Rebuild the index with HowDeSBT
-                    howdesbt(
-                        tax_dir,
-                        kmer_len=kmer_len,
-                        min_occurrences=min_kmer_occurrences,
-                        filter_size=filter_size,
-                        nproc=nproc,
-                        flat_structure=False,
-                    )
 
 
 def main() -> None:
