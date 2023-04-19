@@ -5,10 +5,11 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 18, 2023"
+__date__ = "Apr 19, 2023"
 
 import argparse as ap
 import errno
+import math
 import multiprocessing as mp
 import os
 import shutil
@@ -33,6 +34,7 @@ try:
         checkm,
         cluster,
         dereplicate_genomes,
+        estimate_bf_size,
         filter_checkm_tables,
         get_file_info,
         get_level_boundaries,
@@ -51,7 +53,7 @@ except Exception:
 TOOL_ID = "update"
 
 # Define the list of dependencies
-DEPENDENCIES = ["checkm", "howdesbt"]
+DEPENDENCIES = ["checkm", "howdesbt", "ntcard"]
 
 # Define the list of input files and folders
 FILES_AND_FOLDERS = [
@@ -400,7 +402,7 @@ def profile_and_assign(
         closest_genome: Dict[str, Any] = profile_data["genome"]
 
         # Get the closest species
-        closest_taxa = "|".join(profile_data["species"]["taxonomy"].split("|")[:-1])
+        closest_taxa = profile_data["species"]["taxonomy"]
         closest_common_kmers = profile_data["species"]["common_kmers"]
         closest_score = profile_data["species"]["score"]
 
@@ -1008,7 +1010,25 @@ def update(
                 if taxonomy.split("|")[-1].startswith("s__"):
                     # In case the taxonomy is complete at the species level
                     # Load manifest
-                    strains_manifest = load_manifest(os.path.join(tax_dir, "strains", "manifest.txt"))
+                    strains_manifest_filepath = os.path.join(tax_dir, "strains", "manifest.txt")
+
+                    if not os.path.isfile(strains_manifest_filepath):
+                        # Estimate a proper bloom filter size
+                        strains_filter_size = estimate_bf_size(
+                            genomes=list(Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz")),
+                            kmer_len=kmer_len,
+                            min_occurrences=min_kmer_occurrences,
+                            prefix="genomes",
+                            tmp_dir=os.path.join(tax_dir, "strains", "tmp"),
+                            nproc=nproc,
+                        )
+
+                        with open(strains_manifest_filepath, "w+") as strains_manifest_file:
+                            strains_manifest_file.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
+                            strains_manifest_file.write("--kmer-len {}\n".format(kmer_len))
+                            strains_manifest_file.write("--filter-size {}\n".format(strains_filter_size))
+
+                    strains_manifest = load_manifest(strains_manifest_filepath)
                     
                     # Remove the old index
                     if os.path.isdir(os.path.join(tax_dir, "strains", "index")):
@@ -1031,45 +1051,48 @@ def update(
                     # Get the bloom filters file paths
                     bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
 
-                    # Compute the theta distance between genomes
-                    bfdistance_theta = bfaction(
-                        bf_filepaths,
-                        os.path.join(tmp_dir, "howdesbt_strains"),
-                        kmer_len,
-                        min_occurrences=min_kmer_occurrences,
-                        filter_size=strains_manifest["filter_size"],
-                        nproc=nproc,
-                        action="bfdistance",
-                        mode="theta"
-                    )
+                    if len(genomes_paths) <= 3:
+                        # 3 is the maximum number of selected species
+                        # as it is also the minimum number of genomes for computing boundaries
+                        selected_genomes = [
+                            get_file_info(bf_path, check_supported=False, check_exists=False)[1] for bf_path in bf_filepaths
+                        ]
 
-                    # Sum the distances to get the final score
-                    bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
+                    else:
+                        # Compute the theta distance between genomes
+                        bfdistance_theta = bfaction(
+                            bf_filepaths,
+                            os.path.join(tmp_dir, "howdesbt_strains"),
+                            kmer_len,
+                            min_occurrences=min_kmer_occurrences,
+                            filter_size=strains_manifest["filter_size"],
+                            nproc=nproc,
+                            action="bfdistance",
+                            mode="theta"
+                        )
 
-                    # Sort genomes according to the sum of their distances with all the other genomes
-                    sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+                        # Sum the distances to get the final score
+                        bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
 
-                    # First and last genomes are those that minimize and maximize the distance with all the other genomes
-                    selected_genomes.append(sorted_genomes[0])
-                    selected_genomes.append(sorted_genomes[-1])
+                        # Sort genomes according to the sum of their distances with all the other genomes
+                        sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
 
-                    # Also select a genome in the middles of min and max distances
-                    selected_genomes.append(sorted_genomes[int(len(sorted_genomes) / 2)])
+                        # First and last genomes are those that minimize and maximize the distance with all the other genomes
+                        selected_genomes.append(sorted_genomes[0])
+                        selected_genomes.append(sorted_genomes[-1])
+
+                        # Also select a genome in the middles of min and max distances
+                        selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
 
                     # Get the list of previously selected representative genomes
                     previously_selected_genomes = [
-                        get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters").glob("*.bf.gz"))
+                        get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters")).glob("*.bf.gz")
                     ]
 
                     add_selected_genomes = set(selected_genomes).difference(set(previously_selected_genomes))
-                    remove_selected_genomes = set(previously_selected_genomes).difference(set(selected_genomes))
+                    remove_selected_genomes = set(previously_selected_genomes).difference(set(selected_genomes))                        
 
                     if len(remove_selected_genomes) > 0:
-                        # In case the representative genomes of the species did not change
-                        # Remove the taxonomy from the rebuild list
-                        rebuild.remove(taxonomy)
-                        build_cluster = False
-
                         # Remove old representatives
                         for genome_path in Path(os.path.join(tax_dir, "genomes")).glob("*.gz"):
                             _, genome_name, _, _ = get_file_info(str(genome_path))
@@ -1078,13 +1101,23 @@ def update(
                                 os.unlink(str(genome_path))
 
                                 os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
-                        
+                    
+                    if len(add_selected_genomes) > 0:
+                        # Create the genomes folder under the species level in case of a new species
+                        os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
+
                         # Add new representatives
                         for genome_path in Path(os.path.join(tax_dir, "strains", "genomes")).glob("*.gz"):
                             _, genome_name, _, _ = get_file_info(str(genome_path))
 
                             if genome_name in add_selected_genomes:
                                 os.symlink(str(genome_path), os.path.join(tax_dir, "genomes", os.path.basename(str(genome_path))))
+
+                    if not add_selected_genomes and not remove_selected_genomes:
+                        # In case the representative genomes of the species did not change
+                        # Remove the taxonomy from the rebuild list
+                        rebuild.remove(taxonomy)
+                        build_cluster = False
 
                 if build_cluster:
                     # Remove the old index if it exists
