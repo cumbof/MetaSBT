@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 15, 2023"
+__date__ = "Apr 18, 2023"
 
 import argparse as ap
 import errno
@@ -360,7 +360,7 @@ def profile_and_assign(
         "--input-file",
         filepath,
         "--input-id",
-        filepath,
+        genome_name,
         "--input-type",
         "genome",
         "--tree",
@@ -400,9 +400,9 @@ def profile_and_assign(
         closest_genome: Dict[str, Any] = profile_data["genome"]
 
         # Get the closest species
-        closest_taxa = "|".join(profile_data["genome"]["taxonomy"].split("|")[:-1])
-        closest_common_kmers = profile_data["genome"]["common_kmers"]
-        closest_score = profile_data["genome"]["score"]
+        closest_taxa = "|".join(profile_data["species"]["taxonomy"].split("|")[:-1])
+        closest_common_kmers = profile_data["species"]["common_kmers"]
+        closest_score = profile_data["species"]["score"]
 
         printline("Closest lineage: {} (score {})".format(closest_taxa, closest_score))
         printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_genome["score"]))
@@ -971,10 +971,10 @@ def update(
             metadata_filepath = os.path.join(tax_dir, "metadata.tsv")
             if not os.path.isfile(metadata_filepath):
                 with open(metadata_filepath, "w+") as metadata_file:
-                    metadata_file.write("# Cluster ID: {}".format(assignments[genome_name]["cluster"]))
+                    metadata_file.write("# Cluster ID: {}".format(assignments[genome_path]["cluster"]))
 
             # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
-            rebuild.append(assignments[genome_name]["taxonomy"])
+            rebuild.append(assignments[genome_path]["taxonomy"])
 
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
