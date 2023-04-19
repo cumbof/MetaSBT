@@ -9,7 +9,6 @@ __date__ = "Apr 13, 2023"
 import argparse as ap
 import errno
 import logging
-import math
 import os
 import re
 import shutil
