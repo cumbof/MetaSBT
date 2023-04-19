@@ -1051,7 +1051,7 @@ def update(
                     # Get the bloom filters file paths
                     bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
 
-                    if len(genomes_paths) <= 3:
+                    if len(bf_filepaths) <= 3:
                         # 3 is the maximum number of selected species
                         # as it is also the minimum number of genomes for computing boundaries
                         selected_genomes = [
