@@ -1205,7 +1205,9 @@ def estimate_bf_size_and_howdesbt(
     if len(genomes_paths) <= 3:
         # 3 is the maximum number of selected species
         # as it is also the minimum number of genomes for computing boundaries
-        selected_genomes = [get_file_info(genome_path)[1] for genome_path in genomes_paths]
+        selected_genomes = [
+            get_file_info(genome_path, check_supported=False, check_exists=False)[1] for genome_path in genomes_paths
+        ]
 
     else:
         # Get the bloom filters file paths
@@ -1234,7 +1236,7 @@ def estimate_bf_size_and_howdesbt(
         selected_genomes.append(sorted_genomes[-1])
 
         # Also select a genome in the middles of min and max distances
-        selected_genomes.append(sorted_genomes[int(len(sorted_genomes) / 2)])
+        selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
 
     return strains_dir, selected_genomes
 
