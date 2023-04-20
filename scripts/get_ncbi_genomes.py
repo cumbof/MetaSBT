@@ -6,18 +6,20 @@ superkingdom and kingdom from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 5, 2023"
+__date__ = "Apr 20, 2023"
 
 import argparse as ap
 import datetime
 import gzip
+import multiprocessing as mp
 import os
 import re
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+import tqdm
 from urllib.request import urlretrieve
 
 TOOL_ID = "get_ncbi_genomes"
@@ -95,6 +97,12 @@ def read_params():
         ),
     )
     p.add_argument(
+        "--nproc",
+        type=int,
+        default=1,
+        help="Retrieve genomes in parallel",
+    )
+    p.add_argument(
         "--out-dir",
         type=os.path.abspath,
         required=True,
@@ -134,23 +142,14 @@ def get_genomes_in_db(db_dir: str) -> List[str]:
 
     genomes = list()
 
-    # Search for references
-    references = Path(db_dir).glob("**/references.txt")
+    for genome_type in ["references", "mags"]:
+        genome_files = Path(db_dir).glob("**/{}.txt".format(genome_type))
 
-    for filepath in references:
-        genomes.extend(
-            [ref.strip() for ref in open(str(filepath)).readlines() \
-                if ref.strip() and not ref.strip().startswith("#")]
-        )
-
-    # Search for MAGs
-    mags = Path(db_dir).glob("**/mags.txt")
-
-    for filepath in mags:
-        genomes.extend(
-            [mag.strip() for mag in open(str(filepath)).readlines() \
-                if mag.strip() and not mag.strip().startswith("#")]
-        )
+        for filepath in genome_files:
+            genomes.extend(
+                [genome.strip() for genome in open(str(filepath)).readlines() \
+                    if genome.strip() and not genome.strip().startswith("#")]
+            )
 
     return genomes
 
@@ -179,38 +178,60 @@ def level_name(current_level: str, prev_level: str) -> str:
     return "{}{}".format(level_prefix, level_suffix)
 
 
-def get_genomes_in_ncbi(
-    superkingdom: str,
-    tmpdir: str,
-    kingdom: Optional[str] = None,
-) -> Dict[str, Dict[str, str]]:
+def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
     """
-    Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank
+    Download and extract the NCBI taxdump tarball
 
-    :param superkingdom:    Archaea, Bacteria, Eukaryota, or Viruses
-    :param tmpdir:          Path to the temporary folder
-    :param kingdom:         A specific kingdom related to the superkingdom. Optional
-    :return:                A dictionary with the genome IDs as keys and URL and taxonomic info as values
+    :param taxdump_url:     URL to the NCBI taxdump
+    :param folder_path:     Path to the folder in which the taxdump tarball will be unpacked
+    :return:                The nodes.dmp and names.dmp file paths
     """
 
-    taxdump_dir = os.path.join(tmpdir, "taxdump")
+    # Create the taxdump folder in the temporary directory
+    taxdump_dir = os.path.join(folder_path, "taxdump")
+    os.makedirs(taxdump_dir, exist_ok=True)
 
-    # Retrieve nodes and names dumps
     nodes_dmp = os.path.join(taxdump_dir, "nodes.dmp")
     names_dmp = os.path.join(taxdump_dir, "names.dmp")
 
-    if not os.path.isfile(nodes_dmp) or not os.path.isfile(names_dmp):
-        os.makedirs(taxdump_dir, exist_ok=True)
+    if os.path.isfile(nodes_dmp) and os.path.isfile(names_dmp):
+        return nodes_dmp, names_dmp
 
-        taxdump_filepath = os.path.join(taxdump_dir, os.path.basename(TAXDUMP_URL))
-        
-        if not os.path.isfile(taxdump_filepath):
-            urlretrieve(TAXDUMP_URL, taxdump_filepath)
+    taxdump = os.path.join(folder_path, os.path.basename(taxdump_url))
 
-        # Decompress the archive
-        with tarfile.open(taxdump_filepath, "r:gz") as tar:
-            tar.extractall(taxdump_dir)
+    if not os.path.isfile(taxdump):
+        try:
+            urlretrieve(taxdump_url, taxdump)
 
+        except Exception:
+            raise Exception("Unable to retrieve data from remote location\n{}".format(taxdump_url))
+
+    # Decompress the archive
+    with tarfile.open(taxdump, "r:gz") as tar:
+        tar.extractall(taxdump_dir)
+    
+    return nodes_dmp, names_dmp
+
+
+def ncbitax2lin(
+    tmpdir: str,
+    nodes_dmp: str,
+    names_dmp: str,
+    superkingdom: Optional[str] = None,
+    kingdom: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Run ncbitax2lin over nodes and names dumps and produce the
+    mapping between NCBI tax IDs and ful taxonomic labels
+
+    :param tmpdir:          Path to the tmp directory
+    :param nodes_dmp:       Path to the NCBI nodes dump
+    :param names_dmp:       Path to the NCBI names dump
+    :param superkingdom:    Filter results on this superkingdom only
+    :param kingdom:         Filter results on this kingdom only
+    :return:                Dictionary with the mapping between NCBI tax IDs and full taxonomic labels
+    """
+    
     ncbitax2lin_table = os.path.join(tmpdir, "ncbi_lineages.csv.gz")
 
     if not os.path.isfile(ncbitax2lin_table):
@@ -269,13 +290,23 @@ def get_genomes_in_ncbi(
 
                     # Exclude unclassified taxonomic labels
                     if "unclassified" not in label:
-                        tax_id = int(line_split[0])
+                        taxa_map[line_split[0]] = label
 
-                        taxa_map[tax_id] = label
+    return taxa_map
+
+
+def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, List[Dict[str, str]]]:
+    """
+    Download and load the last available NCBI GenBank Assembly Report table
+
+    :param assembly_summary_url:    URL to the NCBI GenBank Assembly Report table
+    :param tmpdir:                  Path to the tmp folder
+    :return:                        Dictionary with genomes info
+    """
 
     assembly_summary = dict()
 
-    assembly_summary_filepath = os.path.join(tmpdir, os.path.basename(ASSEMBLY_SUMMARY_URL))
+    assembly_summary_filepath = os.path.join(tmpdir, os.path.basename(assembly_summary_url))
 
     if not os.path.isfile(assembly_summary_filepath):
         # Download the NCBI GenBank Assembly Summary table
@@ -330,9 +361,36 @@ def get_genomes_in_ncbi(
                     species_info["genome_type"] = genome_type
 
                     assembly_summary[species_taxid].append(species_info)
+    
+    return assembly_summary
+
+
+def get_genomes_in_ncbi(
+    superkingdom: str,
+    tmpdir: str,
+    kingdom: Optional[str] = None,
+) -> Dict[str, Dict[str, str]]:
+    """
+    Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank
+
+    :param superkingdom:    Archaea, Bacteria, Eukaryota, or Viruses
+    :param tmpdir:          Path to the temporary folder
+    :param kingdom:         A specific kingdom related to the superkingdom. Optional
+    :return:                A dictionary with the genome IDs as keys and URL and taxonomic info as values
+    """
+
+    # Download the NCBI nodes and names dumps
+    nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmpdir)
+
+    # Produce a mapping between NCBI tax IDs and full taxonomic labels
+    taxa_map = ncbitax2lin(tmpdir, nodes_dmp, names_dmp, superkingdom=superkingdom, kingdom=kingdom)
+
+    # Download and load the most recent NCBI GenBank Assembly Report table
+    assembly_summary = get_assembly_summary(ASSEMBLY_SUMMARY_URL, tmpdir)
 
     ncbi_genomes = dict()
 
+    # Get genome info from the assembly reporta table
     for species_taxid in assembly_summary:
         if species_taxid in taxa_map:
             taxonomy = taxa_map[species_taxid]
@@ -348,6 +406,39 @@ def get_genomes_in_ncbi(
     return ncbi_genomes
 
 
+def urlretrieve_wrapper(url: str, filepath: str) -> Tuple[str, bool]:
+    """
+    Wrapper around urlretrieve
+
+    :param url:         Input URL
+    :param filepath:    Output file path
+    :return:            The output file path
+    """
+
+    exists_and_passed_integrity = False
+
+    try:
+        urlretrieve(url, filepath)
+        
+        # Check file integrity
+        subprocess.check_call(
+            [
+                "gzip",
+                "-t",
+                filepath,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        exists_and_passed_integrity = True
+
+    except Exception:
+        pass
+
+    return filepath, exists_and_passed_integrity
+
+
 def main() -> None:
     args = read_params()
     
@@ -355,7 +446,9 @@ def main() -> None:
         os.makedirs(args.out_dir, exist_ok=True)
     
     if args.download:
-        genomes_dir = os.path.join(args.out_dir, "genomes")
+        out_folder = "genomes" if not args.type else "{}s".format(args.type)
+
+        genomes_dir = os.path.join(args.out_dir, out_folder)
 
         if not os.path.isdir(genomes_dir):
             os.makedirs(genomes_dir, exist_ok=True)
@@ -384,27 +477,61 @@ def main() -> None:
                 del ncbi_genomes[genome]
 
     if ncbi_genomes:
-        with open(os.path.join(args.out_dir, "genomes.tsv"), "w+") as genomes_table:
+        out_file = "genomes" if not args.type else "{}s".format(args.type)
+
+        with open(os.path.join(args.out_dir, "{}.tsv".format(out_file)), "w+") as genomes_table:
             genomes_table.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
             genomes_table.write("# timestamp {}\n".format(datetime.datetime.utcnow()))
             genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\turl\n")
 
-            # Download genomes
-            for genome in ncbi_genomes:
-                process = True
+        genomes = list(
+            filter(
+                lambda genome: ncbi_genomes[genome]["type"] == args.type or not args.type,
+                ncbi_genomes.keys()
+            )
+        )
 
-                if args.type:
-                    if args.type != ncbi_genomes[genome]["type"]:
-                        process = False
+        downloaded = list()
 
-                if args.download and process:
-                    try:
-                        urlretrieve(ncbi_genomes[genome]["url"], os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"])))
-                    
-                    except Exception:
-                        process = False
+        print(
+            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Type \"{}\")".format(
+                len(genomes),
+                args.superkingdom,
+                args.kingdom,
+                args.type
+            )
+        )
 
-                if process:
+        with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as pbar:
+            # Wrapper around the update function of tqdm
+            def progress(*args):
+                pbar.update()
+
+            # Process input genomes
+            jobs = [
+                pool.apply_async(
+                    urlretrieve_wrapper,
+                    args=(
+                        ncbi_genomes[genome]["url"],
+                        os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))
+                    ),
+                    callback=progress,
+                )
+                for genome in genomes
+            ]
+
+            # Get results from jobs
+            for job in jobs:
+                filepath, exists = job.get()
+
+                if exists:
+                    downloaded.append(filepath)
+        
+        if downloaded:
+            with open(os.path.join(args.out_dir, "{}.tsv".format(out_file)), "a+") as genomes_table:
+                for filepath in downloaded:
+                    genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
+
                     genomes_table.write(
                         "{}\t{}\t{}\t{}\t{}\n".format(
                             genome,
