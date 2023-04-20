@@ -508,7 +508,7 @@ def load_taxa(
     superkingdom: Optional[str] = None,
     kingdom: Optional[str] = None,
     dump: Optional[str] = None
-) -> Tuple[list, list]:
+) -> Dict[str, str]:
     """
     Load the ncbitax2lin output table
 
@@ -516,11 +516,11 @@ def load_taxa(
     :param superkingdom:        Consider a specific superkingdom only
     :param kingdom:             Kingdom
     :param dump:                Path to the output table
-    :return:                    The lists of NCBI tax IDs and full taxonomic labels
+    :return:                    Dictionary with NCBI tax IDs as keys and full taxonomic labels as values
     """
 
     # Take track of NCBI tax IDs and full taxonomic labels
-    taxa_map: Dict[str, List[int]] = dict()
+    taxa_map: Dict[str, str] = dict()
 
     with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
         # Load the first line as header and search for "superkingdom" and "kingdom" columns
@@ -560,26 +560,19 @@ def load_taxa(
 
                     # Exclude unclassified taxonomic labels
                     if "unclassified" not in label:
-                        if label not in taxa_map:
-                            taxa_map[label] = list()
-                        taxa_map[label].append(int(line_split[0]))
+                        tax_id = line_split[0]
 
-    # Use a single tax ID for each label
-    tax_labels = list()
-    tax_ids = list()
-    for tax_label in taxa_map:
-        tax_labels.append(tax_label)
-        tax_ids.append(str(min(taxa_map[tax_label])))
+                        taxa_map[tax_id] = label
 
     if dump:
         # Dump the tax map to file
         with open(dump, "w+") as tax_table:
             # Add the header line
-            tax_table.write("# {}\t{}\n".format("tax_label", "tax_id"))
-            for pos, label in enumerate(tax_labels):
-                tax_table.write("{}\t{}\n".format(label, tax_ids[pos]))
+            tax_table.write("# {}\t{}\n".format("tax_id", "tax_label"))
+            for tax_id in taxa_map:
+                tax_table.write("{}\t{}\n".format(tax_id, taxa_map[tax_id]))
 
-    return tax_ids, tax_labels
+    return taxa_map
 
 
 def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
@@ -1393,7 +1386,8 @@ def index(
         # Take track of the taxonomic labels to remove duplicates
         # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
         printline("Building species tax ID to full taxonomy mapping")
-        tax_ids, tax_labels = load_taxa(
+
+        taxa_map = load_taxa(
             ncbitax2lin_table,
             superkingdom=superkingdom,
             kingdom=kingdom,
@@ -1428,17 +1422,13 @@ def index(
 
         printline("Processing clusters")
 
-        # Reshape tax_ids and tax_labels according to the assembly summary
-        for txid in copy.deepcopy(tax_ids):
+        # Reshape taxa_map according to the assembly summary
+        for txid in list(taxa_map.keys()):
             if txid not in assembly_summary:
-                tax_pos = tax_ids.index(txid)
+                del taxa_map[txid]
 
-                # Delete a tax ID
-                del tax_ids[tax_pos]
-                del tax_labels[tax_pos]
-        
         # Define the length of the progress bar
-        pbar_len = len(tax_ids)
+        pbar_len = len(taxa_map)
 
     # Define a cluster counter
     clusters_counter = pbar_len
@@ -1467,10 +1457,10 @@ def index(
             jobs = [
                 pool.apply_async(
                     process_partial,
-                    args=(tax_id, tax_labels[pos], assembly_summary[tax_id], pos + 1),
+                    args=(tax_id, taxa_map[tax_id], assembly_summary[tax_id], pos + 1),
                     callback=progress,
                 )
-                for pos, tax_id in enumerate(tax_ids) if tax_id in assembly_summary
+                for pos, tax_id in enumerate(taxa_map.keys()) if tax_id in assembly_summary
             ]
 
         # Get results from jobs
