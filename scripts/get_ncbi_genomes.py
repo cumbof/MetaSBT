@@ -269,18 +269,9 @@ def get_genomes_in_ncbi(
 
                     # Exclude unclassified taxonomic labels
                     if "unclassified" not in label:
-                        if label not in taxa_map:
-                            taxa_map[label] = list()
+                        tax_id = int(line_split[0])
 
-                        taxa_map[label].append(int(line_split[0]))
-
-    # Use a single tax ID for each label
-    tax_labels = list()
-    tax_ids = list()
-
-    for tax_label in taxa_map:
-        tax_labels.append(tax_label)
-        tax_ids.append(str(min(taxa_map[tax_label])))
+                        taxa_map[tax_id] = label
 
     assembly_summary = dict()
 
@@ -315,12 +306,10 @@ def get_genomes_in_ncbi(
                     for h in header:
                         species_info[h] = line_split[header.index(h)].strip()
 
-                    process_genome = False
                     genome_type = "na"
 
                     if not species_info["excluded_from_refseq"].strip() or \
                         all([ex.strip() in REFERENCE_TAGS for ex in species_info["excluded_from_refseq"].split(";")]):
-                        process_genome = True
                         genome_type = "reference"
                     
                     else:
@@ -331,7 +320,6 @@ def get_genomes_in_ncbi(
                                 break
                         
                         if not excluded:
-                            process_genome = True
                             genome_type = "mag"
                     
                     species_info["ftp_filepath"] = genome_url
@@ -346,8 +334,8 @@ def get_genomes_in_ncbi(
     ncbi_genomes = dict()
 
     for species_taxid in assembly_summary:
-        if species_taxid in tax_ids:
-            taxonomy = tax_labels[tax_ids.index(species_taxid)]
+        if species_taxid in taxa_map:
+            taxonomy = taxa_map[species_taxid]
 
             for species_info in assembly_summary[species_taxid]:
                 ncbi_genomes[species_info["local_filename"]] = {
