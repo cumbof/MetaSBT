@@ -54,7 +54,6 @@ DEPENDENCIES = [
     "checkm",
     "howdesbt",
     "kitsune",
-    "ncbitax2lin",
     "ntcard",
     "wget",
 ]
