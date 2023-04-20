@@ -6,20 +6,16 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__date__ = "Apr 20, 2023"
 
 import argparse as ap
-import copy
 import errno
-import gzip
 import hashlib
 import math
 import multiprocessing as mp
 import os
-import re
 import shutil
 import sys
-import tarfile
 import time
 from functools import partial
 from logging import Logger
@@ -38,18 +34,14 @@ try:
         build_sh,
         checkm,
         dereplicate_genomes,
-        download,
         estimate_bf_size,
         filter_checkm_tables,
         get_file_info,
         howdesbt,
         init_logger,
-        integrity_check,
         number,
         optimal_k,
         println,
-        run,
-        validate_url,
     )
 except Exception:
     pass
@@ -153,18 +145,11 @@ def read_params():
     general_group.add_argument(
         "--input-list",
         type=os.path.abspath,
+        required=True,
         dest="input_list",
         help=(
             "Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. "
             "Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz)"
-        ),
-    )
-    general_group.add_argument(
-        "--kingdom",
-        type=str,
-        help=(
-            "Consider genomes whose lineage belongs to a specific kingdom. "
-            "It is optional and must be provided in conjunction with --superkingdom"
         ),
     )
     general_group.add_argument(
@@ -194,40 +179,9 @@ def read_params():
         ),
     )
     general_group.add_argument(
-        "--limit-genomes",
-        type=number(int, minv=1),
-        default=numpy.Inf,
-        dest="limit_genomes",
-        help=(
-            "Limit the number of genomes per species. "
-            "This will remove the exceeding number of genomes randomly to cut the overall number of genomes per species to this number. "
-            "The number of genomes per species is not limited by default"
-        ),
-    )
-    general_group.add_argument(
         "--log",
         type=os.path.abspath,
         help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
-    )
-    general_group.add_argument(
-        "--max-genomes",
-        type=number(int, minv=1),
-        default=numpy.Inf,
-        dest="max_genomes",
-        help=(
-            "Consider species with this number of genomes at most. "
-            "There is not a maximum number of genomes per species by default"
-        ),
-    )
-    general_group.add_argument(
-        "--min-genomes",
-        type=number(int, minv=1),
-        default=1,
-        dest="min_genomes",
-        help=(
-            "Consider species with a minimum number of genomes. "
-            "There is not a minimum number of genomes per species by default"
-        ),
     )
     general_group.add_argument(
         "--nproc",
@@ -240,12 +194,6 @@ def read_params():
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
         help="Maximum number of processors to process each NCBI tax ID in parallel",
-    )
-    general_group.add_argument(
-        "--superkingdom",
-        type=str,
-        choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
-        help="Consider genomes whose lineage belongs to a specific superkingdom if --input-list is not provided",
     )
     general_group.add_argument(
         "--tmp-dir",
@@ -381,229 +329,6 @@ def read_params():
     )
 
     return p.parse_args()
-
-
-def download_assembly_summary(assembly_summary_url: str, folder_path: str) -> Dict[str, List[str]]:
-    """
-    Download and read the NCBI GenBank Assembly Summary
-
-    :param assembly_summary_url:    URL to the NCBI GenBank Assembly Summary table
-    :param folder_path:             Path to the folder in which the assembly table will be downloaded
-    :return:                        Dictionary with the list of URLs to the genome files indexed by the species taxid
-    """
-
-    assembly_summary_filepath = os.path.join(folder_path, os.path.basename(assembly_summary_url))
-    
-    # Check whether the assembly table exists and it is GZ compressed
-    if os.path.isfile("{}.gz".format(assembly_summary_filepath)):
-        with open(assembly_summary_filepath, "w+") as file:
-            run(["gzip", "-dc", "{}.gz".format(assembly_summary_filepath)], stdout=file, stderr=file)
-
-    # Check whether the assembly summary table already exists
-    # Otherwise, download it
-    if not os.path.isfile(assembly_summary_filepath):
-        assembly_summary_filepath = download(url=assembly_summary_url, folder=folder_path)
-
-    # Raise an exception in case the assembly_summary_genbank.txt file does not exist
-    if not os.path.isfile(assembly_summary_filepath):
-        raise Exception("Unable to retrieve data from remote location\n{}".format(assembly_summary))
-    
-    assembly_summary = dict()
-
-    with open(assembly_summary_filepath) as asf:
-        # Skip the first line, it is just a comment
-        next(asf)
-
-        # Load the header line
-        header = next(asf)[1:].strip().split("\t")
-
-        for line in asf:
-            if line.strip():
-                line_split = line.split("\t")
-
-                species_taxid = line_split[header.index("species_taxid")]
-                ftp_path = line_split[header.index("ftp_path")]
-                genome_url = os.path.join(ftp_path, "{}_genomic.fna.gz".format(os.path.basename(ftp_path)))
-
-                # Check whether the genome URL is valid
-                # Otherwise, skip the genome
-                if species_taxid and validate_url(genome_url):
-                    if species_taxid not in assembly_summary:
-                        assembly_summary[species_taxid] = list()
-
-                    species_info = dict()
-                    
-                    for h in header:
-                        species_info[h] = line_split[header.index(h)].strip()
-
-                    species_info["ftp_filepath"] = genome_url
-
-                    _, local_filename, _, _ = get_file_info(genome_url, check_supported=False, check_exists=False)
-                    species_info["local_filename"] = os.path.basename(local_filename)
-
-                    assembly_summary[species_taxid].append(species_info)
-
-    if not os.path.isfile("{}.gz".format(assembly_summary_filepath)):
-        with open("{}.gz".format(assembly_summary_filepath), "w+") as file:
-            run(["gzip", "-c", assembly_summary_filepath], stdout=file, stderr=file)
-        
-    if os.path.isfile(assembly_summary_filepath):
-        os.unlink(assembly_summary_filepath)
-
-    return assembly_summary
-
-
-def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
-    """
-    Download and extract the NCBI taxdump tarball
-
-    :param taxdump_url:     URL to the NCBI taxdump
-    :param folder_path:     Path to the folder in which the taxdump tarball will be unpacked
-    :return:                The nodes.dmp and names.dmp file paths
-    """
-
-    taxdump = download(url=taxdump_url, folder=folder_path)
-
-    # Raise an exception in case the taxdump.tar.gz file does not exist
-    if not os.path.isfile(taxdump):
-        raise Exception("Unable to retrieve data from remote location\n{}".format(taxdump_url))
-
-    # Create the taxdump folder in the temporary directory
-    taxdump_dir = os.path.join(folder_path, "taxdump")
-    os.makedirs(taxdump_dir, exist_ok=True)
-
-    # Decompress the archive
-    with tarfile.open(taxdump, "r:gz") as tar:
-        tar.extractall(taxdump_dir)
-
-    return os.path.join(taxdump_dir, "nodes.dmp"), os.path.join(taxdump_dir, "names.dmp")
-
-
-def level_name(current_level: str, prev_level: str) -> str:
-    """
-    Define a taxonomic level name
-
-    :param current_level:   Current level name
-    :param prev_level:      Previous level name in case of unclassified
-    :return:                The new level name
-    """
-
-    # Remove special characters from current and previous level names
-    current_level = re.sub(r"_+", "_", re.sub(r"\W+", "_", current_level)).strip("_")
-    prev_level = re.sub(r"_+", "_", re.sub(r"\W+", "_", prev_level)).strip("_")
-
-    # Build the new level name
-    level_prefix = current_level.strip()
-    level_suffix = ""
-    if not level_prefix:
-        level_prefix = prev_level
-        # Fill empty taxa levels with unclassified
-        level_suffix = "_unclassified"
-
-    return "{}{}".format(level_prefix, level_suffix)
-
-
-def load_taxa(
-    ncbitax2lin_table: str,
-    superkingdom: Optional[str] = None,
-    kingdom: Optional[str] = None,
-    dump: Optional[str] = None
-) -> Dict[str, str]:
-    """
-    Load the ncbitax2lin output table
-
-    :param ncbitax2lin_table:   Path to the output table produced by ncbitax2lin
-    :param superkingdom:        Consider a specific superkingdom only
-    :param kingdom:             Kingdom
-    :param dump:                Path to the output table
-    :return:                    Dictionary with NCBI tax IDs as keys and full taxonomic labels as values
-    """
-
-    # Take track of NCBI tax IDs and full taxonomic labels
-    taxa_map: Dict[str, str] = dict()
-
-    with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
-        # Load the first line as header and search for "superkingdom" and "kingdom" columns
-        header = ncbi_table.readline().split(",")
-        superkingdom_pos = header.index("superkingdom")  # Archaea, Bacteria, Eukaryota, Viruses
-        kingdom_pos = header.index("kingdom")
-
-        for line in ncbi_table:
-            line = line.strip()
-            if line:
-                line_split = line.split(",")
-
-                # Check whether the current taxonomy must be processed
-                skip = True
-                
-                if not superkingdom and line_split[superkingdom_pos].strip():
-                    skip = False
-                
-                elif line_split[superkingdom_pos] == superkingdom:
-                    if not kingdom:
-                        skip = False
-                    
-                    elif line_split[kingdom_pos] == kingdom:
-                        skip = False
-
-                if not skip:
-                    # Build the current full taxonomic label
-                    label = "k__{}|p__{}|c__{}|o__{}|f__{}|g__{}|s__{}".format(
-                        superkingdom,  # Superkingdom
-                        level_name(line_split[2], superkingdom if superkingdom else line_split[1]),  # Phylum
-                        level_name(line_split[3], line_split[2]),  # Class
-                        level_name(line_split[4], line_split[3]),  # Order
-                        level_name(line_split[5], line_split[4]),  # Family
-                        level_name(line_split[6], line_split[5]),  # Genus
-                        level_name(line_split[7], line_split[6]),  # Species
-                    )
-
-                    # Exclude unclassified taxonomic labels
-                    if "unclassified" not in label:
-                        tax_id = line_split[0]
-
-                        taxa_map[tax_id] = label
-
-    if dump:
-        # Dump the tax map to file
-        with open(dump, "w+") as tax_table:
-            # Add the header line
-            tax_table.write("# {}\t{}\n".format("tax_id", "tax_label"))
-            for tax_id in taxa_map:
-                tax_table.write("{}\t{}\n".format(tax_id, taxa_map[tax_id]))
-
-    return taxa_map
-
-
-def ncbitax2lin(nodes: str, names: str, out_dir: str) -> str:
-    """
-    Extract lineages from the NCBI taxdump
-
-    :param nodes:       Path to the nodes.dmp
-    :param names:       Path to the names.dmp
-    :param out_dir:     Path to the output folder
-    :return:            Output table file path
-    """
-
-    ncbitax2lin_table = os.path.join(out_dir, "ncbi_lineages.csv.gz")
-    run(
-        [
-            "ncbitax2lin",
-            "--nodes-file",
-            nodes,
-            "--names-file",
-            names,
-            "--output",
-            ncbitax2lin_table,
-        ],
-        silence=True,
-    )
-
-    # Raise an exception in case the ncbi_lineages.csv.gz file does not exist
-    if not os.path.isfile(ncbitax2lin_table):
-        raise Exception("An error has occurred while running ncbitax2lin")
-
-    return ncbitax2lin_table
 
 
 def quality_control(
@@ -870,174 +595,6 @@ def process_input_genomes(
     return genomes_paths
 
 
-def process_tax_id(
-    tax_id: str,
-    tax_label: str,
-    genomes_info: List[Dict[str, str]],
-    cluster_id: int,
-    db_dir: str,
-    tmp_dir: str,
-    kmer_len: int,
-    cluster_prefix: str = "MSBT",
-    limit_genomes: float = numpy.Inf,
-    max_genomes: float = numpy.Inf,
-    min_genomes: float = 1.0,
-    nproc: int = 1,
-    pplacer_threads: int = 1,
-    completeness: float = 0.0,
-    contamination: float = 100.0,
-    dereplicate: bool = False,
-    similarity: float = 1.0,
-    flat_structure: bool = False,
-    logger: Optional[Logger] = None,
-    verbose: bool = False,
-) -> List[str]:
-    """
-    Process a specific NCBI tax ID
-    Download reference genomes only, perform quality-control and dereplication
-
-    :param tax_id:              NCBI tax ID of a species
-    :param tax_label:           Full taxonomic label
-    :param genomes_info:        List of dictionaries with genomes information
-    :param cluster_id:          Numberical cluster ID
-    :param db_dir:              Path to the database root folder
-    :param tmp_dir:             Path to the temporary folder
-    :param kmer_len:            Length of the kmers
-    :param cluster_prefix:      Cluster prefix
-    :param limit_genomes:       Limit the number of genomes per species
-    :param max_genomes:         Consider species with this number of genomes at most
-    :param min_genomes:         Consider species with a minimum number of genomes
-    :param nproc:               Make the process parallel when possible
-    :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
-    :param completeness:        Threshold on the CheckM completeness
-    :param contamination:       Threshold on the CheckM contamination
-    :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
-    :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param flat_structure:      Do not taxonomically organize genomes
-    :param logger:              Logger object
-    :param verbose:             Print messages on screen
-    :return:                    The list of paths to the genome files
-    """
-
-    # Define a partial println function to avoid specifying logger and verbose
-    # every time the println function is invoked
-    printline = partial(println, logger=logger, verbose=verbose)
-
-    # Create a temporary folder to store the downloaded genomes
-    tmp_genomes_dir = os.path.join(tmp_dir, "genomes", tax_id)
-    os.makedirs(tmp_genomes_dir, exist_ok=True)
-
-    # Take track of the paths to the genome files
-    genomes_paths = list()
-
-    # Take track of genomes URLs
-    genomes_urls = list()
-
-    for genome_info in genomes_info:
-        if not genome_info["excluded_from_refseq"].strip() or all([ex.strip() in REFERENCE_TAGS for ex in genome_info["excluded_from_refseq"].split(";")]):
-            genomes_urls.append(genome_info["ftp_filepath"])
-
-    if len(genomes_urls) > 0:
-        if verbose:
-            printline("Processing NCBI tax ID {} with {} genomes".format(tax_id, len(genomes_urls)))
-
-        # Check whether the number of genomes falls in the --min-genomes --max-genomes interval
-        if len(genomes_urls) < min_genomes or len(genomes_urls) > max_genomes:
-            if verbose:
-                printline(
-                    "WARNING: the number of genomes does not respect the minimum and maximum number of genomes allowed"
-                )
-            return list()
-
-        # Check whether the number of genomes is greater than the number provided with --limit-genomes
-        if len(genomes_urls) > limit_genomes:
-            if verbose:
-                printline("WARNING: the number of genomes per species is limited to {} at most".format(limit_genomes))
-
-            # Always use the same seed for reproducibility
-            rng = numpy.random.default_rng(0)
-
-            # Subsampling genomes as input for kitsune
-            rng.shuffle(genomes_urls)
-            genomes_urls = genomes_urls[:limit_genomes]
-
-        # Keep track of the paths to the downloaded genome files
-        genomes = list()
-
-        for genome_url in genomes_urls:
-            genome_filepath = download(url=genome_url, folder=tmp_genomes_dir, raise_exception=False)
-
-            if genome_filepath and integrity_check(genome_filepath):
-                genomes.append(genome_filepath)
-
-        if verbose:
-            printline("Retrieved {}/{} genomes".format(len(genomes), len(genomes_urls)))
-
-        # Take track of the paths to the CheckM output tables
-        checkm_tables: List[str] = list()
-
-        # Quality control
-        if genomes and (completeness > 0.0 or contamination < 100.0):
-            before_qc = len(genomes)
-
-            genomes, checkm_tables = quality_control(
-                genomes,
-                tax_id,
-                tmp_dir,
-                completeness=completeness,
-                contamination=contamination,
-                nproc=nproc,
-                pplacer_threads=pplacer_threads,
-            )
-
-            if before_qc > len(genomes) and verbose:
-                printline("Quality control: excluding {}/{} genomes".format(before_qc - len(genomes), before_qc))
-
-        # Dereplication
-        if len(genomes) > 1 and dereplicate:
-            before_dereplication = len(genomes)
-
-            genomes = dereplicate_genomes(
-                genomes,
-                tax_id,
-                tmp_dir,
-                kmer_len,
-                filter_size=None,
-                nproc=nproc,
-                similarity=similarity,
-            )
-
-            if before_dereplication > len(genomes) and verbose:
-                printline(
-                    "Dereplication: excluding {}/{} genomes".format(
-                        before_dereplication - len(genomes), before_dereplication
-                    )
-                )
-
-        # Check whether no genomes survived the quality control and the dereplication steps
-        if not genomes:
-            if verbose:
-                printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
-
-            return list()
-
-        # Organize genome files
-        genomes_paths = organize_data(
-            genomes,
-            db_dir,
-            tax_label,
-            tax_id,
-            cluster_id=cluster_id,
-            cluster_prefix=cluster_prefix,
-            metadata=genomes_info,
-            checkm_tables=checkm_tables,
-            flat_structure=flat_structure,
-        )
-
-    # Return the list of paths to the genome files
-    return genomes_paths
-
-
 def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structure=False) -> List[str]:
     """
     Given a list of genomes, define a sublist with a limited number of genomes taken randomly
@@ -1237,16 +794,11 @@ def estimate_bf_size_and_howdesbt(
 def index(
     db_dir: str,
     input_list: str,
-    superkingdom: str,
     tmp_dir: str,
-    kingdom: Optional[str] = None,
     cluster_prefix: str = "MSBT",
     kmer_len: Optional[int] = None,
     filter_size: Optional[int] = None,
     flat_structure: bool = False,
-    limit_genomes: float = numpy.Inf,
-    max_genomes: float = numpy.Inf,
-    min_genomes: float = 1.0,
     estimate_filter_size: bool = True,
     increase_filter_size: float = 0.0,
     min_kmer_occurrences: int = 2,
@@ -1271,16 +823,11 @@ def index(
 
     :param db_dir:                      Path to the database root folder
     :param input_list:                  Path to the file with a list of input genome paths
-    :param superkingdom:                Retrieve genomes that belong to a specific superkingdom
     :param tmp_dir:                     Path to the temporary folder
-    :param kingdom:                     Kingdom
     :param cluster_prefix:              Prefix of clusters numerical identifiers
     :param kmer_len:                    Length of the kmers
     :param filter_size:                 Size of the bloom filters
     :param flat_structure:              Do not taxonomically organize genomes
-    :param limit_genomes:               Limit the number of genomes per species
-    :param max_genomes:                 Consider species with this number of genomes at most
-    :param min_genomes:                 Consider species with a minimum number of genomes
     :param estimate_filter_size:        Run ntCard to estimate the most appropriate bloom filter size
     :param increase_filter_size:        Increase the estimated bloom filter size by the specified percentage
     :param min_kmer_occurrences:        Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
@@ -1305,163 +852,84 @@ def index(
     # every time the println function is invoked
     printline = partial(println, logger=logger, verbose=verbose)
 
-    if input_list:
-        # Load the set of input genomes
-        taxonomy2genomes: Dict[str, List[str]] = dict()
-        with open(input_list) as file:
-            for line in file:
-                line = line.strip()
-                if line:
-                    if not line.startswith("#"):
-                        line_split = line.split("\t")
+    # Load the set of input genomes
+    taxonomy2genomes: Dict[str, List[str]] = dict()
+    with open(input_list) as file:
+        for line in file:
+            line = line.strip()
+            if line:
+                if not line.startswith("#"):
+                    line_split = line.split("\t")
 
-                        taxonomy = "NA"
-                        if len(line_split) == 2:
-                            taxonomy = line_split[1]
+                    taxonomy = "NA"
+                    if len(line_split) == 2:
+                        taxonomy = line_split[1]
 
-                            if len(taxonomy.split("|")) != 7:
-                                # Taxonomic labels must have 7 levels
-                                raise Exception(
-                                    "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
-                                        line_split[1]
-                                    )
+                        if len(taxonomy.split("|")) != 7:
+                            # Taxonomic labels must have 7 levels
+                            raise Exception(
+                                "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
+                                    line_split[1]
                                 )
+                            )
 
-                        # This automatically check whether extension and compression are supported
-                        dirpath, genome_name, extension, compression = get_file_info(line_split[0])
+                    # This automatically check whether extension and compression are supported
+                    dirpath, genome_name, extension, compression = get_file_info(line_split[0])
 
-                        if taxonomy not in taxonomy2genomes:
-                            taxonomy2genomes[taxonomy] = list()
+                    if taxonomy not in taxonomy2genomes:
+                        taxonomy2genomes[taxonomy] = list()
 
-                        taxonomy2genomes[taxonomy].append(
-                            os.path.join(dirpath, "{}{}{}".format(
-                                genome_name, extension, compression if compression else ""
-                            ))
-                        )
+                    taxonomy2genomes[taxonomy].append(
+                        os.path.join(dirpath, "{}{}{}".format(
+                            genome_name, extension, compression if compression else ""
+                        ))
+                    )
 
-        # Force flat structure in case of genomes with no taxonomic label
-        if "NA" in taxonomy2genomes:
-            flat_structure = True
+    # Force flat structure in case of genomes with no taxonomic label
+    if "NA" in taxonomy2genomes:
+        flat_structure = True
 
-        # Build a partial function around process_input_genomes
-        process_partial = partial(
-            process_input_genomes,
-            db_dir=db_dir,
-            tmp_dir=tmp_dir,
-            kmer_len=kmer_len,
-            cluster_prefix=cluster_prefix,
-            nproc=nproc,
-            pplacer_threads=pplacer_threads,
-            completeness=completeness,
-            contamination=contamination,
-            dereplicate=dereplicate,
-            similarity=similarity,
-            flat_structure=flat_structure,
-            logger=logger,
-            verbose=False,
-        )
+    # Build a partial function around process_input_genomes
+    process_partial = partial(
+        process_input_genomes,
+        db_dir=db_dir,
+        tmp_dir=tmp_dir,
+        kmer_len=kmer_len,
+        cluster_prefix=cluster_prefix,
+        nproc=nproc,
+        pplacer_threads=pplacer_threads,
+        completeness=completeness,
+        contamination=contamination,
+        dereplicate=dereplicate,
+        similarity=similarity,
+        flat_structure=flat_structure,
+        logger=logger,
+        verbose=False,
+    )
 
-        printline("Processing clusters")
-
-        # Define the length of the progress bar
-        pbar_len = len(taxonomy2genomes)
-
-    else:
-        # Download the NCBI taxdump
-        printline("Downloading taxonomy dump from NCBI")
-
-        # Recover already processed nodes.dmp and names.dmp
-        nodes_dmp = os.path.join(tmp_dir, "taxdump", "nodes.dmp")
-        names_dmp = os.path.join(tmp_dir, "taxdump", "names.dmp")
-        if not os.path.isfile(nodes_dmp) or not os.path.isfile(names_dmp):
-            nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmp_dir)
-
-        # Run ncbitax2lin to extract lineages
-        printline("Exporting lineages")
-        ncbitax2lin_table = os.path.join(tmp_dir, "ncbi_lineages.csv.gz")
-        if not os.path.isfile(ncbitax2lin_table):
-            ncbitax2lin_table = ncbitax2lin(nodes_dmp, names_dmp, tmp_dir)
-
-        # Build a mapping between tax IDs and full taxonomic labels
-        # Take track of the taxonomic labels to remove duplicates
-        # Taxonomy IDs are already sorted in ascending order in the ncbitax2lin output table
-        printline("Building species tax ID to full taxonomy mapping")
-
-        taxa_map = load_taxa(
-            ncbitax2lin_table,
-            superkingdom=superkingdom,
-            kingdom=kingdom,
-            dump=os.path.join(tmp_dir, "taxa.tsv") if not os.path.isfile(os.path.join(tmp_dir, "taxa.tsv")) else None,
-        )
-
-        # Download the NCBI GenBank Assembly Summary table
-        # and load the list of genomes grouped by species taxid
-        printline("Downloading NCBI GenBank Assembly Summary table")
-        assembly_summary = download_assembly_summary(ASSEMBLY_SUMMARY_URL, tmp_dir)
-
-        # Build a partial function around process_tax_id
-        process_partial = partial(
-            process_tax_id,
-            db_dir=db_dir,
-            tmp_dir=tmp_dir,
-            kmer_len=kmer_len,
-            cluster_prefix=cluster_prefix,
-            limit_genomes=limit_genomes,
-            max_genomes=max_genomes,
-            min_genomes=min_genomes,
-            nproc=nproc,
-            pplacer_threads=pplacer_threads,
-            completeness=completeness,
-            contamination=contamination,
-            dereplicate=dereplicate,
-            similarity=similarity,
-            flat_structure=flat_structure,
-            logger=logger,
-            verbose=False,
-        )
-
-        printline("Processing clusters")
-
-        # Reshape taxa_map according to the assembly summary
-        for txid in list(taxa_map.keys()):
-            if txid not in assembly_summary:
-                del taxa_map[txid]
-
-        # Define the length of the progress bar
-        pbar_len = len(taxa_map)
+    printline("Processing clusters")
 
     # Define a cluster counter
-    clusters_counter = pbar_len
+    # This is also the size of the progress bar
+    clusters_counter = len(taxonomy2genomes)
 
     # Take track of all the genomes paths
     genomes_paths = list()
 
-    with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=pbar_len, disable=(not verbose)) as pbar:
+    with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=clusters_counter, disable=(not verbose)) as pbar:
         # Wrapper around the update function of tqdm
         def progress(*args):
             pbar.update()
 
-        if input_list:
-            # Process input genomes
-            jobs = [
-                pool.apply_async(
-                    process_partial,
-                    args=(taxonomy2genomes[taxonomy], taxonomy, pos + 1),
-                    callback=progress,
-                )
-                for pos, taxonomy in enumerate(taxonomy2genomes)
-            ]
-
-        else:
-            # Process the NCBI tax IDs
-            jobs = [
-                pool.apply_async(
-                    process_partial,
-                    args=(tax_id, taxa_map[tax_id], assembly_summary[tax_id], pos + 1),
-                    callback=progress,
-                )
-                for pos, tax_id in enumerate(taxa_map.keys()) if tax_id in assembly_summary
-            ]
+        # Process input genomes
+        jobs = [
+            pool.apply_async(
+                process_partial,
+                args=(taxonomy2genomes[taxonomy], taxonomy, pos + 1),
+                callback=progress,
+            )
+            for pos, taxonomy in enumerate(taxonomy2genomes)
+        ]
 
         # Get results from jobs
         for job in jobs:
@@ -1665,19 +1133,6 @@ def main() -> None:
     # Initialise the logger
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
-    if not args.input_list and not args.superkingdom:
-        raise Exception("Please specify --input-list or a valid --superkingdom")
-
-    if args.superkingdom:
-        # Check whether the database folder exists
-        if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(args.superkingdom))):
-            raise Exception(
-                (
-                    "An indexed version of the {} superkingdom already exists in the database!\n"
-                    "Please use the update module to add new genomes"
-                ).format(args.superkingdom)
-            )
-
     # Create the database folder
     os.makedirs(args.db_dir, exist_ok=True)
 
@@ -1700,9 +1155,7 @@ def main() -> None:
         )
 
     superkingdoms = set()
-    if not args.flat_structure and not args.superkingdom:
-        # In this case --input-list must be specified
-        # Build as many manifest file as the number of superkingdoms in the input list of taxonomic labels
+    if not args.flat_structure:
         try:
             with open(args.input_list) as inlist:
                 for line in inlist:
@@ -1715,16 +1168,15 @@ def main() -> None:
                 ex.__traceback__
             )
 
-    # We can process a single superkingdom per run
-    if len(superkingdoms) > 1:
-        raise Exception("The {} module cannot process more than 1 superkingdom per run!".format(TOOL_ID))
-
-    if not args.superkingdom and len(superkingdoms):
-        args.superkingdom = superkingdoms[0]
-
-    if args.superkingdom:
-        # Create the superkingdom directory
-        os.makedirs(os.path.join(args.db_dir, "k__{}".format(args.superkingdom)), exist_ok=True)
+        if superkingdoms:
+            for superkingdom in superkingdoms:
+                if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(superkingdom))):
+                    raise Exception(
+                        (
+                            "An indexed version of the {} superkingdom already exists in the database!\n"
+                            "Please use the update module to add new genomes"
+                        ).format(superkingdom)
+                    )
 
     # Define the database manifest file
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt")
@@ -1773,16 +1225,11 @@ def main() -> None:
     index(
         args.db_dir,
         args.input_list,
-        args.superkingdom,
         args.tmp_dir,
-        kingdom=args.kingdom,
         cluster_prefix=args.cluster_prefix,
         kmer_len=args.kmer_len,
         filter_size=args.filter_size,
         flat_structure=args.flat_structure,
-        limit_genomes=args.limit_genomes,
-        max_genomes=args.max_genomes,
-        min_genomes=args.min_genomes,
         estimate_filter_size=args.estimate_filter_size,
         increase_filter_size=args.increase_filter_size,
         min_kmer_occurrences=args.min_kmer_occurrences,
