@@ -6,7 +6,7 @@ superkingdom and kingdom from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 20, 2023"
+__date__ = "Apr 25, 2023"
 
 import argparse as ap
 import datetime
@@ -406,7 +406,7 @@ def get_genomes_in_ncbi(
     return ncbi_genomes
 
 
-def urlretrieve_wrapper(url: str, filepath: str) -> Tuple[str, bool]:
+def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, bool]:
     """
     Wrapper around urlretrieve
 
@@ -417,24 +417,25 @@ def urlretrieve_wrapper(url: str, filepath: str) -> Tuple[str, bool]:
 
     exists_and_passed_integrity = False
 
-    try:
-        urlretrieve(url, filepath)
-        
-        # Check file integrity
-        subprocess.check_call(
-            [
-                "gzip",
-                "-t",
-                filepath,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+    while retry > 0 and not exists_and_passed_integrity:
+        try:
+            urlretrieve(url, filepath)
+            
+            # Check file integrity
+            subprocess.check_call(
+                [
+                    "gzip",
+                    "-t",
+                    filepath,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
 
-        exists_and_passed_integrity = True
+            exists_and_passed_integrity = True
 
-    except Exception:
-        pass
+        except Exception:
+            retry -= 1
 
     return filepath, exists_and_passed_integrity
 
