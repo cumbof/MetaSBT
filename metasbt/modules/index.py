@@ -39,6 +39,8 @@ try:
         get_file_info,
         howdesbt,
         init_logger,
+        load_input_table,
+        load_manifest,
         number,
         optimal_k,
         println,
@@ -872,44 +874,8 @@ def index(
     # every time the println function is invoked
     printline = partial(println, logger=logger, verbose=verbose)
 
-    # Load the set of input genomes
-    taxonomy2genomes: Dict[str, List[str]] = dict()
-    with open(input_list) as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                if not line.startswith("#"):
-                    line_split = line.split("\t")
-
-                    taxonomy = "NA"
-                    if len(line_split) == 2:
-                        taxonomy = line_split[1]
-
-                        if len(taxonomy.split("|")) != 7:
-                            # Taxonomic labels must have 7 levels
-                            raise Exception(
-                                "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
-                                    line_split[1]
-                                )
-                            )
-
-                    # This automatically check whether extension and compression are supported
-                    dirpath, genome_name, extension, compression = get_file_info(line_split[0])
-
-                    if not line_split[0].endswith(".{}".format(input_extension)):
-                        raise Exception(
-                            "Unexpected input file extension! "
-                            "File: {}; Expected extension: {}".format(line_split[0], input_extension)
-                        )
-
-                    if taxonomy not in taxonomy2genomes:
-                        taxonomy2genomes[taxonomy] = list()
-
-                    taxonomy2genomes[taxonomy].append(
-                        os.path.join(dirpath, "{}{}{}".format(
-                            genome_name, extension, compression if compression else ""
-                        ))
-                    )
+    # Load the list of input genomes and eventually their taxonomic labels
+    taxonomy2genomes = load_input_table(input_list, input_extension=input_extension)
 
     # Force flat structure in case of genomes with no taxonomic label
     if "NA" in taxonomy2genomes:
@@ -973,7 +939,6 @@ def index(
 
     # Add cluster counter
     with open(manifest_filepath, "a+") as manifest:
-        manifest.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
         manifest.write("--clusters-counter {}\n".format(clusters_counter))
 
     # Limited set of genomes in case of --estimate-kmer-size and/or --estimate-filter-size
@@ -1216,26 +1181,28 @@ def main() -> None:
 
     if os.path.isfile(manifest_filepath):
         # Load and compare --kmer-len and --filter-size
-        # This is require to resume the process
-        with open(manifest_filepath) as manifest:
-            for line in manifest:
-                line = line.strip()
-                if line:
-                    line_split = line.split(" ")
+        manifest = load_manifest(manifest_filepath)
 
-                    if line_split[0] == "--kmer-len":
-                        if not args.kmer_len:
-                            args.kmer_len = int(line_split[1])
+        if "kmer_len" in manifest
+            if not args.kmer_len:
+                args.kmer_len = manifest["kmer_len"]
 
-                        elif args.kmer_len != int(line_split[1]):
-                            raise Exception("The kmer length is not compatible with the specified database")
+            elif args.kmer_len != manifest["kmer_len"]:
+                raise ValueError("The kmer length is not compatible with the specified database")
 
-                    elif line_split[0] == "--filter-size":
-                        if not args.filter_size:
-                            args.filter_size = int(line_split[1])
+        if "filter_size" in manifest
+            if not args.filter_size:
+                args.filter_size = manifest["filter_size"]
 
-                        elif args.filter_size != int(line_split[1]):
-                            raise Exception("The bloom filter size is not compatible with the specified database")
+            elif args.filter_size != manifest["filter_size"]:
+                raise ValueError("The bloom filter size is not compatible with the specified database")
+
+        if "min_kmer_occurrences" in manifest
+            if not args.min_kmer_occurrences:
+                args.min_kmer_occurrences = manifest["min_kmer_occurrences"]
+
+            elif args.min_kmer_occurrences != manifest["min_kmer_occurrences"]:
+                raise ValueError("The minimum number of occurrences of kmers is not compatible with the specified database")
 
     else:
         # Initialize manifest file
@@ -1245,6 +1212,8 @@ def main() -> None:
             
             if args.filter_size:
                 manifest.write("--filter-size {}\n".format(args.filter_size))
+
+            manifest.write("--min-kmer-occurrences {}\n".format(args.min_kmer_occurrences))
 
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
