@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 25, 2023"
+__date__ = "Apr 26, 2023"
 
 import argparse as ap
 import errno
@@ -1078,6 +1078,7 @@ def index(
                         estimate_bf_size_and_howdesbt,
                         extension=input_extension,
                         kmer_len=kmer_len,
+                        min_kmer_occurrences=min_kmer_occurrences,
                         prefix="genomes",
                         limit_number=limit_estimation_number,
                         limit_percentage=limit_estimation_percentage,
