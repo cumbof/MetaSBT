@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 25, 2023"
+__date__ = "Apr 26, 2023"
 
 import argparse as ap
 import errno
@@ -737,6 +737,9 @@ def estimate_bf_size(
             silence=True,
         )
 
+    # Total number of kmers in the reads
+    F1 = 0
+
     # Number of distinct kmers
     F0 = 0
 
@@ -744,13 +747,18 @@ def estimate_bf_size(
     fs = list()
 
     # Read the ntCard output hist file
-    with open(os.path.join(tmp_dir, "{}_k{}.hist".format(prefix, kmer_len))) as histfile:
+    hist_filepath = os.path.join(tmp_dir, "{}_k{}.hist".format(prefix, kmer_len))
+
+    with open(hist_filepath) as histfile:
         for line in histfile:
             line = line.strip()
             if line:
                 line_split = line.split()
 
-                if line_split[0] == "F0":
+                if line_split[0] == "F1":
+                    F1 = int(line_split[-1])
+
+                elif line_split[0] == "F0":
                     F0 = int(line_split[-1])
 
                 elif isinstance(line_split[0], int):
@@ -759,6 +767,14 @@ def estimate_bf_size(
 
                     else:
                         break
+
+    if F0 == 0:
+        # This could happen in case of a single very small genome
+        # Use F1 as the bloom filter size in this case
+        if F1 == 0:
+            raise Exception("Unable to estimate the bloom filter size: {}".format(hist_filepath))
+
+        return F1
 
     # Estimate the bloom filter size
     return F0 - sum(fs)
