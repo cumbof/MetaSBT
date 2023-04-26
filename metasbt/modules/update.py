@@ -806,6 +806,8 @@ def update(
         get_file_info(genome)[1]: taxonomy for genome in genomes for taxonomy, genomes in taxonomy2genomes.items()
     } if "NA" not in taxonomy2genomes else dict()
 
+    input_type = "references" if "NA" not in taxonomy2genomes else "MAGs"
+
     # Create a temporary folder in case input genomes are gzip compressed
     tmp_genomes_dir = os.path.join(tmp_dir, "genomes")
     os.makedirs(tmp_genomes_dir, exist_ok=True)
