@@ -117,6 +117,22 @@ def read_params():
         help="Consider genomes whose lineage belongs to a specific superkingdom",
     )
     p.add_argument(
+        "--taxa-level-id",
+        type=str,
+        choices=["phylum", "class", "order", "family", "genus", "species"],
+        dest="taxa_level_id",
+        help="Taxonomic level identifier"
+    )
+    p.add_argument(
+        "--taxa-level-name",
+        type=str,
+        dest="taxa_level_name",
+        help=(
+            "Name of the taxonomic level. "
+            "Must be used in conjunction with \"--taxa-level-id\""
+        )
+    )
+    p.add_argument(
         "--type",
         type=str,
         choices=["reference", "mag"],
@@ -170,8 +186,10 @@ def level_name(current_level: str, prev_level: str) -> str:
     # Build the new level name
     level_prefix = current_level.strip()
     level_suffix = ""
+
     if not level_prefix:
         level_prefix = prev_level
+
         # Fill empty taxa levels with unclassified
         level_suffix = "_unclassified"
 
@@ -369,6 +387,8 @@ def get_genomes_in_ncbi(
     superkingdom: str,
     tmpdir: str,
     kingdom: Optional[str] = None,
+    taxa_level_id: Optional[str] = None,
+    taxa_level_name: Optional[str] = None,
 ) -> Dict[str, Dict[str, str]]:
     """
     Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank
@@ -376,8 +396,21 @@ def get_genomes_in_ncbi(
     :param superkingdom:    Archaea, Bacteria, Eukaryota, or Viruses
     :param tmpdir:          Path to the temporary folder
     :param kingdom:         A specific kingdom related to the superkingdom. Optional
+    :param taxa_level_id:   Taxonomic level identifier (phylum, class, order, family, genus, or species)
+    :param taxa_level_name: Name of the taxonomic level as appear in NCBI
     :return:                A dictionary with the genome IDs as keys and URL and taxonomic info as values
     """
+
+    target_cluster = None
+
+    if taxa_level_id and taxa_level_name:
+        # Search for genomes belonging to a specific cluster
+        target_cluster = "{}__{}".format(
+            taxa_level_id.lower()[0],
+            re.sub(r"_+", "_", re.sub(r"\W+", "_", taxa_level_name)).strip("_")
+        )
+    
+    print(target_cluster)
 
     # Download the NCBI nodes and names dumps
     nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmpdir)
@@ -395,13 +428,14 @@ def get_genomes_in_ncbi(
         if species_taxid in taxa_map:
             taxonomy = taxa_map[species_taxid]
 
-            for species_info in assembly_summary[species_taxid]:
-                ncbi_genomes[species_info["local_filename"]] = {
-                    "type": species_info["genome_type"],
-                    "taxonomy": taxonomy,
-                    "excluded_from_refseq": species_info["excluded_from_refseq"] if species_info["excluded_from_refseq"].strip() else "na",
-                    "url": species_info["ftp_filepath"]
-                }
+            if not target_cluster or "|{}|".format(target_cluster) in "{}|".format(taxonomy):
+                for species_info in assembly_summary[species_taxid]:
+                    ncbi_genomes[species_info["local_filename"]] = {
+                        "type": species_info["genome_type"],
+                        "taxonomy": taxonomy,
+                        "excluded_from_refseq": species_info["excluded_from_refseq"] if species_info["excluded_from_refseq"].strip() else "na",
+                        "url": species_info["ftp_filepath"]
+                    }
 
     return ncbi_genomes
 
@@ -442,10 +476,13 @@ def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, b
 
 def main() -> None:
     args = read_params()
-    
+
+    if (args.taxa_level_id and not args.taxa_level_name) or (args.taxa_level_name and not args.taxa_level_id):
+        raise ValueError("\"--taxa-level-id\" must always be used in conjunction with \"--taxa-level-name\" and the other way around")
+
     if not os.path.isdir(args.out_dir):
         os.makedirs(args.out_dir, exist_ok=True)
-    
+
     if args.download:
         out_folder = "genomes" if not args.type else "{}s".format(args.type)
 
@@ -453,7 +490,7 @@ def main() -> None:
 
         if not os.path.isdir(genomes_dir):
             os.makedirs(genomes_dir, exist_ok=True)
-    
+
     tmp_dir = os.path.join(args.out_dir, "tmp")
 
     if not os.path.isdir(tmp_dir):
@@ -463,7 +500,9 @@ def main() -> None:
     ncbi_genomes = get_genomes_in_ncbi(
         args.superkingdom,
         tmp_dir,
-        kingdom=args.kingdom
+        kingdom=args.kingdom,
+        taxa_level_id=args.taxa_level_id,
+        taxa_level_name=args.taxa_level_name,
     )
 
     if args.db_dir:
@@ -527,7 +566,7 @@ def main() -> None:
 
                 if exists:
                     downloaded.append(filepath)
-        
+
         if downloaded:
             with open(os.path.join(args.out_dir, "{}.tsv".format(out_file)), "a+") as genomes_table:
                 for filepath in downloaded:
