@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__date__ = "Apr 25, 2023"
 
 import argparse as ap
 import errno
@@ -137,14 +137,10 @@ def bfaction(
         if not os.path.exists(genome_file):
             if not compression:
                 # Make a symbolic link in case of an uncompressed file
-                os.symlink(
-                    genome_path,
-                    os.path.join(tmpdir, os.path.basename(genome_path)),
-                )
+                os.symlink(genome_path, genome_file)
 
             else:
                 # Uncompress the genome file
-                # It can always be Gzip compressed here
                 with open(genome_file, "w+") as file:
                     run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
 
@@ -158,7 +154,7 @@ def bfaction(
                     "howdesbt",
                     "makebf",
                     "--k={}".format(kmer_len),
-                    "--min=2",
+                    "--min={}".format(min_occurrences),
                     "--bits={}".format(filter_size),
                     "--hashes=1",
                     "--seed=0,0",
@@ -995,6 +991,7 @@ def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], ta
 
 def howdesbt(
     level_dir: str,
+    extension: str = "fna.gz",
     kmer_len: int = 21,
     min_occurrences: int = 2,
     filter_size: int = 10000,
@@ -1006,6 +1003,7 @@ def howdesbt(
     Genomes must be in the "genomes" folder under level_dir
 
     :param level_dir:       Path to the taxonomic level folder
+    :param extension:       Input file extension
     :param kmer_len:        Length of the kmers
     :param min_occurrences: Exclude kmers with a number of occurrences less than this param
     :param filter_size:     Size of the bloom filters
@@ -1052,17 +1050,16 @@ def howdesbt(
             os.makedirs(filters_dir, exist_ok=True)
 
             # Iterate over the genome files
-            # Genomes are always Gzip compressed .fna files here
-            for genome_path in Path(genomes_folder).glob("*.fna.gz"):
+            for genome_path in Path(genomes_folder).glob("*.{}".format(extension)):
                 # Retrieve genome file info
-                _, genome_name, extension, _ = get_file_info(genome_path)
+                _, genome_name, genome_extension, genome_compression = get_file_info(genome_path)
 
                 # Define the path to the bloom filter representation of the genome
                 bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
 
                 if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
                     # Define the uncompressed genome path
-                    genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, extension))
+                    genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, genome_extension))
 
                     # Uncompress the genome file
                     with open(genome_file, "w+") as file:

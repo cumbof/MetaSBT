@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 20, 2023"
+__date__ = "Apr 25, 2023"
 
 import argparse as ap
 import errno
@@ -132,6 +132,16 @@ def read_params():
         help="This is the database directory with the taxonomically organised sequence bloom trees",
     )
     general_group.add_argument(
+        "--extension",
+        type=str,
+        required=True,
+        choices=["fa", "fa.gz", "fasta", "fasta.gz", "fna", "fna.gz"],
+        help=(
+            "Specify the input genome files extension. "
+            "All the input genomes must have the same file extension before running this module"
+        ),
+    )
+    general_group.add_argument(
         "--flat-structure",
         action="store_true",
         default=False,
@@ -148,7 +158,7 @@ def read_params():
         dest="input_list",
         help=(
             "Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. "
-            "Please note that the input genome files must be gz compressed with fna extension (i.e.: *.fna.gz)"
+            "Please note that the input genome files must all have the same extension and can be Gzip compressed (e.g.: *.fna.gz)"
         ),
     )
     general_group.add_argument(
@@ -334,6 +344,7 @@ def quality_control(
     genomes: list,
     tax_id: str,
     tmp_dir: str,
+    input_extension: str = "fna.gz",
     completeness: float = 0.0,
     contamination: float = 100.0,
     nproc: int = 1,
@@ -345,6 +356,7 @@ def quality_control(
     :param genomes:             List of genome file paths
     :param tax_id:              NCBI tax ID
     :param tmp_dir:             Path to the temporary folder
+    :param input_extension:     File extension of the input files in genomes
     :param completeness:        Completeness threshold
     :param contamination:       Contamination threshold
     :param nproc:               Make CheckM parallel
@@ -362,7 +374,7 @@ def quality_control(
     checkm_tables = checkm(
         genomes,
         checkm_tmp_dir,
-        file_extension="fna.gz",
+        file_extension=input_extension,
         nproc=nproc,
         pplacer_threads=pplacer_threads,
     )
@@ -371,7 +383,7 @@ def quality_control(
     genome_ids = filter_checkm_tables(checkm_tables, completeness=completeness, contamination=contamination)
 
     # Rebuild the genome file paths
-    genome_paths = [os.path.join(tmp_dir, "genomes", tax_id, "{}.fna.gz".format(genome_id)) for genome_id in genome_ids]
+    genome_paths = [os.path.join(tmp_dir, "genomes", tax_id, "{}.{}".format(genome_id, input_extension)) for genome_id in genome_ids]
 
     return genome_paths, checkm_tables
 
@@ -478,6 +490,7 @@ def process_input_genomes(
     db_dir: str,
     tmp_dir: str,
     kmer_len: int,
+    input_extension: str = "fna.gz",
     cluster_prefix: str = "MSBT",
     nproc: int = 1,
     pplacer_threads: int = 1,
@@ -499,6 +512,7 @@ def process_input_genomes(
     :param db_dir:              Path to the database root folder
     :param tmp_dir:             Path to the temporary folder
     :param kmer_len:            Length of the kmers
+    :param input_extension:     File extension of the input files in genomes_list
     :param cluster_prefix:      Cluster prefix
     :param nproc:               Make the process parallel when possible
     :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
@@ -526,6 +540,7 @@ def process_input_genomes(
 
     # Iterate over the list of input genome file paths
     genomes = list()
+
     for genome_path in genomes_list:
         # Symlink input genomes into the temporary folder
         os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
@@ -542,6 +557,7 @@ def process_input_genomes(
             genomes,
             tax_id,
             tmp_dir,
+            input_extension=input_extension,
             completeness=completeness,
             contamination=contamination,
             nproc=nproc,
@@ -677,6 +693,7 @@ def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structu
 def estimate_bf_size_and_howdesbt(
     strains_dir: str,
     tmp_dir: str,
+    extension: str = "fna.gz",
     kmer_len: int = 21,
     min_kmer_occurrences: int = 2,
     prefix: str = "genomes",
@@ -691,6 +708,7 @@ def estimate_bf_size_and_howdesbt(
 
     :param strains_dir:             Path to the strains folder
     :param tmp_dir:                 Path to the temporary folder
+    :param extension:               Input file extension
     :param kmer_len:                Kmer size
     :param min_kmer_occurrences:    Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
     :param prefix:                  Prefix of the ntCard output histogram file
@@ -708,7 +726,7 @@ def estimate_bf_size_and_howdesbt(
 
     os.makedirs(tmp_dir, exist_ok=True)
 
-    genomes_paths = [str(path) for path in Path(genomes_dir).glob("*.fna.gz")]
+    genomes_paths = [str(path) for path in Path(genomes_dir).glob("*.{}".format(extension))]
 
     # Define a subset of genomes
     genomes_paths_sub = get_sublist(
@@ -735,6 +753,7 @@ def estimate_bf_size_and_howdesbt(
     # Run HowDeSBT
     howdesbt(
         strains_dir,
+        extension=extension,
         kmer_len=kmer_len,
         min_occurrences=min_kmer_occurrences,
         filter_size=filter_size,
@@ -794,6 +813,7 @@ def index(
     db_dir: str,
     input_list: str,
     tmp_dir: str,
+    input_extension: str = "fna.gz",
     cluster_prefix: str = "MSBT",
     kmer_len: Optional[int] = None,
     filter_size: Optional[int] = None,
@@ -823,6 +843,7 @@ def index(
     :param db_dir:                      Path to the database root folder
     :param input_list:                  Path to the file with a list of input genome paths
     :param tmp_dir:                     Path to the temporary folder
+    :param input_extension:             File extension of the input files whose paths are defined into the input_list file
     :param cluster_prefix:              Prefix of clusters numerical identifiers
     :param kmer_len:                    Length of the kmers
     :param filter_size:                 Size of the bloom filters
@@ -875,6 +896,12 @@ def index(
                     # This automatically check whether extension and compression are supported
                     dirpath, genome_name, extension, compression = get_file_info(line_split[0])
 
+                    if not line_split[0].endswith(".{}".format(input_extension)):
+                        raise Exception(
+                            "Unexpected input file extension! "
+                            "File: {}; Expected extension: {}".format(line_split[0], input_extension)
+                        )
+
                     if taxonomy not in taxonomy2genomes:
                         taxonomy2genomes[taxonomy] = list()
 
@@ -894,6 +921,7 @@ def index(
         db_dir=db_dir,
         tmp_dir=tmp_dir,
         kmer_len=kmer_len,
+        input_extension=input_extension,
         cluster_prefix=cluster_prefix,
         nproc=nproc,
         pplacer_threads=pplacer_threads,
@@ -1023,6 +1051,7 @@ def index(
         # Define a partial function around the howdesbt wrapper
         howdesbt_partial = partial(
             howdesbt,
+            extension=input_extension,
             kmer_len=kmer_len,
             min_occurrences=min_kmer_occurrences,
             filter_size=filter_size,
@@ -1047,6 +1076,7 @@ def index(
                 if level == "species":
                     estimate_bf_size_and_howdesbt_partial = partial(
                         estimate_bf_size_and_howdesbt,
+                        extension=input_extension,
                         kmer_len=kmer_len,
                         prefix="genomes",
                         limit_number=limit_estimation_number,
@@ -1068,7 +1098,10 @@ def index(
                         jobs = [
                             strains_pool.apply_async(
                                 estimate_bf_size_and_howdesbt_partial,
-                                args=(os.path.join(species_dir, "strains"), os.path.join(species_dir, "strains", "tmp"),),
+                                args=(
+                                    os.path.join(species_dir, "strains"),
+                                    os.path.join(species_dir, "strains", "tmp"),
+                                ),
                                 callback=progress
                             )
                             for species_dir in folders
@@ -1081,8 +1114,8 @@ def index(
                             # Populate the genomes folder at the species level with the selected genomes
                             for genome in selected_genomes:
                                 os.symlink(
-                                    os.path.join(strains_dir, "genomes", "{}.fna.gz".format(genome)),
-                                    os.path.join(species_dir, "genomes", "{}.fna.gz".format(genome))
+                                    os.path.join(strains_dir, "genomes", "{}.{}".format(genome, input_extension)),
+                                    os.path.join(species_dir, "genomes", "{}.{}".format(genome, input_extension))
                                 )
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
@@ -1225,6 +1258,7 @@ def main() -> None:
         args.db_dir,
         args.input_list,
         args.tmp_dir,
+        input_extension=args.extension,
         cluster_prefix=args.cluster_prefix,
         kmer_len=args.kmer_len,
         filter_size=args.filter_size,
