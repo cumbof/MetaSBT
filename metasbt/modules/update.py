@@ -41,6 +41,7 @@ try:
         howdesbt,
         init_logger,
         load_boundaries,
+        load_input_table,
         load_manifest,
         number,
         println,
@@ -141,7 +142,10 @@ def read_params():
         type=os.path.abspath,
         required=True,
         dest="input_list",
-        help="This file contains the list of paths to the new genomes that will be added to the database",
+        help=(
+            "Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. "
+            "Please note that the input genome files must all have the same extension and can be Gzip compressed (e.g.: *.fna.gz)"
+        ),
     )
     general_group.add_argument(
         "--log",
@@ -161,26 +165,11 @@ def read_params():
         help="Maximum number of processors to process input genomes in parallel",
     )
     general_group.add_argument(
-        "--taxa",
-        type=os.path.abspath,
-        help=(
-            "Input file with the mapping between input genome IDs and their taxonomic label. "
-            'This is used in case of reference genomes only "--type references"'
-        ),
-    )
-    general_group.add_argument(
         "--tmp-dir",
         type=os.path.abspath,
         required=True,
         dest="tmp_dir",
         help="Path to the folder for storing temporary data",
-    )
-    general_group.add_argument(
-        "--type",
-        type=str,
-        required=True,
-        choices=["MAGs", "references"],
-        help="Define the nature of the input genomes",
     )
     general_group.add_argument(
         "--verbose",
@@ -239,50 +228,6 @@ def read_params():
     )
 
     return p.parse_args()
-
-
-def load_taxa(taxa_filepath: Optional[str] = None, genomes_path: Optional[List[str]] = None) -> Dict[str, str]:
-    """
-    Load the taxa file with the mapping between the input genome names and their taxonomic labels
-
-    :param taxa_filepath:   Path to the input mapping file with the taxonomic labels
-    :param genomes_path:    List with paths to the input genome files
-    :return:                Dictionary with mapping between genome names and their taxonomic labels
-    """
-
-    if taxa_filepath is None or genomes_path is None:
-        return dict()
-
-    if not os.path.isfile(taxa_filepath) or len(genomes_path) == 0:
-        return dict()
-
-    # Define a mapping between input genome names and taxonomic labels
-    taxonomies = dict()
-
-    # Load taxonomic labels
-    with open(taxa_filepath) as taxa_file:
-        for line in taxa_file:
-            line = line.strip()
-            if line:
-                if not line.startswith("#"):
-                    line_split = line.split("\t")
-                    taxonomies[line_split[0]] = line_split[1]
-
-    # Retrieve the input genome names
-    genome_names = list()
-
-    if genomes_path:
-        for genome_path in genomes_path:
-            # Get the genome name
-            _, genome_name, _, _ = get_file_info(genome_path)
-
-            genome_names.append(genome_name)
-
-    # Check whether a taxonomic label is defined for each of the input genome
-    if len(set(genome_names).intersection(set(taxonomies.keys()))) < len(set(genome_names)):
-        raise Exception("Unable to find all the taxonomic labels for the input reference genomes")
-
-    return taxonomies
 
 
 def profile_and_assign(
@@ -778,13 +723,11 @@ def build_cluster(
 
 def update(
     input_list: str,
-    input_type: str,
     extension: str,
     db_dir: str,
     tmp_dir: str,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
-    taxa_map: Optional[str] = None,
     fast_profile: bool = False,
     completeness: float = 0.0,
     contamination: float = 100.0,
@@ -802,14 +745,11 @@ def update(
     Also create new clusters in case the input genomes result too far from everything in the database
 
     :param input_list:              Path to the input file with the list of input genome paths
-    :param input_type:              Nature of the input genomes (MAGs or references)
     :param extension:               File extension of the input genome files
     :param db_dir:                  Path to the database root folder
     :param tmp_dir:                 Path to the temporary folder
     :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
-    :param taxa_map:                Path to the file with the mapping between the input genome names and their taxonomic labels
-                                    Used only in case of input reference genomes
     :param fast_profile:            Query the tree with the representative genomes under the species level instead
                                     of the strains tree (fast but low precision in establishing the closest genome)
     :param completeness:            Threshold on the CheckM completeness
@@ -854,8 +794,17 @@ def update(
             ex.__traceback__
         )
 
-    # Load the list of genome paths
-    input_genomes_paths = [path.strip() for path in open(input_list).readlines() if path.strip()]
+    # Load the list of input genomes and eventually their taxonomic labels
+    taxonomy2genomes = load_input_table(input_list, input_extension=input_extension)
+
+    # Get the list of genome paths
+    input_genomes_paths = set().union(*taxonomy2genomes.values())
+
+    # Load the file with the mapping between genome names and taxonomic labels
+    # Only in case of input reference genomes
+    taxonomies = {
+        get_file_info(genome)[1]: taxonomy for genome in genomes for taxonomy, genomes in taxonomy2genomes.items()
+    } if "NA" not in taxonomy2genomes else dict()
 
     # Create a temporary folder in case input genomes are gzip compressed
     tmp_genomes_dir = os.path.join(tmp_dir, "genomes")
@@ -863,13 +812,10 @@ def update(
 
     # Symlink input genomes
     genomes_paths = list()
+
     for genome_path in input_genomes_paths:
         os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
         genomes_paths.append(os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
-
-    # Load the file with the mapping between genome names and taxonomic labels
-    # Only in case of input reference genomes
-    taxonomies: Dict[str, str] = load_taxa(taxa_map, genomes_paths) if input_type == "references" else dict()
 
     printline("Processing {} input genomes ({})".format(len(genomes_paths), input_type))
 
@@ -1180,7 +1126,8 @@ def update(
                 # Build the partial taxonomic label
                 taxalist.add("|".join(levels[: i + 1]))
 
-            level_id = list(taxalist)[0][0]
+            # Get the level ID of the last characterized taxonomic level
+            level_id = list(taxalist)[0].split("|")[-1][0]
 
             printline("Rebuilding {}".format(level_names[level_ids.index(level_id)]))
 
@@ -1232,11 +1179,6 @@ def main() -> None:
     if not os.path.isfile(args.input_list):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.input_list)
 
-    # Check whether the input file with the mapping between genome name and taxonomic labels exists
-    # Only in case of input reference genomes
-    if args.type == "references" and not os.path.isfile(args.taxa):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.taxa)
-
     # Check whether the boundaries table exists
     if not os.path.isfile(args.boundaries):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.boundaries)
@@ -1255,13 +1197,11 @@ def main() -> None:
 
     update(
         args.input_list,
-        args.type,
         args.extension,
         args.db_dir,
         args.tmp_dir,
         boundaries_table,
         boundary_uncertainty=args.boundary_uncertainty,
-        taxa_map=args.taxa,
         fast_profile=args.fast_profile,
         completeness=args.completeness,
         contamination=args.contamination,
