@@ -1061,9 +1061,10 @@ def howdesbt(
                     # Define the uncompressed genome path
                     genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, genome_extension))
 
-                    # Uncompress the genome file
-                    with open(genome_file, "w+") as file:
-                        run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
+                    if genome_compression:
+                        # Uncompress the genome file
+                        with open(genome_file, "w+") as file:
+                            run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
 
                     # Build the bloom filter file from the current genome
                     run(
@@ -1083,8 +1084,9 @@ def howdesbt(
                         stderr=howdesbt_log,
                     )
 
-                    # Get rid of the uncompressed genome file
-                    os.unlink(genome_file)
+                    if genome_compression:
+                        # Get rid of the uncompressed genome file
+                        os.unlink(genome_file)
 
                     # Compress the bloom filter file
                     with open("{}.gz".format(bf_filepath), "w+") as file:
