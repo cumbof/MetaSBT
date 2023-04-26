@@ -98,7 +98,7 @@ def report(db_dir: str, output_file: str) -> None:
         # Write metadata
         output.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
         output.write("# Database: {}\n".format(db_dir))
-        output.write("# Timestamp: {}\n".format(datetime.today().strftime("%Y%m%d")))
+        output.write("# Timestamp: {}\n".format(datetime.datetime.today().strftime("%Y%m%d")))
 
         # Write header line
         output.write(
