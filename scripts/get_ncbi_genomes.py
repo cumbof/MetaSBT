@@ -6,7 +6,7 @@ superkingdom and kingdom from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 25, 2023"
+__date__ = "Apr 26, 2023"
 
 import argparse as ap
 import datetime
@@ -469,6 +469,9 @@ def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, b
             exists_and_passed_integrity = True
 
         except Exception:
+            if os.path.isfile(filepath):
+                os.unlink(filepath)
+
             retry -= 1
 
     return filepath, exists_and_passed_integrity
