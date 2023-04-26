@@ -399,6 +399,7 @@ def get_genomes_in_ncbi(
     :param taxa_level_id:   Taxonomic level identifier (phylum, class, order, family, genus, or species)
     :param taxa_level_name: Name of the taxonomic level as appear in NCBI
     :return:                A dictionary with the genome IDs as keys and URL and taxonomic info as values
+                            and optionally the name of the specified cluster
     """
 
     target_cluster = None
@@ -409,8 +410,6 @@ def get_genomes_in_ncbi(
             taxa_level_id.lower()[0],
             re.sub(r"_+", "_", re.sub(r"\W+", "_", taxa_level_name)).strip("_")
         )
-    
-    print(target_cluster)
 
     # Download the NCBI nodes and names dumps
     nodes_dmp, names_dmp = download_taxdump(TAXDUMP_URL, tmpdir)
@@ -437,7 +436,7 @@ def get_genomes_in_ncbi(
                         "url": species_info["ftp_filepath"]
                     }
 
-    return ncbi_genomes
+    return ncbi_genomes, target_cluster
 
 
 def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, bool]:
@@ -483,24 +482,21 @@ def main() -> None:
     if (args.taxa_level_id and not args.taxa_level_name) or (args.taxa_level_name and not args.taxa_level_id):
         raise ValueError("\"--taxa-level-id\" must always be used in conjunction with \"--taxa-level-name\" and the other way around")
 
-    if not os.path.isdir(args.out_dir):
-        os.makedirs(args.out_dir, exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)
 
     if args.download:
         out_folder = "genomes" if not args.type else "{}s".format(args.type)
 
         genomes_dir = os.path.join(args.out_dir, out_folder)
 
-        if not os.path.isdir(genomes_dir):
-            os.makedirs(genomes_dir, exist_ok=True)
+        os.makedirs(genomes_dir, exist_ok=True)
 
     tmp_dir = os.path.join(args.out_dir, "tmp")
 
-    if not os.path.isdir(tmp_dir):
-        os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(tmp_dir, exist_ok=True)
 
     # Retrieve genomes from NCBI
-    ncbi_genomes = get_genomes_in_ncbi(
+    ncbi_genomes, target_cluster = get_genomes_in_ncbi(
         args.superkingdom,
         tmp_dir,
         kingdom=args.kingdom,
@@ -508,28 +504,36 @@ def main() -> None:
         taxa_level_name=args.taxa_level_name,
     )
 
-    if args.db_dir:
-        if os.path.isdir(args.db_dir):
-            # Get the list of genome IDs in the database
-            db_genomes = get_genomes_in_db(args.db_dir)
+    if args.db_dir and os.path.isdir(args.db_dir):
+        # Get the list of genome IDs in the database
+        db_genomes = get_genomes_in_db(args.db_dir)
 
-            # Remove genomes already in the database
-            in_db = set(ncbi_genomes.keys()).intersection(db_genomes)
+        # Remove genomes already in the database
+        in_db = set(ncbi_genomes.keys()).intersection(db_genomes)
 
-            for genome in in_db:
-                del ncbi_genomes[genome]
+        for genome in in_db:
+            del ncbi_genomes[genome]
 
     if ncbi_genomes:
-        out_file = "genomes" if not args.type else "{}s".format(args.type)
+        out_file_name = "genomes" if not args.type else "{}s".format(args.type)
+        out_file_path = os.path.join(args.out_dir, "{}.tsv".format(out_file_name))
 
-        with open(os.path.join(args.out_dir, "{}.tsv".format(out_file)), "w+") as genomes_table:
-            genomes_table.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
-            genomes_table.write("# timestamp {}\n".format(datetime.datetime.utcnow()))
-            genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\turl\n")
+        exclude_genomes = list()
+
+        if not os.path.isfile(out_file_path):
+            with open(out_file_path, "w+") as genomes_table:
+                genomes_table.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
+                genomes_table.write("# timestamp {}\n".format(datetime.datetime.utcnow()))
+                genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\turl\n")
+        
+        else:
+            exclude_genomes = [
+                line.strip().split("\t")[0] for line in open(out_file_path).readlines() if line.strip() and not line.strip().startswith("#")
+            ]
 
         genomes = list(
             filter(
-                lambda genome: ncbi_genomes[genome]["type"] == args.type or not args.type,
+                lambda genome: (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes,
                 ncbi_genomes.keys()
             )
         )
@@ -537,10 +541,11 @@ def main() -> None:
         downloaded = list()
 
         print(
-            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Type \"{}\")".format(
+            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"\"; Type \"{}\")".format(
                 len(genomes),
                 args.superkingdom,
                 args.kingdom,
+                target_cluster,
                 args.type
             )
         )
@@ -571,7 +576,7 @@ def main() -> None:
                     downloaded.append(filepath)
 
         if downloaded:
-            with open(os.path.join(args.out_dir, "{}.tsv".format(out_file)), "a+") as genomes_table:
+            with open(out_file_path, "a+") as genomes_table:
                 for filepath in downloaded:
                     genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
 
