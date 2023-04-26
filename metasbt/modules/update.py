@@ -795,7 +795,7 @@ def update(
         )
 
     # Load the list of input genomes and eventually their taxonomic labels
-    taxonomy2genomes = load_input_table(input_list, input_extension=input_extension)
+    taxonomy2genomes = load_input_table(input_list, input_extension=extension)
 
     # Get the list of genome paths
     input_genomes_paths = set().union(*taxonomy2genomes.values())
