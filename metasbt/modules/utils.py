@@ -1400,6 +1400,66 @@ def load_boundaries(boundaries_filepath: str) -> Dict[str, Dict[str, Union[int, 
     return boundaries
 
 
+def load_input_table(filepath: str, input_extension: str = "fna.gz") -> Dict[str, str]:
+    """
+    Load the input table with the list of paths to the genome files and eventually their taxonomic labels
+
+    :param filepath:            Path to the input file
+    :param input_extension:     Input genome files extension
+    :return:                    A list with paths to the input genomes in case of MAGs or a dictionary with 
+                                genome paths and their taxonomic labels in case of reference genomes
+    """
+
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+
+    taxonomy2genomes: Dict[str, List[str]] = dict()
+
+    with open(filepath) as input_file:
+        for line in input_file:
+            line = line.strip()
+
+            if line:
+                if not line.startswith("#"):
+                    line_split = line.split("\t")
+
+                    taxonomy = "NA"
+
+                    if len(line_split) > 2:
+                        raise Exception("Malformed input file! It must contain two columns at most")
+
+                    elif len(line_split) == 2:
+                        taxonomy = line_split[1]
+
+                        if len(taxonomy.split("|")) != 7:
+                            # Taxonomic labels must have 7 levels
+                            raise Exception(
+                                "Invalid taxonomic label! Please note that taxonomies must have 7 levels:\n{}".format(
+                                    line_split[1]
+                                )
+                            )
+
+                    # This automatically check whether extension and compression are supported
+                    dirpath, genome_name, extension, compression = get_file_info(line_split[0])
+
+                    if not line_split[0].endswith(".{}".format(input_extension)):
+                        raise Exception(
+                            "Unexpected input file extension! "
+                            "File: {}; Expected extension: {}".format(line_split[0], input_extension)
+                        )
+
+                    if taxonomy not in taxonomy2genomes:
+                        taxonomy2genomes[taxonomy] = list()
+
+                    taxonomy2genomes[taxonomy].append(
+                        os.path.join(dirpath, "{}{}{}".format(
+                            genome_name, extension, compression if compression else ""
+                        ))
+                    )
+
+    return taxonomy2genomes
+
+
 def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:
     """
     Load the manifest file
@@ -1421,9 +1481,11 @@ def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:
 
                 # e.g., key: --kmer-len > kmer_len
                 key = line_split[0][2:].replace("-", "_")
+
                 try:
                     # Try to cast values to the appropriate type
                     manifest[key] = literal_eval(line_split[1])
+
                 except Exception:
                     # Otherwise, maintain value as string
                     manifest[key] = line_split[1]
