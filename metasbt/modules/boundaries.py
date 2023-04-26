@@ -6,7 +6,7 @@ between all the genomes under a specific cluster
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 17, 2023"
+__date__ = "Apr 26, 2023"
 
 import argparse as ap
 import errno
@@ -65,6 +65,13 @@ def read_params():
         action="store_true",
         default=False,
         help="Remove temporary data at the end of the pipeline",
+    )
+    p.add_argument(
+        "--consider-mags",
+        action="store_true",
+        default=False,
+        dest="consider_mags"
+        help="Also consider MAGs while counting genomes",
     )
     p.add_argument(
         "--db-dir",
@@ -149,6 +156,7 @@ def define_boundaries(
     output: str,
     kmer_len: int,
     filter_size: int,
+    consider_mags: bool = False,
     max_genomes: Optional[int] = None,
     min_genomes: int = 3,
     nproc: int = 1,
@@ -162,6 +170,7 @@ def define_boundaries(
     :param output:          Path to the output table file with boundaries
     :param kmer_len:        Length of the kmers
     :param filter_size:     Size of the bloom filters
+    :param consider_mags:   Consider MAGs while counting genomes
     :param max_genomes:     Consider this number of genomes at most for computing boundaries
     :param min_genomes:     Consider clusters with at least this number of genomes
     :param nproc:           Make the process parallel when possible
@@ -169,10 +178,16 @@ def define_boundaries(
 
     # Search and merge all the reference genomes paths under all references.txt files in the current taxonomic level
     samples: Dict[str, List[str]] = dict()
+
     # Genomes are usually listed in references.txt files
     references_paths = list(Path(level_dir).glob("**/references.txt"))
+
     # Databases without a taxonomic structure use genomes.txt
     references_paths.extend(list(Path(level_dir).glob("**/genomes.txt")))
+
+    if consider_mags:
+        # Extend the set of genomes to the MAGs
+        references_paths.extend(list(Path(level_dir).glob("**/mags.txt")))
 
     # Take track of the overall number of reference genomes
     # under a specific taxonomic level
@@ -308,6 +323,7 @@ def boundaries(
     flat_structure: bool = False,
     max_genomes: Optional[int] = None,
     min_genomes: int = 3,
+    consider_mags: bool = False,
     superkingdom: Optional[str] = None,
     logger: Optional[Logger] = None,
     verbose: bool = False,
@@ -322,6 +338,7 @@ def boundaries(
     :param output:          Path to the output table file with boundaries
     :param flat_structure:  Genomes in the database have been organized without a taxonomic structure
     :param min_genomes:     Consider clusters with at least this number of genomes
+    :param consider_mags:   Consider MAGs while counting genomes
     :param superkingdom:    Retrieve genomes that belong to a specific superkingdom
     :param logger:          Logger object
     :param verbose:         Print messages on screen
@@ -381,6 +398,7 @@ def boundaries(
             output,
             manifest["kmer_len"],
             manifest["filter_size"],
+            consider_mags=consider_mags,
             max_genomes=max_genomes,
             min_genomes=min_genomes,
             nproc=nproc,
@@ -418,6 +436,7 @@ def boundaries(
                         output,
                         manifest["kmer_len"],
                         species_manifest["filter_size"] if species_manifest else manifest["filter_size"],
+                        consider_mags=consider_mags,
                         max_genomes=max_genomes,
                         min_genomes=min_genomes,
                         nproc=nproc,
@@ -432,6 +451,7 @@ def boundaries(
                 output,
                 manifest["kmer_len"],
                 manifest["filter_size"],
+                consider_mags=consider_mags,
                 max_genomes=max_genomes,
                 min_genomes=min_genomes,
                 nproc=nproc,
@@ -477,6 +497,7 @@ def main() -> None:
         flat_structure=args.flat_structure,
         max_genomes=args.max_genomes,
         min_genomes=args.min_genomes,
+        consider_mags=args.consider_mags,
         superkingdom=args.superkingdom,
         logger=logger,
         verbose=args.verbose,
