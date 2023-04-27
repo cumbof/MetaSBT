@@ -70,7 +70,7 @@ def read_params():
         "--consider-mags",
         action="store_true",
         default=False,
-        dest="consider_mags"
+        dest="consider_mags",
         help="Also consider MAGs while counting genomes",
     )
     p.add_argument(
