@@ -676,7 +676,8 @@ def build_cluster(
                 if genome_name in remove_selected_genomes:
                     os.unlink(str(genome_path))
 
-                    os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
+            for genome_name in remove_selected_genomes:
+                os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
         
         if len(add_selected_genomes) > 0:
             # Create the genomes folder under the species level in case of a new species
