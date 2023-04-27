@@ -1169,21 +1169,21 @@ def main() -> None:
         # Load and compare --kmer-len and --filter-size
         manifest = load_manifest(manifest_filepath)
 
-        if "kmer_len" in manifest
+        if "kmer_len" in manifest:
             if not args.kmer_len:
                 args.kmer_len = manifest["kmer_len"]
 
             elif args.kmer_len != manifest["kmer_len"]:
                 raise ValueError("The kmer length is not compatible with the specified database")
 
-        if "filter_size" in manifest
+        if "filter_size" in manifest:
             if not args.filter_size:
                 args.filter_size = manifest["filter_size"]
 
             elif args.filter_size != manifest["filter_size"]:
                 raise ValueError("The bloom filter size is not compatible with the specified database")
 
-        if "min_kmer_occurrences" in manifest
+        if "min_kmer_occurrences" in manifest:
             if not args.min_kmer_occurrences:
                 args.min_kmer_occurrences = manifest["min_kmer_occurrences"]
 
