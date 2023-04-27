@@ -6,7 +6,7 @@ superkingdom and kingdom from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 26, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import datetime
@@ -306,10 +306,6 @@ def ncbitax2lin(
                         level_name(line_split[7], line_split[6]),  # Species
                     )
 
-                    # Exclude unclassified taxonomic labels
-                    if "unclassified" not in label:
-                        taxa_map[line_split[0]] = label
-
     return taxa_map
 
 
@@ -531,9 +527,13 @@ def main() -> None:
                 line.strip().split("\t")[0] for line in open(out_file_path).readlines() if line.strip() and not line.strip().startswith("#")
             ]
 
+        # Get the genomes of the same type as the input --type
+        # Exclude genomes if they already appear in an existing output table
+        # Exclude the unclassified genomes or consider them in case the input --type is "mag"
         genomes = list(
             filter(
-                lambda genome: (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes,
+                lambda genome: (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes and \
+                               ("unclassified" not in ncbi_genomes[genome]["taxonomy"] or ("unclassified" in ncbi_genomes[genome]["taxonomy"] and args.type == "mag")),
                 ncbi_genomes.keys()
             )
         )
