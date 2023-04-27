@@ -5,7 +5,7 @@ Create a MetaSBT database tarball
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 15, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import errno
@@ -120,10 +120,33 @@ def main() -> None:
                 with open(os.path.join(subdir, "strains", "genomes", ".tagignore"), "a+") as exclude_tag:
                     exclude_tag.write("*")
 
+                # Compress all the bloom filters under the filters folder at the species level
+                for bf_filepath in Path(os.path.join(subdir, "filters")).glob("*.bf"):
+                    with open("{}.gz".format(bf_filepath), "w+") as bf_file:
+                        run(["gzip", "-c", bf_filepath], stdout=bf_file, stderr=bf_file)
+                    
+                    remove.append("{}.gz".format(bf_filepath))
+
+                with open(os.path.join(subdir, "filters", ".tagignore"), "a+") as exclude_tag:
+                    exclude_tag.write("*.bf")
+                
+                # Do the same with filters under the strains level
+                for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf"):
+                    with open("{}.gz".format(bf_filepath), "w+") as bf_file:
+                        run(["gzip", "-c", bf_filepath], stdout=bf_file, stderr=bf_file)
+                    
+                    remove.append("{}.gz".format(bf_filepath))
+                
+                with open(os.path.join(subdir, "strains", "filters", ".tagignore"), "a+") as exclude_tag:
+                    exclude_tag.write("*.bf")
+
                 remove.append("{}.gz".format(strains_bf_filepath))
                 remove.append(os.path.join(subdir, "genomes", ".tagignore"))
+                remove.append(os.path.join(subdir, "filters", ".tagignore"))
                 remove.append(os.path.join(subdir, "strains", ".tagignore"))
                 remove.append(os.path.join(subdir, "strains", "genomes", ".tagignore"))
+                remove.append(os.path.join(subdir, "strains", "filters", ".tagignore"))
+
 
     with open(os.path.join(args.db_dir, ".tagignore"), "w+") as exclude_tag:
         exclude_tag.write("*.log\n")
