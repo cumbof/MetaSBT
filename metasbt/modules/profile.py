@@ -217,7 +217,7 @@ def profile_genome(
     fast: bool = False,
     stop_at: Optional[str] = None,
     output_prefix: Optional[str] = None,
-    best_uncertainty: float = 2.0,
+    best_uncertainty: float = 25.0,
     logger: Optional[Logger] = None,
     verbose: bool = False,
 ) -> None:
