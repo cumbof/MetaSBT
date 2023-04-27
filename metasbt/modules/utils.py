@@ -1077,7 +1077,7 @@ def howdesbt(
                 # Define the path to the bloom filter representation of the genome
                 bf_filepath = os.path.join(filters_dir, "{}.bf".format(genome_name))
 
-                if not os.path.isfile(bf_filepath) and not os.path.isfile("{}.gz".format(bf_filepath)):
+                if not os.path.isfile(bf_filepath):
                     # Define the uncompressed genome path
                     genome_file = os.path.join(genomes_folder, "{}{}".format(genome_name, genome_extension))
 
@@ -1108,29 +1108,13 @@ def howdesbt(
                         # Get rid of the uncompressed genome file
                         os.unlink(genome_file)
 
-                    # Compress the bloom filter file
-                    with open("{}.gz".format(bf_filepath), "w+") as file:
-                        run(["gzip", "-c", bf_filepath], stdout=file, stderr=file)
-
-                elif os.path.isfile("{}.gz".format(bf_filepath)):
-                    # Uncompress the bloom filter file
-                    with open(bf_filepath, "w+") as file:
-                        run(["gzip", "-dc", "{}.gz".format(bf_filepath)], stdout=file, stderr=file)
-
         filters_folder = os.path.join(level_dir, "filters")
 
         if os.path.isdir(filters_folder):
             # Take track of the bloom filter files
             with open(level_list, "w+") as level_list_file:
-                for bf_filepath in Path(filters_folder).glob("*.bf.gz"):
-                    _, bf_name, _, _ = get_file_info(bf_filepath, check_supported=False, check_exists=False)
-
-                    if not os.path.isfile(os.path.join(filters_folder, "{}.bf".format(bf_name))):
-                        # Uncompress the bloom filter file
-                        with open(os.path.join(filters_folder, "{}.bf".format(bf_name)), "w+") as file:
-                            run(["gzip", "-dc", bf_filepath], stdout=file, stderr=file)
-
-                    level_list_file.write("{}\n".format(os.path.join(filters_folder, "{}.bf".format(bf_name))))
+                for bf_filepath in Path(filters_folder).glob("*.bf"):
+                    level_list_file.write("{}\n".format(bf_filepath))
 
                     # Increment the genomes counter
                     how_many += 1
@@ -1144,8 +1128,8 @@ def howdesbt(
                 bf_filepath = os.path.join(level_dir, level, "{}.bf".format(level))
 
                 if os.path.isfile(bf_filepath):
-                    with open(level_list, "a+") as file:
-                        file.write("{}\n".format(bf_filepath))
+                    with open(level_list, "a+") as level_list_file:
+                        level_list_file.write("{}\n".format(bf_filepath))
 
                     # Increment the genomes counter
                     how_many += 1

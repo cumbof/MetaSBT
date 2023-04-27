@@ -6,7 +6,7 @@ Genomes are provided as inputs or automatically downloaded from NCBI GenBank
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 26, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import errno
@@ -372,7 +372,6 @@ def quality_control(
     os.makedirs(checkm_tmp_dir, exist_ok=True)
 
     # Run CheckM on the current set of genomes
-    # Genomes are always downloaded as fna.gz
     checkm_tables = checkm(
         genomes,
         checkm_tmp_dir,
@@ -449,19 +448,6 @@ def organize_data(
     with open(os.path.join(tax_dir, "metadata.tsv"), "w+") as metafile:
         if not flat_structure:
             metafile.write("# Cluster ID: {}{}\n".format(cluster_prefix, cluster_id))
-
-        if metadata:
-            header_list = list(metadata[0].keys())
-            metafile.write("# {}\n".format("\t".join(header_list)))
-
-            for genome_info in metadata:
-                if os.path.join(genomes_dir, "{}.fna.gz".format(genome_info["local_filename"])) in genomes_paths:
-                    line = list()
-
-                    for h in header_list:
-                        line.append(genome_info[h])
-
-                    metafile.write("{}\n".format("\t".join(line)))
 
     if checkm_tables:
         # Also merge the CheckM output tables and move the result to the taxonomy folder
@@ -781,7 +767,7 @@ def estimate_bf_size_and_howdesbt(
 
     else:
         # Get the bloom filters file paths
-        bf_filepaths = [str(path) for path in Path(os.path.join(strains_dir, "filters")).glob("*.bf.gz")]
+        bf_filepaths = [str(path) for path in Path(os.path.join(strains_dir, "filters")).glob("*.bf")]
 
         # Compute the theta distance between genomes
         bfdistance_theta = bfaction(

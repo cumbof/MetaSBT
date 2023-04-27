@@ -624,7 +624,7 @@ def build_cluster(
         selected_genomes = list()
 
         # Get the bloom filters file paths
-        bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf.gz")]
+        bf_filepaths = [str(path) for path in Path(os.path.join(tax_dir, "strains", "filters")).glob("*.bf")]
 
         if len(bf_filepaths) <= 3:
             # 3 is the maximum number of selected species
@@ -661,7 +661,7 @@ def build_cluster(
 
         # Get the list of previously selected representative genomes
         previously_selected_genomes = [
-            get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters")).glob("*.bf.gz")
+            get_file_info(str(path))[1] for path in Path(os.path.join(tax_dir, "filters")).glob("*.bf")
         ]
 
         add_selected_genomes = set(selected_genomes).difference(set(previously_selected_genomes))
@@ -676,7 +676,7 @@ def build_cluster(
                     os.unlink(str(genome_path))
 
             for genome_name in remove_selected_genomes:
-                os.unlink(os.path.join(tax_dir, "filters", "{}.bf.gz".format(genome_name)))
+                os.unlink(os.path.join(tax_dir, "filters", "{}.bf".format(genome_name)))
         
         if len(add_selected_genomes) > 0:
             # Create the genomes folder under the species level in case of a new species
