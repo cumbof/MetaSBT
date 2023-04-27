@@ -16,6 +16,7 @@ import shutil
 import tarfile
 import tempfile
 import sys
+from pathlib import Path
 
 from tabulate import tabulate
 
