@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 26, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import errno
@@ -369,6 +369,7 @@ def cluster(
     cluster_prefix: str = "MSBT",
     min_occurrences: int = 2,
     nproc: int = 1,
+    fast_assignment: bool = False,
 ) -> Dict[str, str]:
     """
     Define new clusters with the unassigned MAGs
@@ -382,6 +383,8 @@ def cluster(
     :param cluster_prefix:      Prefix of clusters numerical identifiers
     :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
     :param nproc:               Make bfdistance parallel
+    :param fast_assignment:     After characterizing a genome, it compares other input genomes with the just characterized one
+                                and it assigns them the same taxonomic label in case they are close enough (faster but less accurate)
     :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
                                 Also return the list of paths to the unassigned genomes
     """
@@ -513,18 +516,19 @@ def cluster(
                     # Mark current genome as assigned
                     assigned_genomes.append(genomes[i])
 
-                    # Check whether other input genomes look pretty close to the current genome by computing
-                    # the number of kmers in common between the current genome and all the other input genomes
-                    for j in range(i + 1, len(genomes_list)):
-                        # Kmers in common have been already computed
-                        # It returns a float by default
-                        common = int(bfdistance_intersect[genomes[i]][genomes[j]])
+                    if fast_assignment:
+                        # Check whether other input genomes look pretty close to the current genome by computing
+                        # the number of kmers in common between the current genome and all the other input genomes
+                        for j in range(i + 1, len(genomes_list)):
+                            # Kmers in common have been already computed
+                            # It returns a float by default
+                            common = int(bfdistance_intersect[genomes[i]][genomes[j]])
 
-                        if common >= last_known_level_mink:
-                            # Set the second genome as assigned
-                            assigned_genomes.append(genomes[j])
-                            # Also assign these genomes to the same taxonomy assigned to the current genome
-                            assigned_taxa[assigned_taxonomy].append(genomes_list[j])
+                            if common >= last_known_level_mink:
+                                # Set the second genome as assigned
+                                assigned_genomes.append(genomes[j])
+                                # Also assign these genomes to the same taxonomy assigned to the current genome
+                                assigned_taxa[assigned_taxonomy].append(genomes_list[j])
 
     # Update the manifest with the new clusters counter
     if clusters_counter > clusters_counter_manifest:
@@ -1413,7 +1417,7 @@ def load_input_table(filepath: str, input_extension: str = "fna.gz") -> Dict[str
     if not os.path.isfile(filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
 
-    taxonomy2genomes: Dict[str, List[str]] = dict()
+    genome2taxonomy: Dict[str, str] = dict()
 
     with open(filepath) as input_file:
         for line in input_file:
@@ -1448,14 +1452,28 @@ def load_input_table(filepath: str, input_extension: str = "fna.gz") -> Dict[str
                             "File: {}; Expected extension: {}".format(line_split[0], input_extension)
                         )
 
-                    if taxonomy not in taxonomy2genomes:
-                        taxonomy2genomes[taxonomy] = list()
+                    genome_path = os.path.join(dirpath, "{}{}{}".format(
+                        genome_name, extension, compression if compression else ""
+                    ))
 
-                    taxonomy2genomes[taxonomy].append(
-                        os.path.join(dirpath, "{}{}{}".format(
-                            genome_name, extension, compression if compression else ""
-                        ))
-                    )
+                    if genome_path in genome2taxonomy:
+                        if genome2taxonomy[genome_path] != taxonomy:
+                            raise Exception(
+                                "Genome \"{}\" appears twice in the input file with two different taxonomic labels:\n{}\n{}".format(
+                                    genome_name, genome2taxonomy[genome_path], taxonomy
+                                )
+                            )
+
+                    genome2taxonomy[genome_path] = taxonomy
+
+    taxonomy2genomes: Dict[str, List[str]] = dict()
+
+    if genome2taxonomy:
+        for genome_path in genome2taxonomy:
+            if genome2taxonomy[genome_path] not in taxonomy2genomes:
+                taxonomy2genomes[genome2taxonomy[genome_path]] = list()
+
+            taxonomy2genomes[genome2taxonomy[genome_path]].append(genome_path)
 
     return taxonomy2genomes
 
