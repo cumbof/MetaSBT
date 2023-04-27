@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 19, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import errno
@@ -607,8 +607,7 @@ def build_cluster(
         strains_manifest = load_manifest(strains_manifest_filepath)
         
         # Remove the old index
-        if os.path.isdir(os.path.join(tax_dir, "strains", "index")):
-            shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
+        shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
 
         # Rebuild the strains SBT first
         # Use the species-specific bloom filter size in manifest
@@ -657,7 +656,7 @@ def build_cluster(
             selected_genomes.append(sorted_genomes[0])
             selected_genomes.append(sorted_genomes[-1])
 
-            # Also select a genome in the middles of min and max distances
+            # Also select a genome in the middle of min and max distances
             selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
 
         # Get the list of previously selected representative genomes
@@ -698,11 +697,10 @@ def build_cluster(
 
     if build:
         # Remove the old index if it exists
-        if os.path.isdir(os.path.join(tax_dir, "index")):
-            shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
+        shutil.rmtree(os.path.join(tax_dir, "index"), ignore_errors=True)
 
-        # Remove filters
-        if os.path.isdir(os.path.join(tax_dir, "filters")):
+        if not taxonomy.split("|")[-1].startswith("s__"):
+            # Remove filters
             shutil.rmtree(os.path.join(tax_dir, "filters"), ignore_errors=True)
 
         # Also remove the copy of the root node if it exists
