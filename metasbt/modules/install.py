@@ -5,7 +5,7 @@ Install pre-computed MetaSBT databases locally
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 1, 2023"
+__date__ = "Apr 27, 2023"
 
 import argparse as ap
 import errno
@@ -334,8 +334,8 @@ def main() -> None:
         print("Unpacking tarball into {}".format(args.install_in))
         tf.extractall(path=args.install_in)
 
-    # Fix file paths
-    print("Fixing absolute paths")
+    # Unpack bloom filters and fix file paths
+    print("Unpacking bloom filters and fixing absolute paths")
 
     # kingdom, phylum, class, order, family, genus, species
     taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
@@ -363,7 +363,13 @@ def main() -> None:
 
             if dirname[:3] in taxonomic_levels_prefixes and dirname[0] == "s":
                 # This is the species level
-                # Fix paths and uncompress the bloom filter file in the strains folder
+                # Fix paths and uncompress the bloom filter files
+                for bf_filepath in Path(os.path.join(subdir, "filters")).glob("*.bf.gz"):
+                    run(["gzip", "-d", bf_filepath])
+
+                for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf.gz"):
+                    run(["gzip", "-d", bf_filepath])
+
                 fix_paths(
                     os.path.join(subdir, "strains", "strains.txt"),
                     os.path.splitext(os.path.basename(tarball_filepath))[0],
