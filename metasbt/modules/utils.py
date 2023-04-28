@@ -4,7 +4,7 @@ Utility functions
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 27, 2023"
+__date__ = "Apr 28, 2023"
 
 import argparse as ap
 import errno
@@ -1225,14 +1225,6 @@ def howdesbt(
             stdout=howdesbt_log,
             stderr=howdesbt_log,
         )
-
-    # In case of species level or flat structure
-    # Remove the uncompressed version of the bloom filter files
-    if os.path.basename(level_dir).startswith("s__") or flat_structure:
-        bf_filepaths = [bf.strip() for bf in open(level_list).readlines() if bf.strip()]
-
-        for bf in bf_filepaths:
-            os.unlink(bf)
 
     # Close the log file handler
     howdesbt_log.close()
