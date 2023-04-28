@@ -7,7 +7,7 @@ single sequences are merged together
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 18, 2023"
+__date__ = "Apr 28, 2023"
 
 import argparse as ap
 import errno
@@ -61,15 +61,6 @@ def read_params():
         action="store_true",
         default=False,
         help="Expand the input query on all the taxonomic levels",
-    )
-    p.add_argument(
-        "--fast",
-        action="store_true",
-        default=False,
-        help=(
-            "Query the tree with the representative genomes at the species level "
-            "instead of the strains tree (fast but low precision in establishing the closest genome)"
-        ),
     )
     p.add_argument(
         "--input-file",
@@ -214,7 +205,6 @@ def profile_genome(
     output_dir: str,
     threshold: float = 0.0,
     expand: bool = False,
-    fast: bool = False,
     stop_at: Optional[str] = None,
     output_prefix: Optional[str] = None,
     best_uncertainty: float = 25.0,
@@ -231,8 +221,6 @@ def profile_genome(
     :param output_dir:          Path to the output folder
     :param threhsold:           Query threshold
     :param expand:              Expand the query to the lower taxonomic levels
-    :param fast:                In case of expand, query the tree with the representative genomes only at the species level
-                                Otherwise, redirect the query to the strains tree (slow but precise)
     :param stop_at:             Stop expanding the query at a specific taxonomic level
     :param output_prefix:       Prefix of the output files with profiles
     :param best_uncertainty:    Consider this uncertainty percentage when selecting the best matches
@@ -273,7 +261,7 @@ def profile_genome(
             kingdom_index = levels[-1]
             curr_taxonomy = "|".join(level_dir.split(os.sep)[kingdom_index:])
 
-        if level.startswith("s__") and expand and not fast:
+        if level.startswith("s__") and expand:
             curr_tree = os.path.join(level_dir, "strains", "index", "index.detbrief.sbt")
 
         # Define the output file path
@@ -532,7 +520,6 @@ def main() -> None:
             args.output_dir,
             threshold=args.threshold,
             expand=args.expand,
-            fast=args.fast,
             stop_at=args.stop_at,
             output_prefix=args.output_prefix,
             logger=logger,
