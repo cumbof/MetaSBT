@@ -5,7 +5,7 @@ Update a specific database with a new set of reference genomes or metagenome-ass
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 27, 2023"
+__date__ = "Apr 28, 2023"
 
 import argparse as ap
 import errno
@@ -605,9 +605,6 @@ def build_cluster(
                 strains_manifest_file.write("--filter-size {}\n".format(strains_filter_size))
 
         strains_manifest = load_manifest(strains_manifest_filepath)
-        
-        # Remove the old index
-        shutil.rmtree(os.path.join(tax_dir, "strains", "index"), ignore_errors=True)
 
         # Rebuild the strains SBT first
         # Use the species-specific bloom filter size in manifest
@@ -802,7 +799,7 @@ def update(
     # Load the file with the mapping between genome names and taxonomic labels
     # Only in case of input reference genomes
     taxonomies = {
-        get_file_info(genome)[1]: taxonomy for genome in genomes for taxonomy, genomes in taxonomy2genomes.items()
+        get_file_info(genome)[1]: taxonomy for taxonomy, genomes in taxonomy2genomes.items() for genome in genomes
     } if "NA" not in taxonomy2genomes else dict()
 
     input_type = "references" if "NA" not in taxonomy2genomes else "MAGs"
