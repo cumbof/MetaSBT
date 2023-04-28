@@ -161,7 +161,7 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf.gz".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))):
                                     mags_list.append(line)
 
                 # Do the same with the references.txt file
@@ -170,7 +170,7 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf.gz".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))):
                                     references_list.append(line)
                 
                 if not mags_list and not references_list:
