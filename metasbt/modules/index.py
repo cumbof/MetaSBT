@@ -1114,11 +1114,15 @@ def main() -> None:
     # Load command line parameters
     args = read_params()
 
-    # Initialise the logger
-    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
-
     # Create the database folder
     os.makedirs(args.db_dir, exist_ok=True)
+
+    # Also create the temporary folder
+    # Do not raise an exception in case it already exists
+    os.makedirs(args.tmp_dir, exist_ok=True)
+
+    # Initialise the logger
+    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Skip the bloom filter size estimation if the filter size is passed as input
     if not args.filter_size and not args.estimate_filter_size:
@@ -1200,10 +1204,6 @@ def main() -> None:
                 manifest.write("--filter-size {}\n".format(args.filter_size))
 
             manifest.write("--min-kmer-occurrences {}\n".format(args.min_kmer_occurrences))
-
-    # Also create the temporary folder
-    # Do not raise an exception in case it already exists
-    os.makedirs(args.tmp_dir, exist_ok=True)
 
     # Build a sh script with the command line used to launch the index module
     build_sh(sys.argv, TOOL_ID, args.db_dir)
