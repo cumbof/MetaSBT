@@ -128,16 +128,6 @@ def read_params():
         ),
     )
     general_group.add_argument(
-        "--fast-profile",
-        action="store_true",
-        default=False,
-        dest="fast_profile",
-        help=(
-            "Query the tree with the representative genomes at the species level "
-            "instead of the strains tree (fast but low precision in establishing the closest genome)"
-        ),
-    )
-    general_group.add_argument(
         "--input-list",
         type=os.path.abspath,
         required=True,
@@ -238,7 +228,6 @@ def profile_and_assign(
     tmp_genomes_dir: str,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
-    fast_profile: bool = False,
     taxonomies: Optional[dict] = None,
     dereplicate: bool = False,
     similarity: float = 100.0,
@@ -257,8 +246,6 @@ def profile_and_assign(
     :param tmp_genomes_dir:         Path to the temporary folder for uncompressing input genomes
     :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
-    :param fast_profile:            Query the tree with the representative genomes under the species level instead
-                                    of the strains tree (fast but low precision in establishing the closest genome)
     :param taxonomies:              Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only)
     :param dereplicate:             Enable dereplication of input genome against genomes in the closest cluster
     :param similarity:              Exclude input genome if its similarity with the closest genome in the database exceed this threshold
@@ -318,9 +305,6 @@ def profile_and_assign(
         "--output-prefix",
         genome_name,
     ]
-
-    if fast_profile:
-        profiler.append("--fast")
 
     run(profiler, silence=True)
 
@@ -724,7 +708,6 @@ def update(
     tmp_dir: str,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float = 0.0,
-    fast_profile: bool = False,
     completeness: float = 0.0,
     contamination: float = 100.0,
     dereplicate: bool = False,
@@ -746,8 +729,6 @@ def update(
     :param tmp_dir:                 Path to the temporary folder
     :param boundaries:              Boundaries table produced by the boundaries module
     :param boundary_uncertainty:    Percentage of kmers to enlarge and reduce boundaries
-    :param fast_profile:            Query the tree with the representative genomes under the species level instead
-                                    of the strains tree (fast but low precision in establishing the closest genome)
     :param completeness:            Threshold on the CheckM completeness
     :param contamination:           Threshold on the CheckM contamination
     :param dereplicate:             Enable the dereplication step to get rid of replicated genomes
@@ -912,7 +893,6 @@ def update(
         tmp_genomes_dir=tmp_genomes_dir,
         boundaries=boundaries,
         boundary_uncertainty=boundary_uncertainty,
-        fast_profile=fast_profile,
         taxonomies=taxonomies,
         dereplicate=dereplicate,
         similarity=similarity,
@@ -1200,7 +1180,6 @@ def main() -> None:
         args.tmp_dir,
         boundaries_table,
         boundary_uncertainty=args.boundary_uncertainty,
-        fast_profile=args.fast_profile,
         completeness=args.completeness,
         contamination=args.contamination,
         dereplicate=args.dereplicate,
