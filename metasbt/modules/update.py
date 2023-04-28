@@ -1166,6 +1166,10 @@ def main() -> None:
     # Load command line parameters
     args = read_params()
 
+    # Also create the temporary folder
+    # Do not raise an exception in case it already exists
+    os.makedirs(args.tmp_dir, exist_ok=True)
+
     # Initialise the logger
     logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
@@ -1183,10 +1187,6 @@ def main() -> None:
     
     # Load the boundaries table
     boundaries_table = load_boundaries(args.boundaries)
-
-    # Also create the temporary folder
-    # Do not raise an exception in case it already exists
-    os.makedirs(args.tmp_dir, exist_ok=True)
 
     # Build a sh script with the command line used to launch the update module
     build_sh(sys.argv, TOOL_ID, args.db_dir)
