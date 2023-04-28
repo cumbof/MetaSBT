@@ -215,7 +215,7 @@ def define_boundaries(
                             os.path.dirname(str(references_path)),
                             "strains",
                             "filters",
-                            "{}.bf.gz".format(line),
+                            "{}.bf".format(line),
                         )
 
                         samples[line] = [genome_path]
@@ -226,7 +226,7 @@ def define_boundaries(
                         genome_path = os.path.join(
                             os.path.dirname(str(references_path)),
                             "filters",
-                            "{}.bf.gz".format(line),
+                            "{}.bf".format(line),
                         )
 
                         if os.path.isfile(genome_path):
