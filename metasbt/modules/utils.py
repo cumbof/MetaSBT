@@ -369,7 +369,6 @@ def cluster(
     cluster_prefix: str = "MSBT",
     min_occurrences: int = 2,
     nproc: int = 1,
-    fast_assignment: bool = False,
 ) -> Dict[str, str]:
     """
     Define new clusters with the unassigned MAGs
@@ -383,8 +382,6 @@ def cluster(
     :param cluster_prefix:      Prefix of clusters numerical identifiers
     :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
     :param nproc:               Make bfdistance parallel
-    :param fast_assignment:     After characterizing a genome, it compares other input genomes with the just characterized one
-                                and it assigns them the same taxonomic label in case they are close enough (faster but less accurate)
     :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
                                 Also return the list of paths to the unassigned genomes
     """
@@ -516,19 +513,18 @@ def cluster(
                     # Mark current genome as assigned
                     assigned_genomes.append(genomes[i])
 
-                    if fast_assignment:
-                        # Check whether other input genomes look pretty close to the current genome by computing
-                        # the number of kmers in common between the current genome and all the other input genomes
-                        for j in range(i + 1, len(genomes_list)):
-                            # Kmers in common have been already computed
-                            # It returns a float by default
-                            common = int(bfdistance_intersect[genomes[i]][genomes[j]])
+                    # Check whether other input genomes look pretty close to the current genome by computing
+                    # the number of kmers in common between the current genome and all the other input genomes
+                    for j in range(i + 1, len(genomes_list)):
+                        # Kmers in common have been already computed
+                        # It returns a float by default
+                        common = int(bfdistance_intersect[genomes[i]][genomes[j]])
 
-                            if common >= last_known_level_mink:
-                                # Set the second genome as assigned
-                                assigned_genomes.append(genomes[j])
-                                # Also assign these genomes to the same taxonomy assigned to the current genome
-                                assigned_taxa[assigned_taxonomy].append(genomes_list[j])
+                        if common >= last_known_level_mink:
+                            # Set the second genome as assigned
+                            assigned_genomes.append(genomes[j])
+                            # Also assign these genomes to the same taxonomy assigned to the current genome
+                            assigned_taxa[assigned_taxonomy].append(genomes_list[j])
 
     # Update the manifest with the new clusters counter
     if clusters_counter > clusters_counter_manifest:
