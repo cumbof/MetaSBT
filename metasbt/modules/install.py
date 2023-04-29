@@ -314,8 +314,8 @@ def main() -> None:
         "B"
     )
 
-    # Databases are uncompressed tarballs, so they are approximately the same size as their extracted content
     # Consider twice the space in case we have to download and extract the tarball
+    # TODO This must be better estimated since the bloom filters are Gzip compressed in the tarball and must be unpacked
     size_factor = 1 if args.database_file else 2
 
     if free_space_bytes < tarball_size_bytes * size_factor:
