@@ -1,6 +1,6 @@
 #!/bin/bash
 #title          :howdesbt_index
-#description    :Index genomes under all the taxonomic lavels in a specific database
+#description    :Index genomes with HowDeSBT
 #author         :Fabio Cumbo (fabio.cumbo@gmail.com)
 #===================================================================================
 
