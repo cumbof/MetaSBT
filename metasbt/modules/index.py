@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Build a database with a set of genomes indexed with HowDeSBT.
-Genomes are provided as inputs or automatically downloaded from NCBI GenBank
+Build a database with a set of genomes indexed with HowDeSBT
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
