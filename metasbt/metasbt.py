@@ -6,7 +6,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 1, 2023"
+__date__ = "May 2, 2023"
 
 import argparse as ap
 import errno
@@ -143,7 +143,7 @@ def check_for_software_updates() -> None:
             data = response.json()
 
             if "tag_name" in data:
-                if "v{}".format(__version__) != data["tag_name"]:
+                if __version__ != data["tag_name"]:
                     println("A new release is available!")
                     println("{}\n".format(REPOSITORY_URL))
     
