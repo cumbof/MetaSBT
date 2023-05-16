@@ -5,8 +5,8 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "May 2, 2023"
+__version__ = "0.1.2"
+__date__ = "May 16, 2023"
 
 import argparse as ap
 import errno
