@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""
-Query a specific sequence bloom tree at all the seven taxonomic levels with an input genome 
-or a file with a list of sequences, one per line. In case of an input genomes, results on 
-single sequences are merged together
+"""Query a specific sequence bloom tree at all the seven taxonomic levels with an input genome or a file
+with a list of sequences, one per line. In case of an input genomes, results on single sequences are merged together.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 28, 2023"
+__version__ = "0.1.1"
+__date__ = "May 25, 2023"
 
 import argparse as ap
 import errno
@@ -41,10 +39,12 @@ FILES_AND_FOLDERS = [
 
 
 def read_params():
-    """
-    Read and test input arguments
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
@@ -55,6 +55,13 @@ def read_params():
             "single sequences are merged together"
         ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "--best-uncertainty",
+        type=number(float, minv=0.0, maxv=100.0),
+        default=25.0,
+        dest="best_uncertainty",
+        help="Consider this uncertainty percentage when selecting the best matches",
     )
     p.add_argument(
         "--expand",
@@ -147,26 +154,35 @@ def read_params():
 
 
 def profile_list(
-    input_file: str,
+    input_file: os.path.abspath,
     input_id: str,
-    tree: str,
-    output_dir: str,
-    threshold: float = 0.0,
-    output_prefix: Optional[str] = None,
-    logger: Optional[Logger] = None,
-    verbose: bool = False,
+    tree: os.path.abspath,
+    output_dir: os.path.abspath,
+    threshold: float=0.0,
+    output_prefix: Optional[str]=None,
+    logger: Optional[Logger]=None,
+    verbose: bool=False,
 ) -> None:
-    """
-    Query a list of sequences against a specific tree
+    """Query a list of sequences against a specific tree.
 
-    :param input_file:      Path to the input file with query sequences
-    :param input_id:        Unique identifier of the input file
-    :param tree:            Path to the tree definition file
-    :param output_dir:      Path to the output folder
-    :param threhsold:       Query threshold
-    :param output_prefix:   Prefix of the output files with profiles
-    :param logger:          Logger object
-    :param verbose:         Print messages on screen as alternative to the logger
+    Parameters
+    ----------
+    input_file : os.path.abspath
+        Path to the input file with query sequences.
+    input_id : str
+        Unique identifier of the input file.
+    tree : os.path.abspath
+        Path to the tree definition file.
+    output_dir : os.path.abspath
+        Path to the output folder.
+    threshold : float, default 0.0
+        The query threshold.
+    output_prefix : str, optional
+        Prefix of the output files with profiles.
+    logger : logging.Logger, optional
+        The Logger object.
+    verbose : bool, default False
+        Print messages on the stdout if True.
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -199,33 +215,45 @@ def profile_list(
 
 
 def profile_genome(
-    input_file: str,
+    input_file: os.path.abspath,
     input_id: str,
-    tree: str,
-    output_dir: str,
-    threshold: float = 0.0,
-    expand: bool = False,
-    stop_at: Optional[str] = None,
-    output_prefix: Optional[str] = None,
-    best_uncertainty: float = 25.0,
-    logger: Optional[Logger] = None,
-    verbose: bool = False,
+    tree: os.path.abspath,
+    output_dir: os.path.abspath,
+    threshold: float=0.0,
+    expand: bool=False,
+    stop_at: Optional[str]=None,
+    output_prefix: Optional[str]=None,
+    best_uncertainty: float=25.0,
+    logger: Optional[Logger]=None,
+    verbose: bool=False,
 ) -> None:
-    """
-    Query the input genome against a specific tree
-    Also expand the query to the lower taxonomic levels if requested
+    """Query the input genome against a specific tree.
+    Also expand the query to the lower taxonomic levels if requested.
 
-    :param input_file:          Path to the input file with query genome
-    :param input_id:            Unique identifier of the input file
-    :param tree:                Path to the tree definition file
-    :param output_dir:          Path to the output folder
-    :param threhsold:           Query threshold
-    :param expand:              Expand the query to the lower taxonomic levels
-    :param stop_at:             Stop expanding the query at a specific taxonomic level
-    :param output_prefix:       Prefix of the output files with profiles
-    :param best_uncertainty:    Consider this uncertainty percentage when selecting the best matches
-    :param logger:              Logger object
-    :param verbose:             Print messages on screen as alternative to the logger
+    Parameters
+    ----------
+    input_file : os.path.abspath
+        Path to the input file with the query genome.
+    input_id : str
+        Unique identifier of the input file.
+    tree : os.path.abspath
+        Path to the tree definition file.
+    output_dir : os.path.abspath
+        Path to the output folder.
+    threshold : float, default 0.0
+        The query threshold.
+    expand : bool, default False
+        Expand the query to the lower taxonomic levels.
+    stop_at : str, optional
+        Stop expanding the query at a specific taxonomic level.
+    output_prefix : str, optional
+        Prefix of the output files with profiles.
+    best_uncertainty : float, default 25.0
+        Consider this uncertainty percentage when selecting the best matches.
+    logger : logging.Logger, optional
+        The Logger object.
+    verbose : bool, default False
+        Print messages on the stdout if True.
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -263,6 +291,10 @@ def profile_genome(
 
         if level.startswith("s__") and expand:
             curr_tree = os.path.join(level_dir, "strains", "index", "index.detbrief.sbt")
+
+            if not os.path.isfile(curr_tree):
+                # In this case, the database has been built by using only 3 representatives per species
+                curr_tree = os.path.join(level_dir, "index", "index.detbrief.sbt")
 
         # Define the output file path
         output_file = os.path.join(matches_dir, "{}__{}__matches.txt".format(output_prefix, level))
@@ -522,6 +554,7 @@ def main() -> None:
             expand=args.expand,
             stop_at=args.stop_at,
             output_prefix=args.output_prefix,
+            best_uncertainty=args.best_uncertainty,
             logger=logger,
             verbose=args.verbose,
         )
