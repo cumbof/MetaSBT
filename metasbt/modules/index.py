@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""
-Build a database with a set of genomes indexed with HowDeSBT
+"""Build a database with a set of genomes indexed with HowDeSBT.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 27, 2023"
+__version__ = "0.1.1"
+__date__ = "May 24, 2023"
 
 import argparse as ap
 import errno
-import hashlib
 import math
 import multiprocessing as mp
 import os
@@ -31,10 +29,9 @@ try:
     from utils import (  # type: ignore  # isort: skip
         bfaction,
         build_sh,
-        checkm,
         dereplicate_genomes,
         estimate_bf_size,
-        filter_checkm_tables,
+        filter_quality,
         get_file_info,
         howdesbt,
         init_logger,
@@ -43,6 +40,7 @@ try:
         number,
         optimal_k,
         println,
+        quality,
     )
 except Exception:
     pass
@@ -52,7 +50,9 @@ TOOL_ID = "index"
 
 # Define the list of dependencies
 DEPENDENCIES = [
-    "checkm",
+    "checkm2",
+    "checkv",
+    "eukcc",
     "howdesbt",
     "kitsune",
     "ntcard",
@@ -93,19 +93,23 @@ REFERENCE_TAGS = [
 ]
 
 
-def read_params():
-    """
-    Read and test input arguments
+def read_params(argv: List[str]):
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Parameters
+    ----------
+    argv : list
+        List with argument names and values.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description=(
-            "Build a database with a set of genomes indexed with HowDeSBT. "
-            "Genomes are provided as inputs or automatically downloaded from NCBI GenBank"
-        ),
+        description="Build a database with a set of genomes indexed with HowDeSBT",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
 
@@ -128,14 +132,14 @@ def read_params():
     general_group.add_argument(
         "--db-dir",
         type=os.path.abspath,
-        required=True,
+        required = "--resume" not in argv,
         dest="db_dir",
         help="This is the database directory with the taxonomically organised sequence bloom trees",
     )
     general_group.add_argument(
         "--extension",
         type=str,
-        required=True,
+        required = "--resume" not in argv,
         choices=["fa", "fa.gz", "fasta", "fasta.gz", "fna", "fna.gz"],
         help=(
             "Specify the input genome files extension. "
@@ -155,7 +159,7 @@ def read_params():
     general_group.add_argument(
         "--input-list",
         type=os.path.abspath,
-        required=True,
+        required = "--resume" not in argv,
         dest="input_list",
         help=(
             "Path to the input table with a list of genome file paths and an optional column with their taxonomic labels. "
@@ -203,14 +207,41 @@ def read_params():
         "--parallel",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
-        help="Maximum number of processors to process each NCBI tax ID in parallel",
+        help="Maximum number of processors to process each cluster in parallel",
+    )
+    general_group.add_argument(
+        "--parent-version",
+        type=str,
+        dest="parent_version",
+        help="Version of MetaSBT that called this process"
+    )
+    general_group.add_argument(
+        "--resume",
+        type=os.path.abspath,
+        help=(
+            "Path to the \"index.sh\" file with the configuration of a previous run. "
+            "Used to resume the index process in case of an unexpected error. "
+            "Not available with --flat-structure"
+        ),
     )
     general_group.add_argument(
         "--tmp-dir",
         type=os.path.abspath,
-        required=True,
+        required = "--resume" not in argv,
         dest="tmp_dir",
         help="Path to the folder for storing temporary data",
+    )
+    general_group.add_argument(
+        "--use-representatives",
+        action="store_true",
+        default=False,
+        dest="use_representatives",
+        help=(
+            "Use only 3 representative genomes per species choosen as the ones that minimize and maximize the "
+            "distance with all the other genomes in the same cluster, plus the \"centroid\". "
+            "These may change in case of an update. "
+            "Not available with --flat-structure"
+        )
     )
     general_group.add_argument(
         "--verbose",
@@ -226,8 +257,8 @@ def read_params():
         help='Print the "{}" version and exit'.format(TOOL_ID),
     )
 
-    # Group of arguments for CheckM
-    qc_group = p.add_argument_group("CheckM: Quality control")
+    # Group of arguments for quality control
+    qc_group = p.add_argument_group("Quality control")
 
     qc_group.add_argument(
         "--completeness",
@@ -240,13 +271,6 @@ def read_params():
         type=number(float, minv=0.0, maxv=100.0),
         default=100.0,
         help="Input genomes must have a maximum contamination percentage before being processed and added to the database",
-    )
-    qc_group.add_argument(
-        "--pplacer-threads",
-        type=number(int, minv=1, maxv=os.cpu_count()),
-        default=1,
-        dest="pplacer_threads",
-        help="Maximum number of threads for pplacer. This is required to maximise the CheckM performances",
     )
 
     # Group of arguments for the dereplication
@@ -338,80 +362,109 @@ def read_params():
         help="Limit the estimation of the optimal kmer size with kitsune to this value at most",
     )
 
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
 def quality_control(
-    genomes: list,
+    genomes: List[os.path.abspath],
     tax_id: str,
-    tmp_dir: str,
-    input_extension: str = "fna.gz",
-    completeness: float = 0.0,
-    contamination: float = 100.0,
-    nproc: int = 1,
-    pplacer_threads: int = 1,
-) -> Tuple[List[str], List[str]]:
+    tmp_dir: os.path.abspath,
+    method: str,
+    input_extension: str="fna.gz",
+    completeness: float=0.0,
+    contamination: float=100.0,
+    nproc: int=1,
+) -> Tuple[List[str], Dict[str, Dict[str, str]]]:
+    """Quality-control genomes.
+
+    Parameters
+    ----------
+    genomes : list
+        List of genome file paths.
+    tax_id : str
+        NCBI tax ID.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    method : {"checkm2", "checkv", "eukcc"}
+        Quality-control method.
+    input_extension : str, default "fna.gz"
+        File extension of the input genome files.
+    completeness : float, default 0.0
+        Completeness threshold.
+    contamination : float, default 100.0
+        Contamination threshold.
+    nproc : int, default 1
+        Make it paralell when possible.
+
+    Returns
+    -------
+    tuple
+        A tuple with the list of genome file paths for the genomes that passes the quality-control,
+        in addition to a dictionary with quality information indexed by the genome names.
     """
-    Quality-control genomes with CheckM
 
-    :param genomes:             List of genome file paths
-    :param tax_id:              NCBI tax ID
-    :param tmp_dir:             Path to the temporary folder
-    :param input_extension:     File extension of the input files in genomes
-    :param completeness:        Completeness threshold
-    :param contamination:       Contamination threshold
-    :param nproc:               Make CheckM parallel
-    :param pplacer_threads:     Max number of threads for pplacer
-    :return:                    List of genome file paths for genomes that passed the quality-control
-                                in addition to a list with the CheckM output table paths
-    """
+    # Define the temporary folder
+    quality_tmp_dir = os.path.join(tmp_dir, "quality", tax_id)
+    os.makedirs(quality_tmp_dir, exist_ok=True)
 
-    # Define the CheckM temporary folder
-    checkm_tmp_dir = os.path.join(tmp_dir, "checkm", tax_id)
-    os.makedirs(checkm_tmp_dir, exist_ok=True)
-
-    # Run CheckM on the current set of genomes
-    checkm_tables = checkm(
-        genomes,
-        checkm_tmp_dir,
-        file_extension=input_extension,
-        nproc=nproc,
-        pplacer_threads=pplacer_threads,
+    # Run quality on the current set of genomes
+    quality_dict = quality(
+        method=method,
+        args={
+            "genomes_paths": genomes,
+            "tmp_dir": quality_tmp_dir,
+            "file_extension": input_extension,
+            "nproc": nproc
+        }
     )
 
     # Filter genomes according to the input --completeness and --contamination thresholds
-    genome_ids = filter_checkm_tables(checkm_tables, completeness=completeness, contamination=contamination)
+    genome_ids = filter_quality(quality_dict, completeness=completeness, contamination=contamination)
 
     # Rebuild the genome file paths
     genome_paths = [os.path.join(tmp_dir, "genomes", tax_id, "{}.{}".format(genome_id, input_extension)) for genome_id in genome_ids]
 
-    return genome_paths, checkm_tables
+    return genome_paths, quality_dict
 
 
 def organize_data(
     genomes: list,
-    db_dir: str,
+    db_dir: os.path.abspath,
     tax_label: str,
     tax_id: str,
-    cluster_id: int = 1,
-    cluster_prefix: str = "MSBT",
-    metadata: Optional[List[Dict[str, str]]] = None,
-    checkm_tables: Optional[list] = None,
-    flat_structure: bool = False,
-) -> List[str]:
-    """
-    Organize genome files
+    cluster_id: int=1,
+    cluster_prefix: str="MSBT",
+    metadata: Optional[List[Dict[str, str]]]=None,
+    quality_dict: Optional[Dict[str, Dict[str, str]]]=None,
+    flat_structure: bool=False,
+) -> List[os.path.abspath]:
+    """Organize genome files.
 
-    :param genomes:         List with path to the genome files
-    :param db_dir:          Path to the database folder
-    :param tax_label:       Full taxonomic label
-    :param tax_id:          NCBI tax ID
-    :param cluster_id:      Numberical cluster ID
-    :param cluster_prefix:  Cluster prefix
-    :param metadata:        List of dictionaries with genomes information
-    :param checkm_tables:   List with paths to the CheckM output tables
-    :param flat_structure:  Organize genomes in the same folder without any taxonomic organization
-    :return:                List with genome file paths
+    Parameters
+    ----------
+    genomes : list
+        List with the path to the genome files.
+    db_dir : os.path.abspath
+        Path to the database root folder.
+    tax_label : str
+        Full taxonomic label.
+    tax_id : str
+        Cluster ID.
+    cluster_id: int, default 1
+        Numerical cluster ID.
+    cluster_prefix : str, default "MSBT"
+        Cluster prefix.
+    metadata : list, optional
+        List of dictionaries with genomes information.
+    quality_dict : dict, optional
+        Dictionary with the quality stats.
+    flat_structure : bool, default False
+        Organize genomes in the same folder without any taxonomic organization if True.
+
+    Returns
+    -------
+    list
+        A list with the genome file paths.
     """
 
     genomes_paths = list()
@@ -427,7 +480,7 @@ def organize_data(
         genomes_dir = os.path.join(tax_dir, "strains", "genomes")
         os.makedirs(genomes_dir, exist_ok=True)
 
-    references_path = "references.txt" if not flat_structure else "genomes_{}.txt".format(tax_id)
+    references_path = "references.txt" if not flat_structure else "genomes.txt"
     with open(os.path.join(tax_dir, references_path), "w+") as refsfile:
         # Move the processed genomes to the taxonomy folder
         for genome_path in genomes:
@@ -448,24 +501,17 @@ def organize_data(
         if not flat_structure:
             metafile.write("# Cluster ID: {}{}\n".format(cluster_prefix, cluster_id))
 
-    if checkm_tables:
-        # Also merge the CheckM output tables and move the result to the taxonomy folder
-        checkm_path = "checkm.tsv" if not flat_structure else "checkm_{}.tsv".format(tax_id)
-        with open(os.path.join(tax_dir, checkm_path), "w+") as table:
-            header = True
-            for table_path in checkm_tables:
-                with open(table_path) as partial_table:
-                    line_count = 0
-                    for line in partial_table:
-                        line = line.strip()
-                        if line:
-                            if line_count == 0:
-                                if header:
-                                    table.write("{}\n".format(line))
-                                    header = False
-                            else:
-                                table.write("{}\n".format(line))
-                            line_count += 1
+    if quality_dict:
+        # Also merge the quality tables and move the result to the taxonomy folder
+        with open(os.path.join(tax_dir, "quality.tsv"), "w+") as table:
+            header = None
+
+            for genome_id in quality_dict:
+                if not header:
+                    header = sorted(list(quality_dict[genome_id].keys()))
+                    table.write("{}\n".format("\t".join(header)))
+
+                table.write("{}\n".format("\t".join([quality_dict[genome_id][h] for h in header])))
 
     return genomes_paths
 
@@ -474,140 +520,273 @@ def process_input_genomes(
     genomes_list: list,
     taxonomic_label: str,
     cluster_id: int,
-    db_dir: str,
-    tmp_dir: str,
+    db_dir: os.path.abspath,
+    tmp_dir: os.path.abspath,
     kmer_len: int,
-    input_extension: str = "fna.gz",
-    cluster_prefix: str = "MSBT",
-    nproc: int = 1,
-    pplacer_threads: int = 1,
-    completeness: float = 0.0,
-    contamination: float = 100.0,
-    dereplicate: bool = False,
-    similarity: float = 1.0,
-    flat_structure: bool = False,
-    logger: Optional[Logger] = None,
-    verbose: bool = False,
-) -> List[str]:
+    input_extension: str="fna.gz",
+    cluster_prefix: str="MSBT",
+    nproc: int=1,
+    completeness: float=0.0,
+    contamination: float=100.0,
+    dereplicate: bool=False,
+    similarity: float=1.0,
+    flat_structure: bool=False,
+    logger: Optional[Logger]=None,
+    verbose: bool=False,
+) -> List[os.path.abspath]:
+    """Process a list of input genomes. Organize, quality-control, and dereplicate genomes.
+
+    Parameters
+    ----------
+    genomes_list : list
+        List of input genome file paths.
+    taxonomic_label : str
+        Taxonomic label of the input genomes.
+    cluster_id : int
+        Numerical cluster ID.
+    db_dir : os.path.abspath
+        Path to the database root folder.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    kmer_len : int
+        Length of the kmers.
+    input_extension : str, default "fna.gz"
+        File extension of the input files in `genomes_list`.
+    cluster_prefix : str, default "MSBT"
+        Cluster prefix.
+    nproc : int, default 1
+        Make the process parallel when possible.
+    completeness : float, default 0.0
+        Threshold on the completeness.
+    contamination : float, default 100.0
+        Threshold on the contamination.
+    dereplicate : bool, default False
+        Enable the dereplication step to get rid of replicated genomes if True.
+    similarity : float, default 1.0
+        Get rid of genomes according to this similarity threshold in case `dereplicate` is True.
+    float_structure : bool, default False
+        Taxonomically organize genomes if True.
+    logger : logging.Logger, optional
+        The Logger object.
+    verbose : bool, default False
+        Print messages on the stdout if True.
+
+    Returns
+    -------
+    list
+        A list of paths to the genome files.
     """
-    Process a provided list of input genomes
-    Organize, quality-control, and dereplicate genomes
 
-    :param genomes_list:        List of input genome file paths
-    :param taxonomic_label:     Taxonomic label of the input genomes
-    :param cluster_id:          Numberical cluster ID
-    :param db_dir:              Path to the database root folder
-    :param tmp_dir:             Path to the temporary folder
-    :param kmer_len:            Length of the kmers
-    :param input_extension:     File extension of the input files in genomes_list
-    :param cluster_prefix:      Cluster prefix
-    :param nproc:               Make the process parallel when possible
-    :param pplacer_threads:     Maximum number of threads to make pplacer parallel with CheckM
-    :param completeness:        Threshold on the CheckM completeness
-    :param contamination:       Threshold on the CheckM contamination
-    :param dereplicate:         Enable the dereplication step to get rid of replicated genomes
-    :param similarity:          Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param flat_structure:      Do not taxonomically organize genomes
-    :param logger:              Logger object
-    :param verbose:             Print messages on screen
-    :return:                    The list of paths to the genome files
-    """
+    # Check whether this set of genomes must be processed
+    process_genomes = True
 
-    # Define a partial println function to avoid specifying logger and verbose
-    # every time the println function is invoked
-    printline = partial(println, logger=logger, verbose=verbose)
+    # Define the cluster folder path
+    tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
 
-    if verbose:
-        printline("Processing {}".format(taxonomic_label))
+    # Search for the metadata file
+    metadata_table = os.path.join(tax_dir, "metadata.tsv")
 
-    # Create a temporary folder to store genomes
-    tax_id = hashlib.md5(taxonomic_label.encode("utf-8")).hexdigest()
-    tmp_genomes_dir = os.path.join(tmp_dir, "genomes", tax_id)
-    os.makedirs(tmp_genomes_dir, exist_ok=True)
+    # Also search for the quality-control table
+    quality_table = os.path.join(tax_dir, "quality.tsv")
 
-    # Iterate over the list of input genome file paths
-    genomes = list()
+    if os.path.isfile(metadata_table):
+        if not flat_structure:
+            os.unlink(metadata_table)
 
-    for genome_path in genomes_list:
-        # Symlink input genomes into the temporary folder
-        os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
-        genomes.append(os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
+            # Recreate the metadata table
+            with open(metadata_table, "w+") as metafile:
+                metafile.write("# Cluster ID: {}{}\n".format(cluster_prefix, cluster_id))
 
-    # Take track of the paths to the CheckM output tables
-    checkm_tables: List[str] = list()
+        # Genomes have been already processed
+        process_genomes = False
 
-    # Quality control
-    if completeness > 0.0 or contamination < 100.0:
-        before_qc = len(genomes)
+    if os.path.isfile(quality_table):
+        os.unlink(quality_table)
 
-        genomes, checkm_tables = quality_control(
-            genomes,
-            tax_id,
-            tmp_dir,
-            input_extension=input_extension,
-            completeness=completeness,
-            contamination=contamination,
-            nproc=nproc,
-            pplacer_threads=pplacer_threads,
-        )
+        # Locate partial quality tables in the tmp folder
+        quality_tmp_dir = os.path.join(tmp_dir, "quality", cluster_id)
+        quality_tables = [str(filepath) for filepath in Path(quality_tmp_dir).glob("run_*.tsv")]
 
-        if before_qc > len(genomes) and verbose:
-            printline("Quality control: excluding {}/{} genomes".format(before_qc - len(genomes), before_qc))
+        # Load the quality tables
+        quality_dict = dict()
 
-    # Dereplication
-    if len(genomes) > 1 and dereplicate:
-        before_dereplication = len(genomes)
+        for table_path in quality_tables:
+            with open(table_path) as table:
+                header = table.readline().strip()
 
-        genomes = dereplicate_genomes(
-            genomes,
-            tax_id,
-            tmp_dir,
-            kmer_len,
-            filter_size=None,
-            nproc=nproc,
-            similarity=similarity,
-        )
+                for line in table:
+                    line = line.strip()
+                    
+                    if line:
+                        line_split = line.split("\t")
 
-        if before_dereplication > len(genomes) and verbose:
-            printline(
-                "Dereplication: excluding {}/{} genomes".format(
-                    before_dereplication - len(genomes), before_dereplication
-                )
+                        genome = line_split[header.index("Name")]
+
+                        if "." in input_extension:
+                            if genome.lower().endswith(".{}".format(input_extension.lower().split(".")[0])):
+                                # Fix the genome name
+                                genome = ".".join(genome.split(".")[:-1])
+
+                        quality_dict[genome] = dict()
+
+                        for idx, value in enumerate(line_split):
+                            quality_dict[genome][header[idx]] = value
+
+        if quality_dict:
+            # Recreate the quality table
+            with open(quality_table, "w+") as table:
+                header = None
+
+                for genome_id in quality_dict:
+                    if not header:
+                        header = sorted(list(quality_dict[genome_id].keys()))
+                        table.write("{}\n".format("\t".join(header)))
+
+                    table.write("{}\n".format("\t".join([quality_dict[genome_id][h] for h in header])))
+
+        # Genomes have been already processed
+        process_genomes = False
+
+    if not process_genomes:
+        genomes_dir = os.path.join(tax_dir, "genomes")
+
+        if not flat_structure:
+            genomes_dir = os.path.join(tax_dir, "strains", "genomes")
+
+        # Retrieve the genomes
+        genomes_paths = [str(filepath) for filepath in Path(genomes_dir).glob("*") if os.path.isfile(filepath)]
+
+    else:
+        # Remove data from a previous run
+        shutil.rmtree(os.path.join(tmp_dir, "genomes", cluster_id), ignore_errors=True)
+        shutil.rmtree(os.path.join(tmp_dir, "howdesbt", cluster_id), ignore_errors=True)
+        shutil.rmtree(os.path.join(tmp_dir, "quality", cluster_id), ignore_errors=True)
+        shutil.rmtree(tax_dir, ignore_errors=True)
+
+        # Define a partial println function to avoid specifying logger and verbose
+        # every time the println function is invoked
+        printline = partial(println, logger=logger, verbose=verbose)
+
+        if verbose:
+            printline("Processing {}".format(taxonomic_label))
+
+        # Create a temporary folder to store genomes
+        tmp_genomes_dir = os.path.join(tmp_dir, "genomes", cluster_id)
+        os.makedirs(tmp_genomes_dir, exist_ok=True)
+
+        # Iterate over the list of input genome file paths
+        genomes = list()
+
+        for genome_path in genomes_list:
+            # Symlink input genomes into the temporary folder
+            os.symlink(genome_path, os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
+            genomes.append(os.path.join(tmp_genomes_dir, os.path.basename(genome_path)))
+
+        # Take track of the quality dictionary
+        quality_dict: Dict[str, Dict[str, str]] = dict()
+
+        # Quality control
+        if completeness > 0.0 or contamination < 100.0:
+            supported_superkingdoms = ["bacteria", "archaea", "eukaryota", "viruses"]
+
+            superkingdom = taxonomic_label.split("|")[0][3:]
+
+            if superkingdom.lower() in supported_superkingdoms:
+                # Try to automatically infer the QC method from the superkingdom
+                qc_method = None
+
+                if superkingdom.lower() in ["bacteria", "archaea"]:
+                    qc_method = "CheckM2"
+
+                elif superkingdom.lower() == "viruses":
+                    qc_method = "CheckV"
+
+                elif superkingdom.lower() == "eukaryota":
+                    qc_method = "EukCC"
+
+                if qc_method:
+                    before_qc = len(genomes)
+
+                    genomes, quality_dict = quality_control(
+                        genomes,
+                        cluster_id,
+                        tmp_dir,
+                        qc_method,
+                        input_extension=input_extension,
+                        completeness=completeness,
+                        contamination=contamination,
+                        nproc=nproc,
+                    )
+
+                    if before_qc > len(genomes) and verbose:
+                        printline("Quality control: excluding {}/{} genomes".format(before_qc - len(genomes), before_qc))
+
+        # Dereplication
+        if len(genomes) > 1 and dereplicate:
+            before_dereplication = len(genomes)
+
+            genomes = dereplicate_genomes(
+                genomes,
+                cluster_id,
+                tmp_dir,
+                kmer_len,
+                filter_size=None,
+                nproc=nproc,
+                similarity=similarity,
             )
 
-    # Check whether no genomes survived the quality control and the dereplication steps
-    if not genomes:
-        if verbose:
-            printline("No more genomes available for the NCBI tax ID {}".format(tax_id))
-        return genomes
+            if before_dereplication > len(genomes) and verbose:
+                printline(
+                    "Dereplication: excluding {}/{} genomes".format(
+                        before_dereplication - len(genomes), before_dereplication
+                    )
+                )
 
-    # Organize genome files
-    genomes_paths = organize_data(
-        genomes,
-        db_dir,
-        taxonomic_label,
-        tax_id,
-        cluster_id=cluster_id,
-        cluster_prefix=cluster_prefix,
-        metadata=None,
-        checkm_tables=checkm_tables,
-        flat_structure=flat_structure,
-    )
+        # Check whether no genomes survived the quality control and the dereplication steps
+        if not genomes:
+            if verbose:
+                printline("No more genomes available for the NCBI tax ID {}".format(cluster_id))
+            return genomes
+
+        # Organize genome files
+        genomes_paths = organize_data(
+            genomes,
+            db_dir,
+            taxonomic_label,
+            cluster_id=cluster_id,
+            cluster_prefix=cluster_prefix,
+            metadata=None,
+            quality_dict=quality_dict,
+            flat_structure=flat_structure,
+        )
 
     return genomes_paths
 
 
-def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structure=False) -> List[str]:
-    """
-    Given a list of genomes, define a sublist with a limited number of genomes taken randomly
+def get_sublist(
+    genomes: List[os.path.abspath],
+    limit_number: Optional[int]=None,
+    limit_percentage: float=100.0,
+    flat_structure: bool=False
+) -> List[str]:
+    """Given a list of genomes, define a sublist with a limited number of genomes taken randomly.
 
-    :param genomes:             Input list of paths to the genomes files
-    :param limit_number:        Limit the number of elements in the resulting list to this number
-                                If defined, it overrides the percentage
-    :param limit_percentage:    Limit the size of the resulting list to this percentage computed 
-                                on the total number of elements in the input list
-    :param flat_structure:      Genomes organization
-    :return:                    The sublist of genomes
+    Parameters
+    ----------
+    genomes : list
+        List of paths to the genome files.
+    limit_number : int, optional
+        Limit the number of elements in the resulting list to this number.
+        It overrides the `limit_percentage` if not None.
+    limit_percentage : float, default 100.0
+        Limit the size of the resulting list to this percentage computed on the total number of elements in the input list.
+    flat_structure : bool, default False
+        Taxonomically organize genomes if True.
+
+    Returns
+    -------
+    list
+        The sublist of genomes.
     """
 
     if not genomes or limit_number == 0 or limit_percentage == 0.0:
@@ -678,32 +857,47 @@ def get_sublist(genomes, limit_number=None, limit_percentage=100.0, flat_structu
 
 
 def estimate_bf_size_and_howdesbt(
-    strains_dir: str,
-    tmp_dir: str,
-    extension: str = "fna.gz",
-    kmer_len: int = 21,
-    min_kmer_occurrences: int = 2,
-    prefix: str = "genomes",
-    limit_number: Optional[int] = None,
-    limit_percentage: float = 100.0,
-    increase_filter_size: float = 0.0,
-    nproc: int = 1,
-) -> None:
-    """
-    Wrapper around ntCard and HowDeSBT for building strains SBTs with species-specific bloom filter sizes
-    The structure is always flat here
+    strains_dir: os.path.abspath,
+    tmp_dir: os.path.abspath,
+    extension: str="fna.gz",
+    kmer_len: int=21,
+    min_kmer_occurrences: int=2,
+    prefix: str="genomes",
+    limit_number: Optional[int]=None,
+    limit_percentage: float=100.0,
+    increase_filter_size: float=0.0,
+    nproc: int=1,
+) -> Tuple[os.path.abspath, List[os.path.abspath]]:
+    """Wrapper around ntCard and HowDeSBT for building strains SBTs with species-specific bloom filter sizes.
+    The structure is always flat here.
 
-    :param strains_dir:             Path to the strains folder
-    :param tmp_dir:                 Path to the temporary folder
-    :param extension:               Input file extension
-    :param kmer_len:                Kmer size
-    :param min_kmer_occurrences:    Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
-    :param prefix:                  Prefix of the ntCard output histogram file
-    :param limit_number:            Maximum number of genomes as input for ntCard
-    :param limit_percentage:        Maximum number of genomes as input for ntCard (in percentage)
-    :param increase_filter_size:    Increase the estimated bloom filter size by the specified percentage
-    :param nproc:                   Make ntCard and HowDeSBT parallel
-    :return:                        Strains folder path and list of selected representative genomes
+    Parameters
+    ----------
+    strains_dir : os.path.abspath
+        Path to the strains folder.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    extension : str, default "fna.gz"
+        Input file extension.
+    kmer_len : int, default 21
+        The length of the kmers.
+    min_kmer_occurrences : int, default 2
+        Minimum number of occurrences of kmers for estimating the bloom filter size and for building the bloom filters.
+    prefix : str, default "genomes"
+        Prefix of the ntCard output histogram file.
+    limit_number : int, optional
+        Maximum number of genomes as input for ntCard.
+    limit_percentage : float, default 100.0
+        Maximum number of genomes as input for ntCard (in percentage).
+    increase_filter_size : float, default 0.0
+        Increase the estimated bloom filter size by the specified percentage.
+    nproc : int, default 1
+        Make ntCard and HowDeSBT parallel.
+
+    Returns
+    -------
+    tuple
+        A tuple with the strains folder path and the list of paths to the selected representative genomes.
     """
 
     genomes_dir = os.path.join(strains_dir, "genomes")
@@ -715,44 +909,56 @@ def estimate_bf_size_and_howdesbt(
 
     genomes_paths = [str(path) for path in Path(genomes_dir).glob("*.{}".format(extension))]
 
-    # Define a subset of genomes
-    genomes_paths_sub = get_sublist(
-        genomes_paths,
-        limit_number=limit_number,
-        limit_percentage=limit_percentage,
-        flat_structure=True
-    )
+    # Path to the manifest with the species-specific bloom filter size
+    manifest_filepath = os.path.join(strains_dir, "manifest.txt")
 
-    # Estimate the bloom filter size
-    filter_size = estimate_bf_size(
-        genomes_paths_sub,
-        kmer_len=kmer_len,
-        min_occurrences=min_kmer_occurrences,
-        prefix=prefix,
-        tmp_dir=tmp_dir,
-        nproc=nproc,
-    )
+    filter_size = None
 
-    # Increment the estimated bloom filter size
-    increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
-    filter_size += increment
+    if os.path.isfile(manifest_filepath):
+        # Load the bloom filter size
+        manifest = load_manifest(manifest_filepath)
 
-    # Run HowDeSBT
-    howdesbt(
-        strains_dir,
-        extension=extension,
-        kmer_len=kmer_len,
-        min_occurrences=min_kmer_occurrences,
-        filter_size=filter_size,
-        nproc=nproc,
-        flat_structure=True,
-    )
+        filter_size = manifest["filter_size"] if "filter_size" in manifest else None
 
-    # Define the manifest file
-    with open(os.path.join(strains_dir, "manifest.txt"), "w+") as manifest:
-        manifest.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
-        manifest.write("--kmer-len {}\n".format(kmer_len))
-        manifest.write("--filter-size {}\n".format(filter_size))
+    if not filter_size:
+        # Define a subset of genomes
+        genomes_paths_sub = get_sublist(
+            genomes_paths,
+            limit_number=limit_number,
+            limit_percentage=limit_percentage,
+            flat_structure=True
+        )
+
+        # Estimate the bloom filter size
+        filter_size = estimate_bf_size(
+            genomes_paths_sub,
+            kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
+            prefix=prefix,
+            tmp_dir=tmp_dir,
+            nproc=nproc,
+        )
+
+        # Increment the estimated bloom filter size
+        increment = int(math.ceil(filter_size * increase_filter_size / 100.0))
+        filter_size += increment
+
+        # Run HowDeSBT
+        howdesbt(
+            strains_dir,
+            extension=extension,
+            kmer_len=kmer_len,
+            min_occurrences=min_kmer_occurrences,
+            filter_size=filter_size,
+            nproc=nproc,
+            flat_structure=True,
+        )
+
+        # Define the manifest file
+        with open(manifest_filepath, "w+") as manifest:
+            manifest.write("--min-kmer-occurrences {}\n".format(min_kmer_occurrences))
+            manifest.write("--kmer-len {}\n".format(kmer_len))
+            manifest.write("--filter-size {}\n".format(filter_size))
 
     # Select the representative genomes
     selected_genomes = list()
@@ -765,94 +971,135 @@ def estimate_bf_size_and_howdesbt(
         ]
 
     else:
-        # Get the bloom filters file paths
-        bf_filepaths = [str(path) for path in Path(os.path.join(strains_dir, "filters")).glob("*.bf")]
+        # Check whether the representative genomes have already been selected in a previous run
+        species_dir = os.path.dirname(strains_dir)
 
-        # Compute the theta distance between genomes
-        bfdistance_theta = bfaction(
-            bf_filepaths,
-            os.path.join(tmp_dir, "howdesbt"),
-            kmer_len,
-            min_occurrences=min_kmer_occurrences,
-            filter_size=filter_size,
-            nproc=nproc,
-            action="bfdistance",
-            mode="theta"
-        )
+        if os.path.isdir(os.path.join(species_dir, "genomes")):
+            selected_genomes = [os.path.realpath(str(filepath)) for filepath in Path(os.path.join(species_dir, "genomes")).glob("*")
+                                if os.path.isfile(str(filepath))]
 
-        # Sum the distances to get the final score
-        bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta}
+        if not selected_genomes:
+            # Get the bloom filters file paths
+            bf_filepaths = [str(path) for path in Path(os.path.join(strains_dir, "filters")).glob("*.bf")]
 
-        # Sort genomes according to the sum of their distances with all the other genomes
-        sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+            # Compute the theta distance between genomes
+            bfdistance_theta = bfaction(
+                bf_filepaths,
+                os.path.join(tmp_dir, "howdesbt"),
+                kmer_len,
+                min_occurrences=min_kmer_occurrences,
+                filter_size=filter_size,
+                nproc=nproc,
+                action="bfdistance",
+                mode="theta"
+            )
 
-        # First and last genomes are those that minimize and maximize the distance with all the other genomes
-        selected_genomes.append(sorted_genomes[0])
-        selected_genomes.append(sorted_genomes[-1])
+            # Sum the distances to get the final score
+            bfdistance_sums = {genome: sum(bfdistance_theta[genome].values()) for genome in bfdistance_theta if genome in bfdistance_theta}
 
-        # Also select a genome in the middles of min and max distances
-        selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
+            # Sort genomes according to the sum of their distances with all the other genomes
+            sorted_genomes = sorted(bfdistance_sums, key=lambda genome: bfdistance_sums[genome])
+
+            # First and last genomes are those that minimize and maximize the distance with all the other genomes
+            selected_genomes.append(sorted_genomes[0])
+            selected_genomes.append(sorted_genomes[-1])
+
+            # Also select a genome in the middles of min and max distances
+            selected_genomes.append(sorted_genomes[math.ceil(int(len(sorted_genomes) / 2))])
 
     return strains_dir, selected_genomes
 
 
 def index(
-    db_dir: str,
-    input_list: str,
-    tmp_dir: str,
-    input_extension: str = "fna.gz",
-    cluster_prefix: str = "MSBT",
-    kmer_len: Optional[int] = None,
-    filter_size: Optional[int] = None,
-    flat_structure: bool = False,
-    estimate_filter_size: bool = True,
-    increase_filter_size: float = 0.0,
-    min_kmer_occurrences: int = 2,
-    estimate_kmer_size: bool = True,
-    limit_estimation_number: Optional[int] = None,
-    limit_estimation_percentage: float = 100.0,
-    limit_kmer_size: int = 32,
-    completeness: float = 0.0,
-    contamination: float = 100.0,
-    dereplicate: bool = False,
-    similarity: float = 1.0,
-    closely_related: bool = False,
-    logger: Optional[Logger] = None,
-    verbose: bool = False,
-    nproc: int = 1,
-    pplacer_threads: int = 1,
-    jellyfish_threads: int = 1,
-    parallel: int = 1,
+    db_dir: os.path.abspath,
+    input_list: os.path.abspath,
+    tmp_dir: os.path.abspath,
+    input_extension: str="fna.gz",
+    cluster_prefix: str="MSBT",
+    kmer_len: Optional[int]=None,
+    filter_size: Optional[int]=None,
+    flat_structure: bool=False,
+    estimate_filter_size: bool=True,
+    increase_filter_size: float=0.0,
+    min_kmer_occurrences: int=2,
+    estimate_kmer_size: bool=True,
+    limit_estimation_number: Optional[int]=None,
+    limit_estimation_percentage: float=100.0,
+    limit_kmer_size: int=32,
+    completeness: float=0.0,
+    contamination: float=100.0,
+    dereplicate: bool=False,
+    similarity: float=1.0,
+    closely_related: bool=False,
+    use_representatives: bool=False,
+    logger: Optional[Logger]=None,
+    verbose: bool=False,
+    nproc: int=1,
+    jellyfish_threads: int=1,
+    parallel: int=1,
 ) -> None:
-    """
-    Build the database baseline
+    """Build the database baseline.
 
-    :param db_dir:                      Path to the database root folder
-    :param input_list:                  Path to the file with a list of input genome paths
-    :param tmp_dir:                     Path to the temporary folder
-    :param input_extension:             File extension of the input files whose paths are defined into the input_list file
-    :param cluster_prefix:              Prefix of clusters numerical identifiers
-    :param kmer_len:                    Length of the kmers
-    :param filter_size:                 Size of the bloom filters
-    :param flat_structure:              Do not taxonomically organize genomes
-    :param estimate_filter_size:        Run ntCard to estimate the most appropriate bloom filter size
-    :param increase_filter_size:        Increase the estimated bloom filter size by the specified percentage
-    :param min_kmer_occurrences:        Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filter files
-    :param estimate_kmer_size:          Run kitsune to estimate the best kmer size
-    :param limit_estimation_number:     Number of genomes per group as input for kitsune and ntCard
-    :param limit_estimation_percentage: Percentage on the total number of genomes per group as input for kitsune and ntCard
-    :param limit_kmer_size:             Maximum kmer size for kitsune kopt
-    :param completeness:                Threshold on the CheckM completeness
-    :param contamination:               Threshold on the CheckM contamination
-    :param dereplicate:                 Enable the dereplication step to get rid of replicated genomes
-    :param closely_related:             For closesly related genomes use this flag
-    :param similarity:                  Get rid of genomes according to this threshold in case the dereplication step is enabled
-    :param logger:                      Logger object
-    :param verbose:                     Print messages on screen
-    :param nproc:                       Make the process parallel when possible
-    :param pplacer_threads:             Maximum number of threads to make pplacer parallel with CheckM
-    :param jellyfish_threads:           Maximum number of threads to make Jellyfish parallel with kitsune
-    :param parallel:                    Maximum number of processors to process each NCBI tax ID in parallel
+    Parameters
+    ----------
+    db_dir : os.path.abspath
+        Path to the database root folder.
+    input_list : os.path.abspath
+        Path to the file with a list of input genome paths.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    input_extension : str, default "fna.gz"
+        File extension of the input files whose paths are defined into the `input_list` file.
+    cluster_prefix : str, default "MSBT",
+        Prefix of clusters.
+    kmer_len : int, optional
+        Length of the kmers.
+    filter_size : int, optional
+        Size of the bloom filters.
+    flat_structure : bool, default False
+        Taxonomically organize genomes if True.
+    estimate_filter_size : bool, default True
+        Run ntCard to estimate the most appropriate bloom filter size.
+    increase_filter_size : float, default 0.0
+        Increase the estimated bloom filter size by the specified percentage.
+    min_kmer_occurrences : int, default 2
+        Minimum number of occurrences of kmers for estimating the bloom filter size and for building bloom filters.
+    estimate_kmer_size : bool, default True
+        Run kitsune to estimate the best kmer size.
+    limit_estimation_number : int, optional
+        Number of genomes per group as input for kitsune and ntCard.
+    limit_estimation_percentage : float, default 100.0
+        Percentage on the total number of genomes per group as input for kitsune and ntCard.
+    limit_kmer_size : int, default 32
+        Maximum kmer size for kitsune kopt.
+    completeness : float, default 0.0
+        Threshold on the completeness.
+    contamination : float, default 100.0
+        Threshold on the contamination.
+    dereplicate : bool, default False
+        Enable the dereplication step to get rid of replicated genomes if True.
+    similarity : float, default 1.0
+        Get rid of genomes according to this threshold in case the dereplication step is enabled.
+    closely_related : bool, default False
+        Used to process closesly related genomes with kitsune kopt.
+    use_representatives : bool, default False
+        Use 3 representative genomes for each species.
+    logger : logging.Logger, optional
+        The Logger object.
+    verbose : bool, default False
+        Print messages on the stdout if True.
+    nproc : int, default 1
+        Make the process parallel when possible.
+    jellyfish_threads : int, default 1
+        Maximum number of threads to make Jellyfish parallel with kitsune.
+    parallel : int, default 1
+        Maximum number of processes to process each NCBI tax ID in parallel.
+
+    Raises
+    ------
+    Exception
+        - If there are no input genomes;
+        - If there are not enough genomes for estimating the optimal kmer size with kitsune.
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -875,7 +1122,6 @@ def index(
         input_extension=input_extension,
         cluster_prefix=cluster_prefix,
         nproc=nproc,
-        pplacer_threads=pplacer_threads,
         completeness=completeness,
         contamination=contamination,
         dereplicate=dereplicate,
@@ -1024,49 +1270,64 @@ def index(
                 printline("Running HowDeSBT at the {} level ({} clusters)".format(level, len(folders)))
 
                 if level == "species":
-                    estimate_bf_size_and_howdesbt_partial = partial(
-                        estimate_bf_size_and_howdesbt,
-                        extension=input_extension,
-                        kmer_len=kmer_len,
-                        min_kmer_occurrences=min_kmer_occurrences,
-                        prefix="genomes",
-                        limit_number=limit_estimation_number,
-                        limit_percentage=limit_estimation_percentage,
-                        increase_filter_size=increase_filter_size,
-                        nproc=nproc,
-                    )
+                    if use_representatives:
+                        estimate_bf_size_and_howdesbt_partial = partial(
+                            estimate_bf_size_and_howdesbt,
+                            extension=input_extension,
+                            kmer_len=kmer_len,
+                            min_kmer_occurrences=min_kmer_occurrences,
+                            prefix="genomes",
+                            limit_number=limit_estimation_number,
+                            limit_percentage=limit_estimation_percentage,
+                            increase_filter_size=increase_filter_size,
+                            nproc=nproc,
+                        )
 
-                    # Establish a species-specific bloom filter size
-                    # Run howdesbt in flat mode
-                    # Search for genomes that minimize and maximize the genetic distance versus all the other genomes in the same cluster
-                    # Use only these genomes to build the species tree
-                    with mp.Pool(processes=parallel) as strains_pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
-                        # Wrapper around the update function of tqdm
-                        def progress(*args):
-                            pbar.update()
-                        
-                        # Process strains
-                        jobs = [
-                            strains_pool.apply_async(
-                                estimate_bf_size_and_howdesbt_partial,
-                                args=(
-                                    os.path.join(species_dir, "strains"),
-                                    os.path.join(species_dir, "strains", "tmp"),
-                                ),
-                                callback=progress
-                            )
-                            for species_dir in folders
-                        ]
+                        # Establish a species-specific bloom filter size
+                        # Run howdesbt in flat mode
+                        # Search for genomes that minimize and maximize the genetic distance versus all the other genomes in the same cluster
+                        # Use only these genomes to build the species tree
+                        with mp.Pool(processes=parallel) as strains_pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
+                            # Wrapper around the update function of tqdm
+                            def progress(*args):
+                                pbar.update()
+                            
+                            # Process strains
+                            jobs = [
+                                strains_pool.apply_async(
+                                    estimate_bf_size_and_howdesbt_partial,
+                                    args=(
+                                        os.path.join(species_dir, "strains"),
+                                        os.path.join(species_dir, "strains", "tmp"),
+                                    ),
+                                    callback=progress
+                                )
+                                for species_dir in folders
+                            ]
 
-                        for job in jobs:
-                            strains_dir, selected_genomes = job.get()
-                            species_dir = os.sep.join(strains_dir.split(os.sep)[:-1])
+                            for job in jobs:
+                                strains_dir, selected_genomes = job.get()
+                                species_dir = os.sep.join(strains_dir.split(os.sep)[:-1])
 
-                            # Populate the genomes folder at the species level with the selected genomes
-                            for genome in selected_genomes:
+                                # Populate the genomes folder at the species level with the selected genomes
+                                for genome in selected_genomes:
+                                    genome_link = os.path.join(species_dir, "genomes", "{}.{}".format(genome, input_extension))
+                                    
+                                    if not os.path.islink(genome_link):
+                                        os.symlink(
+                                            os.path.join(strains_dir, "genomes", "{}.{}".format(genome, input_extension)),
+                                            genome_link
+                                        )
+
+                    else:
+                        # Use all the genomes under this species
+                        for genome_path in Path(os.path.join(species_dir, "strains", "genomes")).glob("*.{}".format(input_extension)):
+                            genome_link = os.path.join(species_dir, "genomes", os.path.basename(genome_path))
+
+                            if not os.path.islink(genome_link):
                                 os.symlink(
-                                    os.path.join(strains_dir, "genomes", "{}.{}".format(genome, input_extension)),
-                                    os.path.join(species_dir, "genomes", "{}.{}".format(genome, input_extension))
+                                    genome_path,
+                                    genome_link
                                 )
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
@@ -1075,33 +1336,22 @@ def index(
                         pbar.update()
 
                     # Process clusters under a specific taxonomic level
+                    # Run HowDeSBT only in case the bloom filter representation of the current cluster does not exist
                     jobs = [
                         pool.apply_async(howdesbt_partial, args=(level_dir,), callback=progress)
-                        for level_dir in folders
+                        for level_dir in folders if not os.path.isfile(os.path.join(level_dir, "{}.bf".format(os.path.basename(level_dir))))
                     ]
 
                     for job in jobs:
                         job.get()
 
-        # Also run HowDeSBT on the database folder to build
+        # Also run HowDeSBT on the database root folder to build
         # the bloom filter representation of the superkingdom
-        if not flat_structure:
-            printline("Building the database root bloom filter with HowDeSBT")
+        if not os.path.isfile(os.path.join(db_dir, "{}.bf".format(os.path.basename(db_dir)))):
+            if not flat_structure:
+                printline("Building the database root bloom filter with HowDeSBT")
 
-        howdesbt_partial(db_dir)
-
-        if flat_structure:
-            # Merge all the genomes_*.txt into a single file
-            gen = Path(db_dir).glob("genomes_*.txt")
-            with open(os.path.join(db_dir, "genomes.txt"), "w+") as genomes_file:
-                for filepath in gen:
-                    with open(str(filepath)) as file:
-                        for line in file:
-                            line = line.strip()
-                            genomes_file.write("{}\n".format(line))
-
-                    # Get rid of the partial genomes file
-                    os.unlink(str(filepath))
+            howdesbt_partial(db_dir)
 
         # The howdesbt function automatically set the current working directory to
         # the index folder of the taxonomic labels
@@ -1111,7 +1361,37 @@ def index(
 
 def main() -> None:
     # Load command line parameters
-    args = read_params()
+    args = read_params(sys.argv[1:])
+
+    # Initialise the logger
+    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
+
+    # Check whether this run is a "resume"
+    resume = args.resume
+
+    # Take track of the framework version to check for code compatibility
+    parent_version = args.parent_version
+
+    if args.resume:
+        # Try to resume the index process
+        # Read the last command line from the sh script
+        argv = [line.strip() for line in open(args.resume).readlines() if line.strip() and not line.startswith("#")][-1].split()
+
+        # Reload command line parameters
+        args = read_params(argv[1:])
+
+        if args.parent_version != parent_version:
+            println(
+                "Warning: your MetaSBT version is v{} while the process you are trying to resume has been initially run with v{}".format(
+                    parent_version,
+                    args.parent_version
+                ),
+                logger=logger,
+                verbose=args.verbose,
+            )
+
+        if args.flat_structure and resume:
+            raise Exception("The --resume option cannot be used in conjunction with --flat-structure")
 
     # Create the database folder
     os.makedirs(args.db_dir, exist_ok=True)
@@ -1119,9 +1399,6 @@ def main() -> None:
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
     os.makedirs(args.tmp_dir, exist_ok=True)
-
-    # Initialise the logger
-    logger = init_logger(filepath=args.log, toolid=TOOL_ID, verbose=args.verbose)
 
     # Skip the bloom filter size estimation if the filter size is passed as input
     if not args.filter_size and not args.estimate_filter_size:
@@ -1157,7 +1434,7 @@ def main() -> None:
 
         if superkingdoms:
             for superkingdom in superkingdoms:
-                if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(superkingdom))):
+                if os.path.isdir(os.path.join(args.db_dir, "k__{}".format(superkingdom))) and not resume:
                     raise Exception(
                         (
                             "An indexed version of the {} superkingdom already exists in the database!\n"
@@ -1169,43 +1446,40 @@ def main() -> None:
     manifest_filepath = os.path.join(args.db_dir, "manifest.txt")
 
     if os.path.isfile(manifest_filepath):
-        # Load and compare --kmer-len and --filter-size
+        # Load and compare --kmer-len, --filter-size, --min-kmer-occurrences, and --use-representatives
         manifest = load_manifest(manifest_filepath)
 
-        if "kmer_len" in manifest:
-            if not args.kmer_len:
-                args.kmer_len = manifest["kmer_len"]
+        for arg in ["kmer_len", "filter_size", "min_kmer_occurrences", "use_representatives"]:
+            if not hasattr(args, arg):
+                setattr(args, arg, manifest[arg])
 
-            elif args.kmer_len != manifest["kmer_len"]:
-                raise ValueError("The kmer length is not compatible with the specified database")
-
-        if "filter_size" in manifest:
-            if not args.filter_size:
-                args.filter_size = manifest["filter_size"]
-
-            elif args.filter_size != manifest["filter_size"]:
-                raise ValueError("The bloom filter size is not compatible with the specified database")
-
-        if "min_kmer_occurrences" in manifest:
-            if not args.min_kmer_occurrences:
-                args.min_kmer_occurrences = manifest["min_kmer_occurrences"]
-
-            elif args.min_kmer_occurrences != manifest["min_kmer_occurrences"]:
-                raise ValueError("The minimum number of occurrences of kmers is not compatible with the specified database")
+            elif getattr(args, arg) != manifest[arg]:
+                raise ValueError(
+                    "The specified \"--{}\" is not compatible with the selected database".format(
+                        arg.replace("_", "-")
+                    )
+                )
 
     else:
         # Initialize manifest file
         with open(manifest_filepath, "w+") as manifest:
             if args.kmer_len:
+                # This will be added later if it does not exist
                 manifest.write("--kmer-len {}\n".format(args.kmer_len))
             
             if args.filter_size:
+                # This will be added later if it does not exist
                 manifest.write("--filter-size {}\n".format(args.filter_size))
 
+            # Add --min-kmer-occurrences
             manifest.write("--min-kmer-occurrences {}\n".format(args.min_kmer_occurrences))
 
-    # Build a sh script with the command line used to launch the index module
-    build_sh(sys.argv, TOOL_ID, args.db_dir)
+            # Add --use-representatives
+            manifest.write("--use-representatives {}\n".format(args.use_representatives))
+
+    if not resume:
+        # Build a sh script with the command line used to launch the index module
+        build_sh(sys.argv, TOOL_ID, args.db_dir)
 
     t0 = time.time()
 
@@ -1230,10 +1504,10 @@ def main() -> None:
         dereplicate=args.dereplicate,
         similarity=args.similarity,
         closely_related=args.closely_related,
+        use_representatives=args.use_representatives,
         logger=logger,
         verbose=args.verbose,
         nproc=args.nproc,
-        pplacer_threads=args.pplacer_threads,
         jellyfish_threads=args.jellyfish_threads,
         parallel=args.parallel,
     )
