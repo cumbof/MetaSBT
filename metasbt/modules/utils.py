@@ -1,13 +1,13 @@
-"""
-Utility functions
+"""Utility functions.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 28, 2023"
+__version__ = "0.1.2"
+__date__ = "May 25, 2023"
 
 import argparse as ap
 import errno
+import gzip
 import logging
 import os
 import re
@@ -28,7 +28,9 @@ import numpy as np  # type: ignore
 # This is never used but helps to keep track of the external
 # software dependencies required by the functions implemented here
 DEPENDENCIES = [
-    "checkm",
+    "checkm2",
+    "checkv",
+    "eukcc",
     "howdesbt",
     "kitsune",
     "ntcard",
@@ -55,35 +57,64 @@ UNCOMPRESSED_FILES = [
 
 
 def bfaction(
-    genomes: List[str],
-    tmpdir: str,
+    genomes: List[os.path.abspath],
+    tmpdir: os.path.abspath,
     kmer_len: int,
-    min_occurrences: int = 2,
-    filter_size: Optional[int] = None,
-    nproc: int = 1,
-    action: str = "bfdistance",
-    mode: str = "theta",
+    min_occurrences: int=2,
+    filter_size: Optional[int]=None,
+    nproc: int=1,
+    action: str="bfdistance",
+    mode: str="theta",
 ) -> Union[Dict[str, Dict[str, float]], Dict[str, int]]:
-    """
-    bfdistance and bfoperate wrapper
+    """Wrapper around HowDeSBT bfdistance and bfoperate sub-commands.
 
-    :param genomes:             List with paths to the genome or bloom filter files
-    :param tmpdir:              Path to the temporary folder with bloom filters
-    :param kmer_len:            Kmer length
-    :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
-    :param filter_size:         Bloom filter size
-    :param nproc:               Make it parallel
-    :param action:              "bfoperate" or "bfdistance"
-    :param mode:                bfoperate modes: "and", "or", "xor", "eq", and "not"
-                                bfdistance modes: "hamming", "intersect", "union", and "theta"
-    :return:                    Dictionary with the result of bfdistance or bfoperate
+    Parameters
+    ----------
+    genomes : list
+        List with paths to the genome or bloom filter files.
+    tmpdir : os.path.abspath
+        Path to the temporary folder with bloom filters.
+    kmer_len : int
+        The kmers length.
+    min_occurrences : int, default 2
+        Exclude kmers with a number of occurrences lower than this parameter.
+    filter_size : int, optional
+        The bloom filter size.
+    nproc : int, default 1
+        Make it parallel.
+    action : {"bfoperate", "bfdistance"}, default "bfdistance"
+        The HowDeSBT sub-command.
+    mode : {"and", "or", "xor", "eq", "not", "hamming", "intersect", "union", "theta"}, default "theta"
+        The sub-command mode.
+        Available values when `action` is "bfoperate" are "and", "or", "xor", "eq", and "not".
+        Available values when `action` is "bfdistance" are "hamming", "intersect", "union", and "theta".
+
+    Raises
+    ------
+    FileNotFoundError
+        If a path to a genome file does not exist.
+    ValueError
+        - If the provided `action` is not supported;
+        - If the provided `mode` is not supported based on the provided `action`.
+    Exception
+        If the number of input genomes is <=2.
+
+    Returns
+    -------
+    dict
+        A dictionary with the results of the bfoperate or bfdistance commands indexed by genome name.
+
+    Notes
+    -----
+    Please refer to the HowDeSBT documentation for additional information about the bfoperate and bfdistance sub-commands:
+    https://github.com/medvedevgroup/HowDeSBT
     """
 
     # Define supported actions
     actions = ["bfoperate", "bfdistance"]
 
     if action not in actions:
-        raise Exception('Unsupported action "{}"!'.format(action))
+        raise ValueError('Unsupported action "{}"!'.format(action))
 
     mode = mode.lower()
 
@@ -94,7 +125,7 @@ def bfaction(
     if (action == "bfoperate" and mode not in bfoperate_modes) or (
         action == "bfdistance" and mode not in bfdistance_modes
     ):
-        raise Exception('Unsupported mode "{}" for action "{}"!'.format(mode, action))
+        raise ValueError('Unsupported mode "{}" for action "{}"!'.format(mode, action))
 
     # Check whether the input genomes exist
     for filepath in genomes:
@@ -199,8 +230,8 @@ def bfaction(
                             line_split = " ".join(line.split()).split(" ")
 
                             # Get genome names
-                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_exists=False)
-                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_exists=False)
+                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_supported=False, check_exists=False)
+                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_supported=False, check_exists=False)
 
                             # Remove non informative fields
                             if line_split[-1] == "({})".format("intersection" if mode == "intersect" else mode):
@@ -236,7 +267,7 @@ def bfaction(
                             key = "result"
                             if line_split[0] != key:
                                 # Get genome name
-                                _, key, _, _ = get_file_info(line_split[0], check_exists=False)
+                                _, key, _, _ = get_file_info(line_split[0], check_supported=False, check_exists=False)
 
                             # Get active bits
                             dist[key] = int(line_split[-3])
@@ -247,13 +278,17 @@ def bfaction(
     return dist
 
 
-def build_sh(argv: List[str], module: str, outfolder: str) -> None:
-    """
-    Build a sh script with the command line used to launch a module
+def build_sh(argv: List[str], module: str, outfolder: os.path.abspath) -> None:
+    """Build a sh script with the command line used to launch a module.
 
-    :param argv:        List of arguments
-    :param module:      Module ID
-    :param outfolder:   Output folder path
+    Parameters
+    ----------
+    argv : list
+        List of arguments.
+    module : str
+        The module name.
+    outfolder : os.path.abspath
+        Path to the output folder.
     """
 
     with open(os.path.join(outfolder, "{}.sh".format(module)), "w+") as sh:
@@ -266,47 +301,61 @@ def build_sh(argv: List[str], module: str, outfolder: str) -> None:
         argv[1] = module
 
         # Finally build the command line
-        sh.write("{}\n".format(" ".join([os.path.abspath(v) if os.path.exists(v) else v  for v in argv])))
+        sh.write("{}\n".format(" ".join([os.path.abspath(v) if os.path.exists(v) else v for v in argv])))
 
 
-def checkm(
-    genomes_paths: List[str],
-    tmp_dir: str,
-    file_extension: str = "fna.gz",
-    nproc: int = 1,
-    pplacer_threads: int = 1,
-) -> List[str]:
+def checkm2(
+    genomes_paths: Optional[List[os.path.abspath]]=None,
+    tmp_dir: Optional[os.path.abspath]=None,
+    file_extension: str="fna.gz",
+    nproc: int=1,
+) -> Dict[str, Dict[str, str]]:
+    """Run CheckM2 on a set of genomes. Organize genomes in chunks with 1000 genomes at most.
+
+    Parameters
+    ----------
+    genomes_paths : list, optional
+        List of paths to the input genomes.
+    tmp_dir : os.path.abspath, optional
+        Path to the temporary folder.
+    file_extension : str, default "fna.gz"
+        Assume all genomes have the same file extension.
+    nproc : int, default 1
+        Make the execution of CheckM2 parallel.
+
+    Returns
+    -------
+    dict
+        A dictionary with the CheckM2 stats indexed by the genome names.
+
+    Notes
+    -----
+    Please refer to the official documentation for additional information about CheckM2:
+    https://github.com/chklovski/CheckM2
     """
-    Run CheckM on a set of genomes
-    Organise genomes in chunks with 1000 genomes at most
 
-    :param genomes_paths:       List of paths to the input genomes
-    :param tmp_dir:             Path to the temporary folder
-    :param file_extension:      Assume all genomes have the same file extension
-    :param nproc:               Make the execution CheckM parallel
-    :param pplacer_threads:     Maximum number of threads for pplacer
-    :return:                    Return the list of paths to the CheckM output tables
-    """
-
-    # Define the output list of paths to the CheckM tables
-    output_tables = list()
+    # Define the output dictionary
+    output_dict = dict()
 
     # Check whether there is at least one genome path in list
     if genomes_paths:
         run_tmp_dir = os.path.join(tmp_dir, "tmp")
 
-        # Organise genomes
+        # Organize genomes
         counter = 0
         run_id = 1
+
         os.makedirs(os.path.join(run_tmp_dir, "bins_{}".format(run_id)), exist_ok=True)
+        os.makedirs(os.path.join(run_tmp_dir, "tmp_{}".format(run_id)), exist_ok=True)
 
         # Iterate over the list of paths to the genome files
         for genome_path in genomes_paths:
-            # Reorganise genomes in chunks with 1000 genomes at most
+            # Reorganize genomes in chunks with 1000 genomes at most
             if counter % 1000 > 0:
                 counter = 0
                 run_id += 1
                 os.makedirs(os.path.join(run_tmp_dir, "bins_{}".format(run_id)), exist_ok=True)
+                os.makedirs(os.path.join(run_tmp_dir, "tmp_{}".format(run_id)), exist_ok=True)
 
             # Symlink genome files to the bins folder of the current chunk
             os.symlink(
@@ -328,62 +377,218 @@ def checkm(
                 table_path = os.path.join(tmp_dir, "run_{}.tsv".format(run_id))
 
                 try:
-                    # Run CheckM
-                    # TODO update to CheckM2
-                    run(
-                        [
-                            "checkm",
-                            "lineage_wf",
-                            "-t",
-                            nproc,
-                            "-x",
-                            file_extension,
-                            "--pplacer_threads",
-                            pplacer_threads,
-                            "--tab_table",
-                            "-f",
-                            table_path,
-                            bins_folder,
-                            run_dir,
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                    with open(table_path, "w+") as table:
+                        # Run CheckM2
+                        run(
+                            [
+                                "checkm2",
+                                "predict",
+                                "--input",
+                                bins_folder,
+                                "--output-directory",
+                                run_dir,
+                                "--specific",
+                                "--extension",
+                                file_extension,
+                                "--tmpdir",
+                                os.path.join(run_tmp_dir, "tmp_{}".format(run_id)),
+                                "--threads",
+                                nproc,
+                                "--stdout",
+                            ],
+                            stdout=table,
+                            stderr=subprocess.DEVNULL,
+                        )
 
-                    # Add the output table path to the output list
-                    output_tables.append(table_path)
+                    if os.path.isfile(table_path):
+                        with open(table_path) as table:
+                            header = table.readline().strip()
+
+                            for line in table:
+                                line = line.strip()
+                                
+                                if line:
+                                    line_split = line.split("\t")
+
+                                    genome = line_split[header.index("Name")]
+
+                                    if "." in file_extension:
+                                        # Fix the genome name
+                                        genome = ".".join(genome.split(".")[:-1])
+
+                                    output_dict[genome] = dict()
+
+                                    for idx, value in enumerate(line_split):
+                                        output_dict[genome][header[idx]] = value
 
                 except Exception:
                     pass
 
-    return output_tables
+    return output_dict
+
+
+def checkv(
+    genomes_paths: Optional[List[os.path.abspath]]=None,
+    tmp_dir: Optional[os.path.abspath]=None,
+    file_extension: str="fna.gz",
+    nproc: int=1,
+) -> Dict[str, Dict[str, str]]:
+    """Run CheckV on a set of genomes.
+
+    Parameters
+    ----------
+    genomes_paths : list, optional
+        List of paths to the input genomes.
+    tmp_dir : os.path.abspath, optional
+        Path to the temporary folder.
+    file_extension : str, default "fna.gz"
+        Assume all genomes have the same file extension.
+    nproc : int, default 1
+        Make the execution of CheckV parallel.
+
+    Returns
+    -------
+    dict
+        A dictionary with the CheckV stats indexed by the genome names.
+
+    Notes
+    -----
+    Please refer to the official documentation for additional information about CheckV:
+    https://bitbucket.org/berkeleylab/checkv
+    """
+
+    # Define the output dictionary
+    output_dict = dict()
+
+    # Check whether there is at least one genome path in list
+    if genomes_paths:
+        # Merge input files
+        merged_filepath = os.path.join(tmp_dir, "merged.fna")
+
+        # Mapping contig ID to file name
+        contig_to_filename = dict()
+
+        with open(merged_filepath, "w+") as outfile:
+            for genome_path in genomes_paths:
+                # This should not make any memory issue since input files are pretty small here
+                if file_extension.lower().endswith(".gz"):
+                    with gzip.open(genome_path, "rt") as infile:
+                        # First line is the contig ID
+                        contig_id = infile.readline().strip()[1:]
+
+                        # Take track of the mapping between the contig IDs and file names
+                        contig_to_filename[contig_id] = get_file_info(genome_path, check_supported=False, check_exists=False)[1]
+
+                        outfile.write(infile.read())
+
+                else:
+                    with open(genome_path) as infile:
+                        # First line is the contig ID
+                        contig_id = infile.readline().strip()[1:]
+
+                        # Take track of the mapping between the contig IDs and file names
+                        contig_to_filename[contig_id] = get_file_info(genome_path)[1]
+
+                        outfile.write(infile.read())
+
+        # Run CheckV
+        run(
+            [
+                "checkv",
+                "end_to_end",
+                merged_filepath,
+                tmp_dir,
+                "-t",
+                nproc,
+            ],
+            silence=True,
+        )
+
+        output_filepath = os.path.join(tmp_dir, "quality_summary.tsv")
+
+        if os.path.isfile(output_filepath):
+            # Read the content of the output table and add a new "Name" column 
+            # with the input file names base on the mapping contig_to_filename
+            with open(os.path.join(tmp_dir, "run_1.tsv")) as run_table:
+                with open(output_filepath) as output_table:
+                    header = output_table.readline().strip().split("\t")
+
+                    # Add a new column "Name" with the name of the input files
+                    header.insert("Name", 0)
+
+                    # Write the new header line
+                    run_table.write("{}\n".format("\t".join(header)))
+
+                    for line in output_table:
+                        line = line.strip()
+                        if line:
+                            line_split = line.split("\t")
+
+                            # Retrieve the contig ID
+                            contig_id = line_split[header.index("contig_id")+1]
+
+                            # Add the file name
+                            line_split.insert(contig_to_filename[contig_id], 0)
+
+                            # Write the new line
+                            run_table.write("{}\n".format("\t".join(line_split)))
+
+                            # Update the output dictionary with quality stats
+                            output_dict[contig_to_filename[contig_id]] = dict()
+
+                            for idx, value in enumerate(line_split):
+                                output_dict[contig_to_filename[contig_id]][header[idx]] = value
+
+    return output_dict
 
 
 def cluster(
-    genomes_list: List[str],
+    genomes_list: List[os.path.abspath],
     boundaries: Dict[str, Dict[str, Union[int, float]]],
-    manifest_filepath: str,
-    profiles_dir: str,
-    tmpdir: str,
-    outpath: str,
-    cluster_prefix: str = "MSBT",
-    min_occurrences: int = 2,
-    nproc: int = 1,
-) -> Dict[str, str]:
-    """
-    Define new clusters with the unassigned MAGs
+    manifest_filepath: os.path.abspath,
+    profiles_dir: os.path.abspath,
+    tmpdir: os.path.abspath,
+    outpath: os.path.abspath,
+    cluster_prefix: str="MSBT",
+    min_occurrences: int=2,
+    nproc: int=1,
+) -> Tuple[Dict[os.path.abspath, Dict[str, str]], List[os.path.abspath]]:
+    """Define new clusters with the unassigned MAGs.
 
-    :param genomes_list:        List with paths to the unassigned genomes
-    :param boundaries:          Boundaries table produced by the boundaries module
-    :param manifest_filepath:   Path to the manifest file
-    :param profiles_dir:        Path to the temporary folder with the genomes profiles defined by the profile module
-    :param tmpdir:              Path to the temporary folder for building bloom filters
-    :param outpath:             Path to the output file with the new assignments
-    :param cluster_prefix:      Prefix of clusters numerical identifiers
-    :param min_occurrences:     Exclude kmers with a number of occurrences less than this param
-    :param nproc:               Make bfdistance parallel
-    :return:                    Return the assignments as a dictionary <genome_path, taxonomy>
-                                Also return the list of paths to the unassigned genomes
+    Parameters
+    ----------
+    genomes_list : list
+        List with paths to the unassigned genomes.
+    boundaries : dict
+        Dictionary with boundaries as produced by the boundaries module.
+    manifest_filepath : os.path.abspath
+        Path to the manifest file.
+    profiles_dir : oa.path.abspath
+        Path to the temporary folder with the genomes profiles defined by the profile module.
+    tmpdir : os.path.abspath
+        Path to the temporary folder for building the bloom filters.
+    outpath : os.path.abspath
+        Path to the output file with the new assignments.
+    cluster_prefix : str, default "MSBT"
+        Prefix of clusters.
+    min_occurrences : int, default 2
+        Exclude kmers with a number of occurrences lower than this parameter.
+    nproc : int, default 1
+        Make the HowDeSBT bfdistance sub-command parallel
+
+    Raises
+    ------
+    FileExistsError
+        If the output file with assignments already exists.
+    FileNotFoundError
+        - If the manifest file does not exist;
+        - If the temporary folder with the genomes profiles does not exist.
+
+    Returns
+    -------
+    tuple
+        A tuple with the assignments as a dictionary mapping the genome file path with the taxonomic label
+        in addition to the list of paths to the unassigned genomes.
     """
 
     # Check whether the output file already exists
@@ -429,7 +634,7 @@ def cluster(
     assigned_genomes: List[str] = list()
 
     # Keep track of those genomes that MetaSBT is not able to assign
-    unassigned: List[str] = list()
+    unassigned: List[os.path.abspath] = list()
 
     # Compute pair-wise distance between genomes as the number of common kmers
     # This could take a while
@@ -516,15 +721,20 @@ def cluster(
                     # Check whether other input genomes look pretty close to the current genome by computing
                     # the number of kmers in common between the current genome and all the other input genomes
                     for j in range(i + 1, len(genomes_list)):
-                        # Kmers in common have been already computed
-                        # It returns a float by default
-                        common = int(bfdistance_intersect[genomes[i]][genomes[j]])
+                        try:
+                            # Kmers in common have been already computed
+                            # It returns a float by default
+                            common = int(bfdistance_intersect[genomes[i]][genomes[j]])
 
-                        if common >= last_known_level_mink:
-                            # Set the second genome as assigned
-                            assigned_genomes.append(genomes[j])
-                            # Also assign these genomes to the same taxonomy assigned to the current genome
-                            assigned_taxa[assigned_taxonomy].append(genomes_list[j])
+                            if common >= last_known_level_mink:
+                                # Set the second genome as assigned
+                                assigned_genomes.append(genomes[j])
+                                # Also assign these genomes to the same taxonomy assigned to the current genome
+                                assigned_taxa[assigned_taxonomy].append(genomes_list[j])
+
+                        except KeyError:
+                            # Only in case the current genome is not into the bfdistance_intersect dict
+                            pass
 
     # Update the manifest with the new clusters counter
     if clusters_counter > clusters_counter_manifest:
@@ -569,28 +779,41 @@ def cluster(
 
 
 def dereplicate_genomes(
-    genomes: list,
+    genomes: List[os.path.abspath],
     tax_id: str,
-    tmp_dir: str,
+    tmp_dir: os.path.abspath,
     kmer_len: int,
-    filter_size: Optional[int] = None,
-    nproc: int = 1,
-    similarity: float = 1.0,
-) -> List[str]:
-    """
-    Dereplicate genomes
+    filter_size: Optional[int]=None,
+    nproc: int=1,
+    similarity: float=1.0,
+) -> List[os.path.abspath]:
+    """Dereplicate genomes.
 
-    :param genomes:         List of genome file paths
-    :param tax_id:          NCBI tax ID
-    :param tmp_dir:         Path to the temporary folder
-    :param kmer_len:        Length of the kmers
-    :param filter_size:     Size of the bloom filters
-    :param nproc:           Make it parallel
-    :param similarity:      Similarity threshold on the theta distance
-                            Theta between two genomes A and B is defined as N/D, where
-                            N is the number of 1s in common between A and B, and
-                            D is the number of 1s in A
-    :return:                List of genome file paths for genomes that passed the dereplication
+    Parameters
+    ----------
+    genomes : list
+        List with paths to the genome files.
+    tax_id : str
+        The NCBI tax ID.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    kmer_len : int
+        The length of the kmers.
+    filter_size : int, optional
+        The size of the bloom filters.
+    nproc : int, default 1
+        Make it parallel.
+    similarity : float, default 1.0
+        The similarity threshold on the theta distance.
+
+    Returns
+    -------
+    listA list with paths to the genome files that passed the dereplication process.
+
+    Notes
+    -----
+    Theta between two genomes A and B is defined as N/D, where N is the number of 1s in common
+    between A and B, and D is the number of 1s in A.
     """
 
     # Define the HowDeSBT temporary folder
@@ -636,21 +859,49 @@ def dereplicate_genomes(
 
 
 def download(
-    url: Optional[str] = None,
-    urls: Optional[List[str]] = None,
-    folder: str = os.getcwd(),
-    retries: int = 10,
-    raise_exception: bool = True
-) -> Optional[Union[str, List[str]]]:
-    """
-    Download a file from URL to the specified folder
+    url: Optional[str]=None,
+    urls: Optional[List[str]]=None,
+    folder: os.path.abspath=os.getcwd(),
+    retries: int=10,
+    raise_exception: bool=True
+) -> Optional[Union[os.path.abspath, List[os.path.abspath]]]:
+    """Download a file from URL to the specified folder.
 
-    :param url:             Source file URL
-    :param urls:            List with source file URLs
-    :param folder:          Target destination folder path
-    :param retries:         Try downloading again in case of errors
-    :param raise_exception: Raise an exception in case of error
-    :return:                Path or list of paths to the downloaded files
+    Parameters
+    ----------
+    url : str, optional
+        The URL to the source file.
+    urls : list, optional
+        A list of URLs to the source files.
+    folder : os.path.abspath, default os.getcwd
+        Path to the output folder.
+    retries : int, default 10
+        Try downloading again in case of errors.
+    raise_exception : bool, default True
+        Raise an exception in case of errors if True.
+
+    Raises
+    ------
+    ValueError
+        If no URLs are provided.
+    Exception
+        If an error occurs while downloading the files.
+
+    Returns
+    -------
+    A path or a list of paths to the downloaded files.
+
+    Examples
+    --------
+    >>> import os
+    >>> from utils import download
+    >>> url = "https://raw.githubusercontent.com/cumbof/MetaSBT-DBs/main/databases.tsv"
+    >>> filepath = download(url=url)
+    >>> os.path.isfile(filepath)
+    True
+
+    Download the databases table from the MetaSBT-DBs repository and check whether the 
+    file exists on the file system. By default, it is saved into the home directory.
     """
 
     if not url and not urls:
@@ -698,23 +949,39 @@ def download(
 
 
 def estimate_bf_size(
-    genomes: str,
-    kmer_len: int = 21,
-    min_occurrences: int = 2,
-    prefix: str = "genomes",
-    tmp_dir: str = os.getcwd(),
-    nproc: int = 1
+    genomes: List[os.path.abspath],
+    kmer_len: int=21,
+    min_occurrences: int=2,
+    prefix: str="genomes",
+    tmp_dir: os.path.abspath=os.getcwd(),
+    nproc: int=1
 ) -> int:
-    """
-    Estimate the bloom filter size with ntCard
+    """Estimate the bloom filter size with ntCard.
 
-    :param genomes:         List of paths to the genome files
-    :param kmer_len:        Length of the kmers
-    :param min_occurrences: Exclude kmers with a number of occurrences less than this param
-    :param prefix:          Prefix of the output histogram file
-    :param tmp_dir:         Path to the temporary folder
-    :param nproc:           Make it parallel
-    :return:                The estimated bloom filter size
+    Parameters
+    ----------
+    genomes : list
+        List of paths to the genome files.
+    kmer_len : int, default 21
+        Length of the kmers.
+    min_occurrences : int, default 2
+        Exclude kmers with a number of occurrences lower than this parameter.
+    prefix : str, default "genomes"
+        Prefix of the output histogram file.
+    tmp_dir : os.path.abspath, default os.getcwd
+        Path to the temporary folder.
+    nproc : int, default 1
+        Make it parallel.
+
+    Raises
+    ------
+    Exception
+        If it is not able to estimate the bloom filter size.
+
+    Returns
+    -------
+    int
+        The estimated bloom filter size.
     """
 
     os.makedirs(tmp_dir, exist_ok=True)
@@ -780,48 +1047,165 @@ def estimate_bf_size(
     return F0 - sum(fs)
 
 
-def filter_checkm_tables(
-    checkm_tables: List[str], completeness: float = 0.0, contamination: float = 100.0
-) -> List[str]:
-    """
-    Filter genomes according to completeness and contamination criteria
+def eukcc(
+    genomes_paths: Optional[List[os.path.abspath]]=None,
+    tmp_dir: Optional[os.path.abspath]=None,
+    file_extension: str="fna.gz",
+    nproc: int=1,
+) -> Dict[str, Dict[str, str]]:
+    """Run EukCC on a set of genomes.
 
-    :param checkm_tables:   List of paths to the CheckM output tables
-    :param completeness:    Minimum allowed completeness
-    :param contamination:   Maximum allowed contamination
-    :return:                The list of genomes that passed the quality-control criteria
+    Parameters
+    ----------
+    genomes_paths : list, optional
+        List of paths to the input genomes.
+    tmp_dir : os.path.abspath, optional
+        Path to the temporary folder.
+    file_extension : str, default "fna.gz"
+        Assume all genomes have the same file extension.
+    nproc : int, default 1
+        Make the execution of EukCC parallel
+
+    Returns
+    -------
+    dict
+        A dictionary with the EukCC stats indexed by the genome names.
+
+    Notes
+    -----
+    Please refer to the official documentation for additional information about EukCC:
+    https://github.com/Finn-Lab/EukCC
+    """
+
+    # Define the output dictionary
+    output_dict = dict()
+
+    # Check whether there is at least one genome path in list
+    if genomes_paths:
+        bins_folder = os.path.join(tmp_dir, "bins")
+
+        os.makedirs(bins_folder, exist_ok=True)
+
+        for genome_path in genomes_paths:
+            os.symlink(genome_path, os.path.join(bins_folder, os.path.basename(genome_path)))
+
+        # TODO
+        # Use file_extension to change the default file type as argument to EukCC
+        # Does it work with Gzip compressed sequences?
+
+        # Run EukCC
+        run(
+            [
+                "eukcc",
+                "folder",
+                "--out",
+                tmp_dir,
+                "--threads",
+                nproc,
+                bins_folder,
+            ],
+            silence=True,
+        )
+
+        output_filepath = os.path.join(tmp_dir, "eukcc.tsv")
+
+        if os.path.isfile(output_filepath):
+            # Read the content of the output table and add a new "Name" column 
+            with open(os.path.join(tmp_dir, "run_1.tsv")) as run_table:
+                with open(output_filepath) as output_table:
+                    header = output_table.readline().strip().split("\t")
+
+                    # Add a new column "Name" with the name of the input files
+                    header.insert("Name", 0)
+
+                    # Write the new header line
+                    run_table.write("{}\n".format("\t".join(header)))
+
+                    for line in output_table:
+                        line = line.strip()
+                        if line:
+                            line_split = line.split("\t")
+
+                            # Retrieve the file name
+                            filename = get_file_info(line_split[header.index("fasta")+1], check_supported=False, check_exists=False)[1]
+
+                            # Add the file name
+                            line_split.insert(filename, 0)
+
+                            # Write the new line
+                            run_table.write("{}\n".format("\t".join(line_split)))
+
+                            # Update the output dictionary with quality stats
+                            output_dict[filename] = dict()
+
+                            for idx, value in enumerate(line_split):
+                                output_dict[filename][header[idx]] = value
+
+    return output_dict
+
+
+def filter_quality(
+    quality_dict: Dict[str, Dict[str, str]], completeness: float=0.0, contamination: float=100.0
+) -> List[str]:
+    """Filter genomes according to completeness and contamination criteria.
+
+    Parameters
+    ----------
+    quality_dict : dict
+        Dictionary with quality information indexed by genome names.
+    completeness : float, default 0.0
+        Minimum allowed completeness.
+    contamination : float, default 100.0
+        Maximum allowed contamination.
+
+    Returns
+    -------
+    list
+        A list of genomes that passed the quality-control criteria.
     """
 
     # Define the list of genomes that passed the quality control
     genomes = list()
 
-    # Iterate over the CheckM output tables
-    for filepath in checkm_tables:
-        if os.path.isfile(filepath):
-            with open(filepath) as table:
-                line_count = 0
-                for line in table:
-                    line = line.strip()
-                    if line:
-                        # Always skip the first header line
-                        if line_count > 0:
-                            line_split = line.split("\t")
+    for genome in quality_dict:
+        # Check whether the current genome respect both the completeness and contamination criteria
+        comp = None
+        cont = None
 
-                            # Check whether the current genome respect both the completeness and contamination criteria
-                            if float(line_split[-3]) >= completeness and float(line_split[-2]) <= contamination:
-                                genomes.append(line_split[0])
+        if "Completeness_Specific" in quality_dict[genome]:
+            # CheckM2
+            comp = float(quality_dict[genome]["Completeness_Specific"])
+            cont = float(quality_dict[genome]["Contamination"])
+        
+        elif "completeness" in quality_dict[genome]:
+            # CheckV and EukCC
+            comp = float(quality_dict[genome]["completeness"])
+            cont = float(quality_dict[genome]["contamination"])
 
-                        line_count += 1
+        if isinstance(comp, float) and isinstance(cont, float):
+            if comp >= completeness and cont <= contamination:
+                genomes.append(genome)
 
     return genomes
 
 
-def get_bf_density(filepath: str) -> float:
-    """
-    Retrieve the bloom filter density
+def get_bf_density(filepath: os.path.abspath) -> float:
+    """Retrieve the bloom filter density.
 
-    :param filepath:    Path to the bloom filter file
-    :return:            Density of the bloom filter
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the bloom filter file.
+
+    Raises
+    ------
+    Exception
+        If an error occurs while retrieving the bloom filter density with HowDeSBT.
+
+    Returns
+    -------
+    float
+        The density of the bloom filter.
     """
 
     density = 0.0
@@ -852,19 +1236,28 @@ def get_bf_density(filepath: str) -> float:
 
 
 def get_boundaries(
-    bfs: List[str], tmpdir: str, kmer_len: int, filter_size: Optional[int] = None, nproc: int = 1
+    bfs: List[os.path.abspath], tmpdir: os.path.abspath, kmer_len: int, filter_size: Optional[int]=None, nproc: int=1
 ) -> Tuple[int, int, int]:
-    """
-    Return kmers boundaries for a specific set of genomes defined as the minimum and
-    maximum number of common kmers among all the genomes in the current taxonomic level
+    """Return kmers boundaries for a specific set of genomes defined as the minimum and
+    maximum number of common kmers among all the genomes in the current taxonomic level.
 
-    :param genomes:     List with paths to the bloom filter representations of the genomes
-    :param tmpdir:      Path to the temporary folder
-    :param kmer_len:    Kmer length
-    :param filter_size: Bloom filter size
-    :param nproc:       Make it parallel
-    :return:            Return a tuple with boundaries
-                        Total number, minimum, and maximum amount of kmers in common among the input genomes
+    Parameters
+    ----------
+    bfs : list
+        List with paths to the bloom filter representations of the genomes.
+    tmpdir : os.path.abspath
+        Path to the temporary folder.
+    kmer_len : int
+        The length of the kmers.
+    filter_size : int, optional
+        The bloom filter size.
+    nproc : int, default 1
+        Make it parallel.
+
+    Returns
+    -------
+    tuple
+        A tuple with the total number, the minimum, and maximum number of kmers in common among the input genomes.
     """
 
     # Search for the minimum and maximum number of common kmers among all the input genomes
@@ -884,23 +1277,27 @@ def get_boundaries(
             _, genome1, _, _ = get_file_info(bfs[i])
             _, genome2, _, _ = get_file_info(bfs[j])
 
-            # Result is under key "result"
-            # It returns a float by default
-            common = int(bfdistance_intersect[genome1][genome2])
+            try:
+                # It returns a float by default
+                common = int(bfdistance_intersect[genome1][genome2])
 
-            if common == 0:
-                # This could be only due to a wrong classification and must be reported
-                with open(os.path.join(tmpdir, "zero_common_kmers.tsv"), "a+") as zck:
-                    zck.write("{}\t{}\n".format(genome1, genome2))
+                if common == 0:
+                    # This could be only due to a wrong classification and must be reported
+                    with open(os.path.join(tmpdir, "zero_common_kmers.tsv"), "a+") as zck:
+                        zck.write("{}\t{}\n".format(genome1, genome2))
 
-                # Pass to the next comparison
-                continue
+                    # Pass to the next comparison
+                    continue
 
-            # Update the minimum and maximum number of common kmers
-            if common > maxv:
-                maxv = common
-            if common < minv:
-                minv = common
+                # Update the minimum and maximum number of common kmers
+                if common > maxv:
+                    maxv = common
+                if common < minv:
+                    minv = common
+
+            except KeyError:
+                # Only in case the current genome is not into the bfdistance_intersect dict
+                pass
 
     # Use bfoperate --or (union) to retrieve the total number of kmers
     bfoperate_or = bfaction(bfs, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfoperate", mode="or")
@@ -911,12 +1308,29 @@ def get_boundaries(
     return kmers, minv, maxv
 
 
-def get_file_info(filepath: str, check_supported: bool = True, check_exists: bool = True) -> Tuple[str, str, str, str]:
-    """
-    Get file path, name, extension, and compression
+def get_file_info(filepath: os.path.abspath, check_supported: bool=True, check_exists: bool=True) -> Tuple[str, str, str, str]:
+    """Get file path, name, extension, and compression.
 
-    :param filepath:    Path to the input file
-    :return:            File path, name, extension, and compression
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the input file.
+    check_supported : bool, default True
+        Check if the file extension is supported if True.
+    check_exists : bool, default True
+        Check if the file exists if True.
+
+    Raises
+    ------
+    FileNotFoundError
+        If `check_exists` is True and the file does not exist.
+    Exception
+        If `check_supported` is True and the file extension is not recognized.
+
+    Returns
+    -------
+    tuple
+        A tuple with the file path, name, extension, and compression.
     """
 
     if check_exists and not os.path.isfile(filepath):
@@ -947,12 +1361,19 @@ def get_file_info(filepath: str, check_supported: bool = True, check_exists: boo
 
 
 def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], taxonomy: str) -> Tuple[int, int]:
-    """
-    Retrieve boundaries for a given taxonomic label
+    """Retrieve boundaries for a given taxonomic label.
 
-    :param boundaries:  Boundaries table produced by the boundaries module
-    :param taxonomy:    Taxonomic label
-    :return:            Taxonomy-specific boundaries
+    Parameters
+    ----------
+    boundaries : dict
+        Dictionary with boundaries as produced by the boundaries module.
+    taxonomy : str
+        The taxonomic label.
+
+    Returns
+    -------
+    tuple
+        A tuple with the minimum and maximum number of kmers in common among all the genomes under the specified cluster.
     """
 
     minv = 0
@@ -1006,25 +1427,42 @@ def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], ta
 
 
 def howdesbt(
-    level_dir: str,
-    extension: str = "fna.gz",
-    kmer_len: int = 21,
-    min_occurrences: int = 2,
-    filter_size: int = 10000,
-    nproc: int = 1,
-    flat_structure: bool = False,
+    level_dir: os.path.abspath,
+    extension: str="fna.gz",
+    kmer_len: int=21,
+    min_occurrences: int=2,
+    filter_size: int=10000,
+    nproc: int=1,
+    flat_structure: bool=False,
 ) -> None:
-    """
-    Run HowDeSBT on a specific taxonomic level
-    Genomes must be in the "genomes" folder under level_dir
+    """Run HowDeSBT on a specific taxonomic level. Genomes must be in the "genomes" folder under `level_dir`.
 
-    :param level_dir:       Path to the taxonomic level folder
-    :param extension:       Input file extension
-    :param kmer_len:        Length of the kmers
-    :param min_occurrences: Exclude kmers with a number of occurrences less than this param
-    :param filter_size:     Size of the bloom filters
-    :param nproc:           Make it parallel
-    :param flat_structure:  Genomes are not taxonomically organized
+    Parameters
+    ----------
+    level_dir : os.path.abspath
+        Path to the taxonomic level folder.
+    extension : str, default "fna.gz"
+        Input file extension.
+    kmer_len : int, default 21
+        The length of the kmers.
+    min_occurrences : int, default 2
+        Exclude kmers with a number of occurrences lower than this parameter.
+    filter_size : int, default 10000
+        The size of the bloom filters.
+    nproc : int, default 1
+        Make it parallel.
+    flat_structure : bool, default False
+        Genomes are not taxonomically organized if False.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the provided `level_dir` does not exist.
+
+    Notes
+    -----
+    Please refer to the official documentation for additional information about HowDeSBT:
+    https://github.com/medvedevgroup/HowDeSBT
     """
 
     # Check whether the input folder exists
@@ -1226,13 +1664,27 @@ def howdesbt(
     howdesbt_log.close()
 
 
-def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, verbose: bool = True) -> Optional[Logger]:
-    """
-    Define a logger to print on console, on file, or both
+def init_logger(filepath: Optional[os.path.abspath]=None, toolid: Optional[str]=None, verbose: bool=True) -> Optional[Logger]:
+    """Define a logger to print on console, on file, or both.
 
-    :param filepath:    Path to the log file
-    :param verbose:     Print on screen
-    :return:            Logger object or None
+    Parameters
+    ----------
+    filepath : os.path.abspath, optional
+        Path to the log file.
+    toolid : str, optional
+        The ID of the module.
+    verbose : bool, default True
+        Print messages on the stdout.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the folder of the provided `filepath` does not exist.
+
+    Returns
+    -------
+    logging.Logger
+        The logging.Logger object.
     """
 
     # Define the logger config
@@ -1317,12 +1769,23 @@ def init_logger(filepath: Optional[str] = None, toolid: Optional[str] = None, ve
     return None
 
 
-def integrity_check(filepath) -> bool:
-    """
-    This is for Gzipped files only
+def integrity_check(filepath: os.path.abspath) -> bool:
+    """This is for Gzipped files only.
 
-    :param filepath:    Path to the Gzipped file
-    :return:            True if it passes the integrity check
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the Gzipped file.
+
+    Raises
+    ------
+    Exception
+        If the input file does not have a ".gz" extension.
+
+    Returns
+    -------
+    bool
+        True if the input file passes the integrity check.
     """
 
     # This checks whether the input file exists and its extension and compression are supported
@@ -1342,12 +1805,18 @@ def integrity_check(filepath) -> bool:
     return True
 
 
-def load_boundaries(boundaries_filepath: str) -> Dict[str, Dict[str, Union[int, float]]]:
-    """
-    Load the table produced by the boundaries module
+def load_boundaries(boundaries_filepath: os.path.abspath) -> Dict[str, Dict[str, Union[int, float]]]:
+    """Load the table produced by the boundaries module.
 
-    :param boundaries_filepath: Path to the boundaries table
-    :return:                    Dictionary with the table content indexed by taxa
+    Parameters
+    ----------
+    boundaries_filepath : os.path.abspath
+        Path to the boundaries table.
+
+    Returns
+    -------
+    dict
+        A dictionary with the table content indexed by taxa.
     """
 
     if not os.path.isfile(boundaries_filepath):
@@ -1376,14 +1845,30 @@ def load_boundaries(boundaries_filepath: str) -> Dict[str, Dict[str, Union[int, 
     return boundaries
 
 
-def load_input_table(filepath: str, input_extension: str = "fna.gz") -> Dict[str, str]:
-    """
-    Load the input table with the list of paths to the genome files and eventually their taxonomic labels
+def load_input_table(filepath: os.path.abspath, input_extension: str="fna.gz") -> Dict[str, List[os.path.abspath]]:
+    """Load the input table with the list of paths to the genome files and eventually their taxonomic labels.
 
-    :param filepath:            Path to the input file
-    :param input_extension:     Input genome files extension
-    :return:                    A list with paths to the input genomes in case of MAGs or a dictionary with 
-                                genome paths and their taxonomic labels in case of reference genomes
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the input file.
+    input_extension : str, default "fna.gz"
+        The extension of the genome files listed in the input table.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the provided `filepath` does not exist.
+    Exception
+        - If the input table contains more than 2 columns;
+        - If a taxonomic label contains more or less than 7 taxonomic levels;
+        - If a genome file has a different extension compared to the provided one;
+        - If a genome is reported twice.
+
+    Returns
+    -------
+    dict
+        A dictionary with the list of genome paths indexed by their taxonomic labels.
     """
 
     if not os.path.isfile(filepath):
@@ -1450,12 +1935,23 @@ def load_input_table(filepath: str, input_extension: str = "fna.gz") -> Dict[str
     return taxonomy2genomes
 
 
-def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:
-    """
-    Load the manifest file
+def load_manifest(manifest_filepath: os.path.abspath) -> Dict[str, Union[str, int, float]]:
+    """Load the manifest file.
 
-    :param manifest_filepath:   Path to the manifest file
-    :return:                    Dictionary with manifest data
+    Parameters
+    ----------
+    manifest_filepath : os.path.abspath
+        Path to the manifest file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the input manifest file does not exist.
+
+    Returns
+    -------
+    dict
+        A dictionary with manifest data.
     """
 
     if not os.path.isfile(manifest_filepath):
@@ -1485,11 +1981,30 @@ def load_manifest(manifest_filepath: str) -> Dict[str, Union[str, int, float]]:
 
 def number(
     typev: type,
-    minv: Optional[Union[int, float]] = None,
-    maxv: Optional[Union[int, float]] = None,
+    minv: Optional[Union[int, float]]=None,
+    maxv: Optional[Union[int, float]]=None,
 ) -> Callable:
-    """
-    Take full control of input numeric types by defining custom intervals
+    """Take full control of input numeric types by defining custom intervals.
+
+    Parameters
+    ----------
+    typev : type
+        A numerical type, int or float.
+    minv : {int, float}, optional
+        The lower bound of the numerical interval.
+    maxv : {int, float}, optional
+        The upper bound of the numerical interval.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        - If the type of the provided input is not numerical.
+        - If the provided number falls outside the interval.
+
+    Returns
+    -------
+    collections.abc.Collable
+        The collections.abc.Callable object.
     """
 
     def type_func(value: Union[int, float]) -> Union[int, float]:
@@ -1515,23 +2030,48 @@ def number(
 
 
 def optimal_k(
-    genomes: List[str],
+    genomes: List[os.path.abspath],
     kl: int,
-    tmpdir: str,
-    closely_related: bool = False,
-    nproc: int = 1,
-    threads: int = 1
+    tmpdir: os.path.abspath,
+    closely_related: bool=False,
+    nproc: int=1,
+    threads: int=1
 ) -> int:
-    """
-    Given a set of genomes, try to define the best k-mer length with kitsune
+    """Given a set of genomes, try to define the best k-mer length with kitsune.
 
-    :param genomes:         List with genome file paths (Gzip compressed or not)
-    :param kl:              kitsune tests different k-mer lengths, starting from k=4 up to kl
-    :param tmpdir:          Path to the temporary folder
-    :param closely_related: For closesly related genomes use this flag
-    :param nproc:           Max number of processes
-    :param threads:         Max number of threads
-    :return:                Optimal k-mer length
+    Parameters
+    ----------
+    genomes : list
+        List of paths to the genome files (Gzip compressed or not).
+    kl : int
+        kitsune tests different kmer lengths, starting from k=4 up to this parameter.
+    tmpdir : os.path.abspath
+        Path to the temporary folder.
+    closely_related : bool, default False
+        For closely related genomes, set this parameter to True.
+    nproc : int, default 1
+        Maximum number of processes.
+    threads : int, default 1
+        Maximum number of threads.
+
+    Raises
+    ------
+    ValueError
+        if the provided `kl` is lower than 4.
+    Exception
+        - If the size of `genomes` is <2;
+        - If the actual number of genomes is <2;
+        - If an error occurs while running kitsune kopt.
+
+    Returns
+    -------
+    int
+        The optimal kmer length.
+
+    Notes
+    -----
+    Please refer to the official documentation for additional information about kitsune:
+    https://github.com/natapol/kitsune
     """
 
     if len(genomes) < 2:
@@ -1565,7 +2105,7 @@ def optimal_k(
         
         genomes_paths.append(genome_file)
 
-    if not genomes_paths:
+    if len(genomes_paths) < 2:
         raise Exception("Not enough genomes. Something went wrong while processing your genomes")
 
     with tempfile.NamedTemporaryFile() as inputlist, tempfile.NamedTemporaryFile() as outres:
@@ -1611,14 +2151,17 @@ def optimal_k(
             )
 
 
-def println(message: str, logger: Optional[Logger] = None, verbose: bool = True) -> None:
-    """
-    Send messages to the logger
-    It will print messages on screen, send messages to the log file, or both
+def println(message: str, logger: Optional[Logger]=None, verbose: bool=True) -> None:
+    """Send messages to the logger. It will print messages on screen, send messages to the log file, or both.
 
-    :param message:     Custom message
-    :param logger:      Logger object
-    :param verbose:     Print messages on sceeen if True and logger is None
+    Parameters
+    ----------
+    message : str
+        The custom message.
+    logger : logging.Logger, optional
+        The logging.Logger object.
+    verbose : bool, default True
+        Print messages on the stdout if True and `logger` is None.
     """
 
     if logger:
@@ -1631,23 +2174,74 @@ def println(message: str, logger: Optional[Logger] = None, verbose: bool = True)
         print(message)
 
 
+def quality(
+    method: str="CheckM2",
+    args: Optional[Dict[str, Any]]=None,
+) -> Dict[str, Dict[str, str]]:
+    """Wrapper around CheckM2, CheckV, and EukCC for assessing the quality of the input genomes based on their kingdom.
+
+    Parameters
+    ----------
+    method : {"CheckM2", "CheckV", "EukCC"}, default "CheckM2"
+        The quality-control method.
+    args : dict, optional
+        A dictionary with method-specific arguments.
+
+    Raises
+    ------
+    ValueError
+        If the provided `method` is not supported.
+
+    Returns
+    -------
+    dict
+        A dictionary with the quality stats indexed by genome names.
+    """
+
+    # Define the set of supported methods
+    supported_methods = {
+        "checkm2": checkm2,
+        "checkv": checkv,
+        "eukcc": eukcc
+    }
+
+    if method.lower() not in supported_methods:
+        raise ValueError("Unsupported method \"{}\"".format(method))
+
+    # Unpack the args dictionary and pass arguments to the selected function
+    return supported_methods[method.lower()](**args)
+
+
 def run(
     cmdline: List[Union[str, int, float]],
-    stdout: Union[int, TextIO] = sys.stdout,
-    stderr: Union[int, TextIO] = sys.stderr,
-    silence: bool = False,
-    extended_error: bool = False,
-    retries: int = 1,
+    stdout: Union[int, TextIO]=sys.stdout,
+    stderr: Union[int, TextIO]=sys.stderr,
+    silence: bool=False,
+    extended_error: bool=False,
+    retries: int=1,
 ) -> None:
-    """
-    Wrapper for the subprocess.check_call function
+    """Wrapper for the subprocess.check_call function.
 
-    :param cmdline:         Command line list
-    :param stdout:          Standard output
-    :param stderr:          Standard error
-    :param silence:         Redirect stdout and stderr to /dev/null
-    :param extended_error:  Raise errors with traceback in case of unexpected exceptions
-    :param retries:         Try running the process again in case of errors
+    Parameters
+    ----------
+    cmdline : list
+        The command line list of arguments and values.
+    stdout : TextIO, default sys.stdout
+        The standard output.
+    stderr : TextIO, default sys.stderr
+        The standard error.
+    silence : bool, default False
+        Redirect the stdout and stderr to /dev/null.
+    extended_error : bool, default False
+        Raise errors with traceback in case of unexpected exceptions.
+    retries : int, default 1
+        Try running the process again in case of errors.
+
+    Raises
+    ------
+    Exception
+        - If the provided command line is empty;
+        - If the provided command line failed to run.
     """
 
     # Check whether ther is something to run
@@ -1696,11 +2290,17 @@ def run(
 
 
 def validate_url(url: str) -> bool:
-    """
-    Validate a URL
+    """Validate a URL.
 
-    :param url: Input URL to be validated
-    :return:    True if validated, False otherwise
+    Parameters
+    ----------
+    url : str
+        The input URL that must be validated.
+
+    Returns
+    -------
+    bool
+        True if the input URL is valid, False otherwise.
     """
 
     regex = re.compile(
@@ -1708,7 +2308,7 @@ def validate_url(url: str) -> bool:
         r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain
         r'localhost|'  # localhost
         r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # or ip
-        r'(?::\d+)?' # optional port
+        r'(?::\d+)?'  # optional port
         r'(?:/?|[/?]\S+)$', re.IGNORECASE
     )
 
