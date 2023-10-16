@@ -37,6 +37,7 @@ setuptools.setup(
         "kitsune>=1.3.3",
         "ncbitax2lin>=2.3.2",
         "numpy>=1.22.3",
+        "packaging>=23.2",
         "requests>=2.28.0",
         "tabulate>=0.9.0",
         "tqdm>=4.38.0",

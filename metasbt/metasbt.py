@@ -11,6 +11,7 @@ import platform
 import pkgutil
 import subprocess
 import sys
+from packaging import version
 from shutil import which
 from typing import List
 
@@ -152,7 +153,7 @@ def check_for_software_updates() -> None:
             data = response.json()
 
             if "tag_name" in data:
-                if __version__ != data["tag_name"]:
+                if version.parse(__version__) < version.parse(data["tag_name"]):
                     println("A new release is available!")
                     println("{}\n".format(REPOSITORY_URL))
     
