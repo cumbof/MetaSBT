@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""
-Create a database report table
+"""Create a database report table.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 13, 2023"
+__version__ = "0.1.2"
+__date__ = "May 25, 2023"
 
 import argparse as ap
 import datetime
@@ -37,10 +36,12 @@ FILES_AND_FOLDERS = [
 
 
 def read_params():
-    """
-    Read and test input arguments
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
@@ -85,12 +86,23 @@ def read_params():
     return p.parse_args()
 
 
-def report(db_dir: str, output_file: str) -> None:
-    """
-    Build the database report table
+def report(db_dir: os.path.abspath, output_file: os.path.abspath) -> None:
+    """Build the database report table.
 
-    :param db_dir:       Path to the database root folder
-    :param output_file:  Path to the output table
+    Parameters
+    ----------
+    db_dir : os.path.abspath
+        Path to the database root folder.
+    output_file : os.path.abspath
+        Path to the output table.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the "metadata.tsv" file is not available in the species folder.
+    Exception
+        - If the cluster ID is not specified into the "metadata.tsv" file;
+        - If there are no genomes under a specific species.
     """
 
     # Initialise the report table
@@ -102,7 +114,7 @@ def report(db_dir: str, output_file: str) -> None:
 
         # Write header line
         output.write(
-            "# {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+            "# {}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                 "Cluster",
                 "Lineage",
                 "MAGs",
@@ -110,7 +122,6 @@ def report(db_dir: str, output_file: str) -> None:
                 "Bloom Filter Density",
                 "Mean completeness",
                 "Mean contamination",
-                "Mean strain heterogeneity",
             )
         )
 
@@ -161,7 +172,8 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))) \
+                                        or os.path.isfile(os.path.join(str(species_dir), "filters", "{}.bf".format(line))):
                                     mags_list.append(line)
 
                 # Do the same with the references.txt file
@@ -170,42 +182,44 @@ def report(db_dir: str, output_file: str) -> None:
                         for line in file:
                             line = line.strip()
                             if line:
-                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))):
+                                if os.path.isfile(os.path.join(str(species_dir), "strains", "filters", "{}.bf".format(line))) \
+                                        or os.path.isfile(os.path.join(str(species_dir), "filters", "{}.bf".format(line))):
                                     references_list.append(line)
                 
                 if not mags_list and not references_list:
                     raise Exception("Unable to retrieve genomes in {}".format(str(species_dir)))
 
-                # Keep track of all the completeness, contamination, and strain heterogeneity percentages
+                # Keep track of all the completeness and contamination percentages
                 # for all the genomes in the current species
                 qc_stats = dict()
 
-                # Also load the CheckM table
-                if os.path.isfile(os.path.join(str(species_dir), "checkm.tsv")):
-                    with open(os.path.join(str(species_dir), "checkm.tsv")) as file:
-                        for line in file:
+                # Also load the quality table
+                if os.path.isfile(os.path.join(str(species_dir), "quality.tsv")):
+                    with open(os.path.join(str(species_dir), "quality.tsv")) as quality_table:
+                        header = quality_table.readline().strip().split("\t")
+                        
+                        for line in quality_table:
                             line = line.strip()
+
                             if line:
                                 line_split = line.split("\t")
+
                                 qc_stats[line_split[0]] = {
-                                    "completeness": float(line_split[-3]),
-                                    "contamination": float(line_split[-2]),
-                                    "strain_heterogeneity": float(line_split[-1]),
+                                    "completeness": float(line_split[header.index("Completeness_specific")]),
+                                    "contamination": float(line_split[header.index("Contamination")]),
                                 }
 
                 # Retrieve the QC stats
                 completeness = list()
                 contamination = list()
-                strain_heterogeneity = list()
 
                 for genome in references_list + mags_list:
                     if genome in qc_stats:
                         completeness.append(qc_stats[genome]["completeness"])
                         contamination.append(qc_stats[genome]["contamination"])
-                        strain_heterogeneity.append(qc_stats[genome]["strain_heterogeneity"])
 
                 output.write(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                         cluster,
                         lineage,
                         len(mags_list),
@@ -213,17 +227,22 @@ def report(db_dir: str, output_file: str) -> None:
                         get_bf_density(os.path.join(str(species_dir), "{}.bf".format(os.path.basename(str(species_dir))))),
                         round(sum(completeness) / len(completeness), 2) if completeness else "na",
                         round(sum(contamination) / len(contamination), 2) if contamination else "na",
-                        round(sum(strain_heterogeneity) / len(strain_heterogeneity), 2) if strain_heterogeneity else "na",
                     )
                 )
 
 
-def load_report_table(table_path: str) -> Tuple[str, str, datetime.datetime, Dict[str, Dict[str, Union[str, int, float]]]]:
-    """
-    Load a report table into a dictionary
+def load_report_table(table_path: os.path.abspath) -> Tuple[str, str, datetime.datetime, Dict[str, Dict[str, Union[str, int, float]]]]:
+    """Load a report table into a dictionary.
 
-    :param table_path:  Path to the report table
-    :return:            Dictionary with the content of the report table indexed by cluster ID
+    Parameters
+    ----------
+    table_path : os.path.abspath
+        Path to the report table.
+
+    Returns
+    -------
+    dict
+        A dictionary with the content of the report table indexed by cluster ID.
     """
 
     database = None
@@ -266,18 +285,26 @@ def load_report_table(table_path: str) -> Tuple[str, str, datetime.datetime, Dic
                         "bf_density": float(line_split[4]),
                         "mean_completeness": float(line_split[5]),
                         "mean_contamination": float(line_split[6]),
-                        "mean_strain_heterogeneity": float(line_split[7])
                     }
 
     return database, version, timestamp, report
 
 
-def diff(new_table_path: str, old_table_path: str, skip_metadata: bool = False) -> None:
-    """
-    Compare two report tables and report differences
+def diff(new_table_path: os.path.abspath, old_table_path: os.path.abspath, skip_metadata: bool=False) -> None:
+    """Compare two report tables and report differences
 
-    :param new_table_path:  Path to the most recent report table
-    :param old_table_path:  Path to an old report table
+    Parameters
+    ----------
+    new_table_path : os.path.abspath
+        Path to the most recent report table.
+    old_table_path : os.path.abspath
+        Path to an old version of the report table.
+
+    Raises
+    ------
+    Exception
+        - If the two input report tables refer to different databases;
+        - If the new table has been produced prior to the old table.
     """
 
     # Load new and old tables
