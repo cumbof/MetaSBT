@@ -16,7 +16,7 @@ from typing import List
 
 import requests
 
-from metasbt import __date__, __version__
+from metasbt.metadata import __date__, __version__
 from metasbt.modules.utils import println, run
 
 # Define the tool name

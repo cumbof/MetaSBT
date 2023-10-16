@@ -3,7 +3,7 @@ import sys
 
 import setuptools
 
-from metasbt.metasbt import __version__
+from metasbt.metadata import __version__
 
 if platform.system() not in ["Darwin", "Linux"]:
     sys.exit("MetaSBT does not work on {} platforms".format(platform.system()))
