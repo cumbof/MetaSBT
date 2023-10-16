@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Install pre-computed MetaSBT databases locally
+"""Install pre-computed MetaSBT databases locally.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -43,10 +42,12 @@ FILES_AND_FOLDERS = [
 
 
 def read_params():
-    """
-    Read and test input arguments
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
@@ -107,13 +108,36 @@ def read_params():
 
 
 def convert_size(size: float, in_unit: str, out_unit: str) -> float:
-    """
-    Convert size from a unit to another (e.g., B to GB and viceversa)
+    """Convert size from a unit to another (e.g., B to GB and viceversa).
 
-    :param size:        Input size
-    :param in_unit:     Unit of input size
-    :param out_unit:    Convert the input size to this unit
-    :return:            Size converted to a specific unit
+    Parameters
+    ----------
+    size : float
+        The input size.
+    in_unit : {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
+        The unit of the input size.
+    out_unit : {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
+        Convert the input size to this unit.
+
+    Raises
+    ------
+    ValueError
+        If the input or output units are not valid.
+
+    Returns
+    -------
+    float
+        The size converted to a specific unit.
+
+    Examples
+    --------
+    >>> from install import convert_size
+    >>> size = 1
+    >>> size = convert_size(size, "MB", "KB")
+    >>> print(size)
+    1024
+
+    Convert 1 MB into KB. The result is 1024 KB.
     """
 
     # Define a list of units
@@ -137,13 +161,17 @@ def convert_size(size: float, in_unit: str, out_unit: str) -> float:
         return size * p
 
 
-def fix_paths(filepath: str, main_folder: str, replace_with: str) -> None:
-    """
-    Fix file paths
+def fix_paths(filepath: os.path.abspath, main_folder: str, replace_with: str) -> None:
+    """Fix file paths.
 
-    :param filepath:        Path to the file with the list of paths
-    :param main_folder:     Fix paths up to this folder
-    :param replace_with:    Replace sub-paths with this
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the file with the list of paths that must be fixed.
+    main_folder : str
+        Fix paths up to this folder.
+    replace_with : str
+        Replace sub-paths with this.
     """
 
     filepaths = list()
