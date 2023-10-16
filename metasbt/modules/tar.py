@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Create a MetaSBT database tarball
+"""Create a MetaSBT database tarball.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -34,10 +33,12 @@ FILES_AND_FOLDERS = [
 
 
 def read_params():
-    """
-    Read and test input arguments
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
