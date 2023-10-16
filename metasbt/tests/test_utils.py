@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Unit tests for modules/utils.py
+"""Unit tests for modules/utils.py
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -44,13 +43,11 @@ import utils
 
 
 class TestUtils(unittest.TestCase):
-    """
-    Unit tests for utils functions
+    """Unit tests for utils functions.
     """
 
     def test_download(self):
-        """
-        Test the utils.download() function
+        """Test the utils.download() function.
         Dependencies: wget
         """
 
@@ -88,8 +85,7 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(sha256_hash, sha256_hash_precomp)
 
     def test_estimate_bf_size(self):
-        """
-        Test the utils.estimate_bf_size() function
+        """Test the utils.estimate_bf_size() function.
         """
 
         # Link to the E. coli K-12 reference genome from NCBI GenBank
@@ -114,8 +110,7 @@ class TestUtils(unittest.TestCase):
         self.assertTrue(filter_size > 0)
 
     def test_get_file_info(self):
-        """
-        Test the utils.get_file_info() function
+        """Test the utils.get_file_info() function.
         """
 
         # Test get_file_info() on this python file
@@ -136,8 +131,7 @@ class TestUtils(unittest.TestCase):
             self.assertIs(compression, None)
 
     def test_validate_url(self):
-        """
-        Test the utils.validate_url() function
+        """Test the utils.validate_url() function.
         """
 
         # URL to the NCBI GenBank Assembly Summary table

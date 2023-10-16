@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Unit tests for modules/index.py
+"""Unit tests for modules/index.py
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -42,13 +41,11 @@ import index
 
 
 class TestUtils(unittest.TestCase):
-    """
-    Unit tests for index functions
+    """Unit tests for index functions.
     """
 
     def test_get_sublist(self):
-        """
-        Test the index.get_sublist() function
+        """Test the index.get_sublist() function.
         """
 
         # Define a list of genomes

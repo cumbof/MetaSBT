@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Unit tests for modules/boundaries.py
+"""Unit tests for modules/boundaries.py
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -39,8 +38,7 @@ import boundaries
 
 
 class TestUtils(unittest.TestCase):
-    """
-    Unit tests for boundaries functions
+    """Unit tests for boundaries functions.
     """
 
     def test_get_lineage_from_path(self):

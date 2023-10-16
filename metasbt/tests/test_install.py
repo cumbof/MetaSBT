@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Unit tests for modules/install.py
+"""Unit tests for modules/install.py
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -41,13 +40,11 @@ import install
 
 
 class TestUtils(unittest.TestCase):
-    """
-    Unit tests for install functions
+    """Unit tests for install functions.
     """
 
     def test_convert_size(self):
-        """
-        Test the install.convert_size() function
+        """Test the install.convert_size() function.
         """
 
         with self.subTest():
@@ -57,8 +54,7 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(install.convert_size(1.0, "GB", "MB"), 1024.0)
 
     def test_fix_paths(self):
-        """
-        Test the install.fix_paths() function
+        """Test the install.fix_paths() function.
         """
 
         # This is the folder path that must be replaced
