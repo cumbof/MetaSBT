@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""
-A scalable framework for automatically indexing microbial genomes and accurately
+"""A scalable framework for automatically indexing microbial genomes and accurately
 characterizing metagenome-assembled genomes with Sequence Bloom Trees
 """
-
-__author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.2"
-__date__ = "May 16, 2023"
 
 import argparse as ap
 import errno
@@ -21,6 +16,7 @@ from typing import List
 
 import requests
 
+from metasbt import __date__, __version__
 from metasbt.modules.utils import println, run
 
 # Define the tool name
@@ -61,6 +57,14 @@ RELEASES_API_URL = "https://api.github.com/repos/cumbof/{}/releases/latest".form
 
 
 def read_params():
+    """Read and test the input arguments.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
+    """
+
     p = ap.ArgumentParser(
         prog=TOOL_ID,
         description=(
@@ -131,8 +135,13 @@ def read_params():
 
 
 def check_for_software_updates() -> None:
-    """
-    Check for new releases
+    """Check for new releases through the GitHub APIs.
+    Print a message on the stdout in case a new release is available.
+
+    Raises
+    ------
+    requests.ConnectionError
+        If it is not able to connect to the GitHub APIs.
     """
 
     try:
@@ -151,12 +160,25 @@ def check_for_software_updates() -> None:
         pass
 
 
-def get_modules(dirpath: str, test: bool = False) -> List[str]:
-    """
-    Return the list of modules under the specified directory
+def get_modules(dirpath: str, test: bool=False) -> List[str]:
+    """Return the list of modules under the specified directory.
 
-    :param dirpath: Path to the folder with python modules
-    :return:        List of modules
+    Parameters
+    ----------
+    dirpath : str
+        Path to the folder with modules.
+    test : bool, default False
+        True if the folder contains unit tests
+
+    Raises
+    ------
+    FileNotFoundError
+        If the input path `dirpath` does not exist on the file system.
+
+    Returns
+    -------
+    list
+        A list with the module names in the input folder `dirpath`.
     """
 
     if not os.path.isdir(dirpath):
@@ -177,32 +199,42 @@ def get_modules(dirpath: str, test: bool = False) -> List[str]:
 
 
 def print_citations() -> None:
-    """
-    Print citations and exit
-    """
+    """Print citations and exit."""
 
     println("If you are using {} for your research, please credit us in your manuscript by citing:\n".format(TOOL_ID))
     println("TBA\n")
 
 
 def print_license() -> None:
+    """Print the software license and exit.
+
+    Raises
+    ------
+    requests.ConnectionError
+        If it is not able to retrieve the license file from GitHub.
     """
-    Print the software license and exit
-    """
 
-    response = requests.get(LICENSE)
+    try:
+        response = requests.get(LICENSE)
 
-    if response.status_code == 200:
-        # Print the license content
-        println("{}\n".format(response.text))
+        if response.status_code == 200:
+            # Print the license content
+            println("{}\n".format(response.text))
 
-    else:
-        println("Unable to retrieve the license from the following URL:\n{}\n\nPlease try again")
+        else:
+            println("Unable to retrieve the license from the following URL:\n{}\n\nPlease try again")
+
+    except requests.ConnectionError:
+        pass
 
 
 def print_modules() -> None:
-    """
-    List all the available modules and exit
+    """List all the available modules and exit.
+
+    Raises
+    ------
+    Exception
+        If there are no modules available.
     """
 
     modules_list = get_modules(MODULES_DIR)
@@ -217,8 +249,12 @@ def print_modules() -> None:
 
 
 def print_tests() -> None:
-    """
-    List all the available unit tests and exit
+    """List all the available unit tests and exit.
+
+    Raises
+    ------
+    Exception
+        If there are no unit tests available.
     """
 
     # Unit tests are defined into python files
@@ -235,11 +271,20 @@ def print_tests() -> None:
 
 
 def run_test(test: str) -> None:
-    """
-    Run unit tests
+    """Run unit tests
 
-    :param test:    Test name among those reported with --tests
-                    Use the wildcard "all" for runnig all the available tests at once
+    Parameters
+    ----------
+    test : str
+        Test name among those reported with --tests.
+        Use the wildcard "all" for runnig all the available tests at once.
+
+    Raises
+    ------
+    ValueError
+        If the input `test` is not available as a unit test.
+    Exception
+        If the unit test failed to run.
     """
 
     # Retrieve the list of the available unit tests
@@ -262,13 +307,26 @@ def run_test(test: str) -> None:
             println(str(ex))
 
 
-def resolve_dependencies(dependencies: List[str], stop_unavailable: bool = False, verbose: bool = True) -> None:
-    """
-    Check whether all the external software dependencies and Python requirements are available
+def resolve_dependencies(dependencies: List[str], stop_unavailable: bool=False, verbose: bool=True) -> None:
+    """Check whether all the external software dependencies and Python requirements are available.
 
-    :param dependencies:        List of external software dependencies
-    :param stop_unavailable:    Raise an exception in case of a unavailable dependency
-    :param verbose:             Print messages on screen
+    Parameters
+    ----------
+    dependencies : list
+        A list of strings with the name of the external software dependencies.
+    stop_unavailable : bool, default False
+        Stop the execution and raise and Exception in case on of the dependencies listed in `dependencies` is not available.
+    verbose : bool = True
+        Print messages on the stdout if True.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the "requirements.txt" file with the list of Python dependencies is not available.
+    Exception
+        - If `stop_unavailable` is True and at least one of the dependencies listed in `dependencies` is not available;
+        - If HowDeSBT has not been compiled with the alternative version of the Makefile that enables advanced commands;
+        - If pip failes in installing Python dependencies listed in the "requirements.txt" file.
     """
 
     # Sort the list of dependencies
@@ -462,6 +520,12 @@ def main() -> None:
                     # Expand the command line with all the input arguments
                     cmd_line.extend(unknown)
                     cmd_line.remove(unknown_arg)
+
+                    if unknown_arg in ["index", "update"]:
+                        # Add the main MetaSBT version
+                        # Supported by the index and update modules only because of the --resume arg
+                        # Display a warning in case of different MetaSBT versions
+                        cmd_line.extend(["--parent-version", __version__])
 
                     try:
                         # Run the specified module or unit test
