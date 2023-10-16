@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""
-Define taxonomy-specific boundaries as the minimum and maximum number of kmers in common 
-between all the genomes under a specific cluster
+"""Define taxonomy-specific boundaries as the minimum and maximum number of
+kmers in common between all the genomes under a specific cluster.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 26, 2023"
+__version__ = "0.1.1"
+__date__ = "May 25, 2023"
 
 import argparse as ap
 import errno
@@ -46,10 +45,12 @@ FILES_AND_FOLDERS = [
 
 
 def read_params():
-    """
-    Read and test input arguments
+    """Read and test the input arguments.
 
-    :return:    The ArgumentParser object
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ArgumentParser object
     """
 
     p = ap.ArgumentParser(
@@ -150,30 +151,41 @@ def read_params():
 
 
 def define_boundaries(
-    level_dir: str,
+    level_dir: os.path.abspath,
     level_id: str,
-    tmp_dir: str,
-    output: str,
+    tmp_dir: os.path.abspath,
+    output: os.path.abspath,
     kmer_len: int,
     filter_size: int,
-    consider_mags: bool = False,
-    max_genomes: Optional[int] = None,
-    min_genomes: int = 3,
-    nproc: int = 1,
+    consider_mags: bool=False,
+    max_genomes: Optional[int]=None,
+    min_genomes: int=3,
+    nproc: int=1,
 ) -> None:
-    """
-    Compute boundaries for the specified taxonomic level
+    """Compute boundaries for the specified taxonomic level.
 
-    :param level_dir:       Path to the taxonomic level folder
-    :param level_id:        ID of the taxonomic level
-    :param tmp_dir:         Path to the temporary folder
-    :param output:          Path to the output table file with boundaries
-    :param kmer_len:        Length of the kmers
-    :param filter_size:     Size of the bloom filters
-    :param consider_mags:   Consider MAGs while counting genomes
-    :param max_genomes:     Consider this number of genomes at most for computing boundaries
-    :param min_genomes:     Consider clusters with at least this number of genomes
-    :param nproc:           Make the process parallel when possible
+    Parameters
+    ----------
+    level_dir : os.path.abspath
+        Path to the taxonomic level folder.
+    level_id : str
+        The ID of the taxonomic folder.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    output : os.path.abspath
+        Path to the output table file with boundaries.
+    kmer_len : int
+        The length of the kmers.
+    filter_size : int
+        The size of the bloom filters.
+    consider_mags : bool, default False
+        Consider MAGs while counting genomes.
+    max_genomes : int, optional
+        Consider this number of genomes at most for computing boundaries.
+    min_genomes : int, default 3
+        Consider clusters with at least this number of genomes.
+    nproc : int, default 1
+        Make the process parallel when possible.
     """
 
     # Search and merge all the reference genomes paths under all references.txt files in the current taxonomic level
@@ -211,12 +223,11 @@ def define_boundaries(
                 line = line.strip()
                 if line:
                     if level_id == "species":
-                        genome_path = os.path.join(
-                            os.path.dirname(str(references_path)),
-                            "strains",
-                            "filters",
-                            "{}.bf".format(line),
-                        )
+                        genome_path = os.path.join(os.path.dirname(str(references_path)), "strains", "filters", "{}.bf".format(line))
+
+                        if not os.path.isfile(genome_path):
+                            # In this case, the database has been built by using only 3 representatives per species
+                            genome_path = os.path.join(os.path.dirname(str(references_path)), "filters", "{}.bf".format(line))
 
                         samples[line] = [genome_path]
 
@@ -293,12 +304,29 @@ def define_boundaries(
             )
 
 
-def get_lineage_from_path(folder_path: str) -> str:
-    """
-    Rebuild a lineage from a taxonomic folder path
+def get_lineage_from_path(folder_path: os.path.abspath) -> str:
+    """Rebuild a lineage from a taxonomic folder path.
 
-    :param folder_path: Path to the taxonomic folder
-    :return:            Lineage
+    Parameters
+    ----------
+    folder_path : os.path.abspath
+        Path to the taxonomic folder.
+
+    Returns
+    -------
+    str
+        The taxonomic label.
+
+    Examples
+    --------
+    >>> from boundaries import get_lineage_from_path
+    >>> folder_path = "~/MetaSBT-DBs/k__Viruses/p__Nucleocytoviricota/c__Pokkesviricetes/o__Chitovirales/f__Poxviridae/g__Orthopoxvirus/s__Monkeypox_virus"
+    >>> lineage = get_lineage_from_path(folder_path)
+    >>> print(lineage)
+    k__Viruses|p__Nucleocytoviricota|c__Pokkesviricetes|o__Chitovirales|f__Poxviridae|g__Orthopoxvirus|s__Monkeypox_virus
+
+    Define a taxonomic folder as it appears when indexing Viruses with MetaSBT.
+    In this example, the folder points to the Monkeypox virus, and its full lineage is rebuilt starting from the folder path.
     """
 
     lineage_list = list()
@@ -317,9 +345,9 @@ def get_lineage_from_path(folder_path: str) -> str:
 
 
 def boundaries(
-    db_dir: str,
-    tmp_dir: str,
-    output: str,
+    db_dir: os.path.abspath,
+    tmp_dir: os.path.abspath,
+    output: os.path.abspath,
     flat_structure: bool = False,
     max_genomes: Optional[int] = None,
     min_genomes: int = 3,
@@ -329,20 +357,40 @@ def boundaries(
     verbose: bool = False,
     nproc: int = 1,
 ) -> None:
-    """
-    Define boundaries for each of the taxonomic levels in the database
-    Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level
+    """Define boundaries for each of the taxonomic levels in the database. 
+    Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level.
 
-    :param db_dir:          Path to the database root folder
-    :param tmp_dir:         Path to the temporary folder
-    :param output:          Path to the output table file with boundaries
-    :param flat_structure:  Genomes in the database have been organized without a taxonomic structure
-    :param min_genomes:     Consider clusters with at least this number of genomes
-    :param consider_mags:   Consider MAGs while counting genomes
-    :param superkingdom:    Retrieve genomes that belong to a specific superkingdom
-    :param logger:          Logger object
-    :param verbose:         Print messages on screen
-    :param nproc:           Make the process parallel when possible
+    Parameters
+    ----------
+    db_dir : os.path.abspath
+        Path to the database root folder.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+    output : os.path.abspath
+        Path to the output table file with boundaries.
+    flat_structure : bool, default False
+        If True, genomes in the database have been organized without a taxonomic structure.
+    max_genomes : int, optional
+        Consider this number of genomes at most for computing boundaries.
+    min_genomes : int, default 3
+        Consider clusters with at least this number of genomes.
+    consider_mags : bool, default False
+        Consider MAGs while counting genomes.
+    superkingdom : str, optional
+        Retrieve genomes that belong to a specific superkingdom.
+    logger : logging.Logger, optional
+        The Logger object.
+    verbose : bool, default False
+        Print messages on the stdout if True.
+    nproc : int, default 1
+        Make the process parallel when possible.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the "manifest.txt" file with the database info is not available.
+    Exception
+        If the "manifest.txt" file does not contain information about the kmer length and filter size.
     """
 
     # Define a partial println function to avoid specifying logger and verbose
@@ -355,11 +403,15 @@ def boundaries(
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
         file.write("# timestamp: {}\n".format(datetime.today().strftime("%Y%m%d")))
         file.write("# --db-dir {}\n".format(db_dir))
+
         if superkingdom:
             file.write("# --superkingdom {}\n".format(superkingdom))
+
         file.write("# --min-genomes {}\n".format(min_genomes))
+
         if max_genomes:
             file.write("# --max-genomes {}\n".format(max_genomes))
+
         file.write(
             "# {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                 "Lineage",  # Taxonomic label
@@ -426,7 +478,9 @@ def boundaries(
                         # Load the manifest file under the strains folder
                         # Use the species-specific bloom filter size
                         species_manifest_filepath = os.path.join(str(level_dir), "strains", "manifest.txt")
-                        species_manifest = load_manifest(species_manifest_filepath)
+
+                        if os.path.isfile(species_manifest_filepath):
+                            species_manifest = load_manifest(species_manifest_filepath)
 
                     # Define boundaries for the current taxonomic level
                     define_boundaries(
