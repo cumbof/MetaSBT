@@ -145,6 +145,8 @@ def check_for_software_updates() -> None:
         If it is not able to connect to the GitHub APIs.
     """
 
+    new_updates = False
+
     try:
         response = requests.get(RELEASES_API_URL)
 
@@ -156,9 +158,14 @@ def check_for_software_updates() -> None:
                 if version.parse(__version__) < version.parse(data["tag_name"]):
                     println("A new release is available!")
                     println("{}\n".format(REPOSITORY_URL))
-    
+
+                    new_updates = True
+
     except requests.ConnectionError:
         pass
+
+    if not new_updates:
+        println("You are using the latest version of {}!\n".format(TOOL_ID))
 
 
 def get_modules(dirpath: str, test: bool=False) -> List[str]:
