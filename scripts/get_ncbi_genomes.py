@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""
-Retrieve reference genomes and metagenome-assembled genomes for a specific 
-superkingdom and kingdom from NCBI GenBank
+"""Retrieve reference genomes and metagenome-assembled genomes for a specific superkingdom and kingdom from NCBI GenBank.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 27, 2023"
+__version__ = "0.1.1"
+__date__ = "Dec 1, 2023"
 
 import argparse as ap
 import datetime
@@ -18,9 +16,10 @@ import subprocess
 import tarfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.request import urlretrieve
 
 import tqdm
-from urllib.request import urlretrieve
+import numpy as np
 
 TOOL_ID = "get_ncbi_genomes"
 
@@ -97,6 +96,16 @@ def read_params():
         ),
     )
     p.add_argument(
+        "--max-genomes-per-species",
+        type=int,
+        default=0,
+        dest="max_genomes_per_species",
+        help=(
+            "Limit the number of downloaded genomes per species. "
+            "Not limited by default (--max-genomes-per-species 0)"
+        ),
+    )
+    p.add_argument(
         "--nproc",
         type=int,
         default=1,
@@ -149,8 +158,7 @@ def read_params():
 
 
 def get_genomes_in_db(db_dir: str) -> List[str]:
-    """
-    Retrieve the list of reference genomes and MAGs in the MetaSBT database
+    """Retrieve the list of reference genomes and MAGs in the MetaSBT database.
 
     :param db_dir:  Path to the root folder of the MetaSBT database
     :return:        List with genome IDs in the database
@@ -171,8 +179,7 @@ def get_genomes_in_db(db_dir: str) -> List[str]:
 
 
 def level_name(current_level: str, prev_level: str) -> str:
-    """
-    Define a taxonomic level name
+    """Define a taxonomic level name.
 
     :param current_level:   Current level name
     :param prev_level:      Previous level name in case of unclassified
@@ -197,8 +204,7 @@ def level_name(current_level: str, prev_level: str) -> str:
 
 
 def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
-    """
-    Download and extract the NCBI taxdump tarball
+    """Download and extract the NCBI taxdump tarball.
 
     :param taxdump_url:     URL to the NCBI taxdump
     :param folder_path:     Path to the folder in which the taxdump tarball will be unpacked
@@ -238,9 +244,7 @@ def ncbitax2lin(
     superkingdom: Optional[str] = None,
     kingdom: Optional[str] = None
 ) -> Dict[str, str]:
-    """
-    Run ncbitax2lin over nodes and names dumps and produce the
-    mapping between NCBI tax IDs and ful taxonomic labels
+    """Run ncbitax2lin over nodes and names dumps and produce the mapping between NCBI tax IDs and ful taxonomic labels.
 
     :param tmpdir:          Path to the tmp directory
     :param nodes_dmp:       Path to the NCBI nodes dump
@@ -306,12 +310,13 @@ def ncbitax2lin(
                         level_name(line_split[7], line_split[6]),  # Species
                     )
 
+                    taxa_map[line_split[0]] = label
+
     return taxa_map
 
 
 def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, List[Dict[str, str]]]:
-    """
-    Download and load the last available NCBI GenBank Assembly Report table
+    """Download and load the last available NCBI GenBank Assembly Report table.
 
     :param assembly_summary_url:    URL to the NCBI GenBank Assembly Report table
     :param tmpdir:                  Path to the tmp folder
@@ -354,19 +359,19 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, Li
                     genome_type = "na"
 
                     if not species_info["excluded_from_refseq"].strip() or \
-                        all([ex.strip() in REFERENCE_TAGS for ex in species_info["excluded_from_refseq"].split(";")]):
+                        all([ex.strip().lower() in REFERENCE_TAGS for ex in species_info["excluded_from_refseq"].split(";")]):
                         genome_type = "reference"
-                    
+
                     else:
                         excluded = False
                         for ex in species_info["excluded_from_refseq"].split(";"):
-                            if ex in EXCLUDE_TAGS:
+                            if ex.strip().lower() in EXCLUDE_TAGS:
                                 excluded = True
                                 break
-                        
+
                         if not excluded:
                             genome_type = "mag"
-                    
+
                     species_info["ftp_filepath"] = genome_url
 
                     local_filename = os.path.splitext(os.path.splitext(os.path.basename(genome_url))[0])[0]
@@ -375,7 +380,7 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, Li
                     species_info["genome_type"] = genome_type
 
                     assembly_summary[species_taxid].append(species_info)
-    
+
     return assembly_summary
 
 
@@ -386,8 +391,7 @@ def get_genomes_in_ncbi(
     taxa_level_id: Optional[str] = None,
     taxa_level_name: Optional[str] = None,
 ) -> Dict[str, Dict[str, str]]:
-    """
-    Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank
+    """Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank.
 
     :param superkingdom:    Archaea, Bacteria, Eukaryota, or Viruses
     :param tmpdir:          Path to the temporary folder
@@ -436,8 +440,7 @@ def get_genomes_in_ncbi(
 
 
 def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, bool]:
-    """
-    Wrapper around urlretrieve
+    """Just a wrapper around urlretrieve.
 
     :param url:         Input URL
     :param filepath:    Output file path
@@ -521,27 +524,50 @@ def main() -> None:
                 genomes_table.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
                 genomes_table.write("# timestamp {}\n".format(datetime.datetime.utcnow()))
                 genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\turl\n")
-        
+
         else:
             exclude_genomes = [
                 line.strip().split("\t")[0] for line in open(out_file_path).readlines() if line.strip() and not line.strip().startswith("#")
             ]
 
-        # Get the genomes of the same type as the input --type
-        # Exclude genomes if they already appear in an existing output table
-        # Exclude the unclassified genomes or consider them in case the input --type is "mag"
-        genomes = list(
-            filter(
-                lambda genome: (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes and \
-                               ("unclassified" not in ncbi_genomes[genome]["taxonomy"] or ("unclassified" in ncbi_genomes[genome]["taxonomy"] and args.type == "mag")),
-                ncbi_genomes.keys()
-            )
-        )
+        species = dict()
+
+        for genome in ncbi_genomes:
+            # Get the genomes of the same type as the input --type
+            # Exclude genomes if they already appear in an existing output table
+            # Exclude the unclassified genomes or consider them in case the input --type is "mag"
+            if (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes and \
+                ("unclassified" not in ncbi_genomes[genome]["taxonomy"] or ("unclassified" in ncbi_genomes[genome]["taxonomy"] and args.type == "mag")):
+
+                taxonomy = ncbi_genomes[genome]["taxonomy"]
+
+                if taxonomy not in species:
+                    species[taxonomy] = list()
+
+                species[taxonomy].append(genome)
+
+        if args.max_genomes_per_species > 0:
+            # Limit the number of genomes per species
+            for sp in species:
+                if len(species[sp]) > args.max_genomes_per_species:
+                    # Always use the same seed for reproducibility
+                    rng = numpy.random.default_rng(0)
+
+                    sp_genomes = species[sp]
+
+                    # Subsampling genomes
+                    rng.shuffle(sp_genomes)
+                    species[sp] = sp_genomes[:args.max_genomes_per_species]
+
+        genomes = list()
+
+        for sp in species:
+            genomes += species[sp]
 
         downloaded = list()
 
         print(
-            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"\"; Type \"{}\")".format(
+            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"{}\"; Type \"{}\")".format(
                 len(genomes),
                 args.superkingdom,
                 args.kingdom,
