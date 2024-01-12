@@ -145,7 +145,31 @@ def read_params():
         "--type",
         type=str,
         choices=["reference", "mag"],
-        help="Retrieve reference genomes or metagenome-assembled genomes only"
+        help=(
+            "Retrieve reference genomes or metagenome-assembled genomes (MAGs) only. "
+            "Genomes are categorized as references or MAGs according to their tags under the \"excluded_from_refseq\" "
+            "column in the NCBI GenBank Assembly Summary Report table"
+        )
+    )
+    p.add_argument(
+        "--reference-genome",
+        action="store_true",
+        default=False,
+        dest="reference_genome",
+        help=(
+            "Retrieve genomes marked as \"reference genome\" under the \"refseq_category\" column in the "
+            "NCBI GenBank Assembly Suppary Report table. Can be used if --type is not provided"
+        )
+    )
+    p.add_argument(
+        "--representative-genome",
+        action="store_true",
+        default=False,
+        dest="representative_genome",
+        help=(
+            "Retrieve genomes marked as \"representative genome\" under the \"refseq_category\" column in the "
+            "NCBI GenBank Assembly Suppary Report table. Can be used if --type is not provided"
+        )
     )
     p.add_argument(
         "-v",
@@ -241,8 +265,8 @@ def ncbitax2lin(
     tmpdir: str,
     nodes_dmp: str,
     names_dmp: str,
-    superkingdom: Optional[str] = None,
-    kingdom: Optional[str] = None
+    superkingdom: Optional[str]=None,
+    kingdom: Optional[str]=None
 ) -> Dict[str, str]:
     """Run ncbitax2lin over nodes and names dumps and produce the mapping between NCBI tax IDs and ful taxonomic labels.
 
@@ -358,8 +382,8 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, Li
 
                     genome_type = "na"
 
-                    if not species_info["excluded_from_refseq"].strip() or \
-                        all([ex.strip().lower() in REFERENCE_TAGS for ex in species_info["excluded_from_refseq"].split(";")]):
+                    if not species_info["excluded_from_refseq"].strip() or species_info["excluded_from_refseq"].strip() == "na" or \
+                        all([ex.strip().lower() in REFERENCE_TAGS for ex in species_info["excluded_from_refseq"].split(";") if ex.strip()]):
                         genome_type = "reference"
 
                     else:
@@ -387,9 +411,9 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, Li
 def get_genomes_in_ncbi(
     superkingdom: str,
     tmpdir: str,
-    kingdom: Optional[str] = None,
-    taxa_level_id: Optional[str] = None,
-    taxa_level_name: Optional[str] = None,
+    kingdom: Optional[str]=None,
+    taxa_level_id: Optional[str]=None,
+    taxa_level_name: Optional[str]=None,
 ) -> Dict[str, Dict[str, str]]:
     """Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank.
 
@@ -431,6 +455,7 @@ def get_genomes_in_ncbi(
                 for species_info in assembly_summary[species_taxid]:
                     ncbi_genomes[species_info["local_filename"]] = {
                         "type": species_info["genome_type"],
+                        "refseq_category": species_info["refseq_category"],
                         "taxonomy": taxonomy,
                         "excluded_from_refseq": species_info["excluded_from_refseq"] if species_info["excluded_from_refseq"].strip() else "na",
                         "url": species_info["ftp_filepath"]
@@ -439,7 +464,7 @@ def get_genomes_in_ncbi(
     return ncbi_genomes, target_cluster
 
 
-def urlretrieve_wrapper(url: str, filepath: str, retry: int = 5) -> Tuple[str, bool]:
+def urlretrieve_wrapper(url: str, filepath: str, retry: int=5) -> Tuple[str, bool]:
     """Just a wrapper around urlretrieve.
 
     :param url:         Input URL
@@ -480,6 +505,9 @@ def main() -> None:
 
     if (args.taxa_level_id and not args.taxa_level_name) or (args.taxa_level_name and not args.taxa_level_id):
         raise ValueError("\"--taxa-level-id\" must always be used in conjunction with \"--taxa-level-name\" and the other way around")
+
+    if (args.type and args.reference_genome) or (args.type and args.representative_genome):
+        raise ValueError("\"--reference-genome\" and \"--representative-genome\" cannot be used in conjunction with \"--type\"")
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -532,13 +560,29 @@ def main() -> None:
 
         species = dict()
 
-        for genome in ncbi_genomes:
-            # Get the genomes of the same type as the input --type
-            # Exclude genomes if they already appear in an existing output table
-            # Exclude the unclassified genomes or consider them in case the input --type is "mag"
-            if (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes and \
-                ("unclassified" not in ncbi_genomes[genome]["taxonomy"] or ("unclassified" in ncbi_genomes[genome]["taxonomy"] and args.type == "mag")):
+        for genome in ncbi_genomes.keys():
+            selected = False
 
+            if not args.type and (args.reference_genome or args.representative_genome):
+                # Get genomes marked as "reference genome" or "representative genome" in the Assembly Summary table
+                if args.reference_genome and ncbi_genomes[genome]["refseq_category"] == "reference genome":
+                    selected = True
+
+                elif args.representative_genome and ncbi_genomes[genome]["refseq_category"] == "representative genome":
+                    selected = True
+
+                if selected:
+                    # Override the genome type
+                    ncbi_genomes[genome]["type"] = ncbi_genomes[genome]["refseq_category"]
+
+            elif (ncbi_genomes[genome]["type"] == args.type or not args.type) and genome not in exclude_genomes and \
+                ("unclassified" not in ncbi_genomes[genome]["taxonomy"] or ("unclassified" in ncbi_genomes[genome]["taxonomy"] and args.type == "mag")):
+                # Get genomes of the same type as the input --type
+                # Exclude genomes if they already appear in an existing output table
+                # Exclude unclassified genomes or consider them in case the input --type is "mag"
+                selected = True
+
+            if selected:
                 taxonomy = ncbi_genomes[genome]["taxonomy"]
 
                 if taxonomy not in species:
@@ -564,10 +608,8 @@ def main() -> None:
         for sp in species:
             genomes += species[sp]
 
-        downloaded = list()
-
         print(
-            "Retrieving {} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"{}\"; Type \"{}\")".format(
+            "{} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"{}\"; Type \"{}\")".format(
                 len(genomes),
                 args.superkingdom,
                 args.kingdom,
@@ -576,35 +618,42 @@ def main() -> None:
             )
         )
 
-        with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as pbar:
-            # Wrapper around the update function of tqdm
-            def progress(*args):
-                pbar.update()
+        downloaded = list()
 
-            # Process input genomes
-            jobs = [
-                pool.apply_async(
-                    urlretrieve_wrapper,
-                    args=(
-                        ncbi_genomes[genome]["url"],
-                        os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))
-                    ),
-                    callback=progress,
-                )
-                for genome in genomes
-            ]
+        if args.download:
+            with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as pbar:
+                # Wrapper around the update function of tqdm
+                def progress(*args):
+                    pbar.update()
 
-            # Get results from jobs
-            for job in jobs:
-                filepath, exists = job.get()
+                # Process input genomes
+                jobs = [
+                    pool.apply_async(
+                        urlretrieve_wrapper,
+                        args=(
+                            ncbi_genomes[genome]["url"],
+                            os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))
+                        ),
+                        callback=progress,
+                    )
+                    for genome in genomes
+                ]
 
-                if exists:
-                    downloaded.append(filepath)
+                # Get results from jobs
+                for job in jobs:
+                    filepath, exists = job.get()
 
-        if downloaded:
+                    if exists:
+                        downloaded.append(filepath)
+
+        if downloaded or genomes:
             with open(out_file_path, "a+") as genomes_table:
-                for filepath in downloaded:
-                    genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
+                selection = downloaded if downloaded else genomes
+
+                for entry in selection:
+                    # entry is a filepath if selection is downloaded
+                    # otherwise, it is a genome name
+                    genome = os.path.splitext(os.path.splitext(os.path.basename(entry))[0])[0] if downloaded else entry
 
                     genomes_table.write(
                         "{}\t{}\t{}\t{}\t{}\n".format(
