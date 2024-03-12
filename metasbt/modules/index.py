@@ -431,7 +431,6 @@ def organize_data(
     genomes: list,
     db_dir: os.path.abspath,
     tax_label: str,
-    tax_id: str,
     cluster_id: int=1,
     cluster_prefix: str="MSBT",
     metadata: Optional[List[Dict[str, str]]]=None,
@@ -448,8 +447,6 @@ def organize_data(
         Path to the database root folder.
     tax_label : str
         Full taxonomic label.
-    tax_id : str
-        Cluster ID.
     cluster_id: int, default 1
         Numerical cluster ID.
     cluster_prefix : str, default "MSBT"
@@ -581,7 +578,7 @@ def process_input_genomes(
     process_genomes = True
 
     # Define the cluster folder path
-    tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep)) if not flat_structure else db_dir
+    tax_dir = os.path.join(db_dir, taxonomic_label.replace("|", os.sep)) if not flat_structure else db_dir
 
     # Search for the metadata file
     metadata_table = os.path.join(tax_dir, "metadata.tsv")
@@ -604,7 +601,7 @@ def process_input_genomes(
         os.unlink(quality_table)
 
         # Locate partial quality tables in the tmp folder
-        quality_tmp_dir = os.path.join(tmp_dir, "quality", cluster_id)
+        quality_tmp_dir = os.path.join(tmp_dir, "quality", str(cluster_id))
         quality_tables = [str(filepath) for filepath in Path(quality_tmp_dir).glob("run_*.tsv")]
 
         # Load the quality tables
@@ -658,9 +655,9 @@ def process_input_genomes(
 
     else:
         # Remove data from a previous run
-        shutil.rmtree(os.path.join(tmp_dir, "genomes", cluster_id), ignore_errors=True)
-        shutil.rmtree(os.path.join(tmp_dir, "howdesbt", cluster_id), ignore_errors=True)
-        shutil.rmtree(os.path.join(tmp_dir, "quality", cluster_id), ignore_errors=True)
+        shutil.rmtree(os.path.join(tmp_dir, "genomes", str(cluster_id)), ignore_errors=True)
+        shutil.rmtree(os.path.join(tmp_dir, "howdesbt", str(cluster_id)), ignore_errors=True)
+        shutil.rmtree(os.path.join(tmp_dir, "quality", str(cluster_id)), ignore_errors=True)
         shutil.rmtree(tax_dir, ignore_errors=True)
 
         # Define a partial println function to avoid specifying logger and verbose
@@ -671,7 +668,7 @@ def process_input_genomes(
             printline("Processing {}".format(taxonomic_label))
 
         # Create a temporary folder to store genomes
-        tmp_genomes_dir = os.path.join(tmp_dir, "genomes", cluster_id)
+        tmp_genomes_dir = os.path.join(tmp_dir, "genomes", str(cluster_id))
         os.makedirs(tmp_genomes_dir, exist_ok=True)
 
         # Iterate over the list of input genome file paths
@@ -1320,15 +1317,16 @@ def index(
                                         )
 
                     else:
-                        # Use all the genomes under this species
-                        for genome_path in Path(os.path.join(species_dir, "strains", "genomes")).glob("*.{}".format(input_extension)):
-                            genome_link = os.path.join(species_dir, "genomes", os.path.basename(genome_path))
+                        for species_dir in folders:
+                            # Use all the genomes under this species
+                            for genome_path in Path(os.path.join(species_dir, "strains", "genomes")).glob("*.{}".format(input_extension)):
+                                genome_link = os.path.join(species_dir, "genomes", os.path.basename(genome_path))
 
-                            if not os.path.islink(genome_link):
-                                os.symlink(
-                                    genome_path,
-                                    genome_link
-                                )
+                                if not os.path.islink(genome_link):
+                                    os.symlink(
+                                        genome_path,
+                                        genome_link
+                                    )
 
                 with mp.Pool(processes=parallel) as pool, tqdm.tqdm(total=len(folders), disable=(not verbose)) as pbar:
                     # Wrapper around the update function of tqdm
