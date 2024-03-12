@@ -12,7 +12,7 @@
 - Both the `index` and `update` modules now integrate `CheckV` and `EukCC` for assessing the quality of viruses and eukaryotes;
 - `CheckM` has been updated to `CheckM2`.
 
-## Fixes
+### Fixes
 
 - It correctly checks now for new framework versions when starting a new `metasbt` instance;
 - Fixed genome quality filtering on completeness and contamination during the `update`;
