@@ -119,6 +119,8 @@ def main() -> None:
                         with open("{}.gz".format(strains_bf_filepath), "w+") as bf_file:
                             run(["gzip", "-c", strains_bf_filepath], stdout=bf_file, stderr=bf_file)
 
+                    remove.append("{}.gz".format(strains_bf_filepath))
+
                     if os.path.isdir(os.path.join(subdir, "strains", "genomes")):
                         with open(os.path.join(subdir, "strains", "genomes", ".tagignore"), "a+") as exclude_tag:
                             exclude_tag.write("*")
@@ -151,7 +153,6 @@ def main() -> None:
                 with open(os.path.join(subdir, "filters", ".tagignore"), "a+") as exclude_tag:
                     exclude_tag.write("*.bf")
                 
-                remove.append("{}.gz".format(strains_bf_filepath))
                 remove.append(os.path.join(subdir, "genomes", ".tagignore"))
                 remove.append(os.path.join(subdir, "filters", ".tagignore"))
 
