@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.2"
-__date__ = "May 25, 2023"
+__date__ = "Mar 21, 2024"
 
 import argparse as ap
 import errno
@@ -1276,7 +1276,10 @@ def update(
                 if not os.path.isfile("{}{}".format(genome_filepath, compressed)):
                     run(["gzip", genome_filepath], silence=True)
 
-            mags_entries = [line.strip() for line in open(os.path.join(tax_dir, "mags.txt")).readlines() if line.strip()]
+            mags_entries = list()
+
+            if os.path.isfile(os.path.join(tax_dir, "mags.txt")):
+                mags_entries = [line.strip() for line in open(os.path.join(tax_dir, "mags.txt")).readlines() if line.strip()]
 
             if not genome_name in mags_entries:
                 # Also update the mags.txt file
