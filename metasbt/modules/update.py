@@ -158,13 +158,16 @@ def read_params(argv: List[str]):
         "--nproc",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
-        help="This argument refers to the number of processors used for parallelizing the pipeline when possible",
+        help="This argument refers to the number of processors used to run the pipeline in parallel",
     )
     general_group.add_argument(
         "--parallel",
         type=number(int, minv=1, maxv=os.cpu_count()),
         default=1,
-        help="Maximum number of processors to process input genomes in parallel",
+        help=(
+            "Used to rebuild multiple clusters in parallel. "
+            "Warning: The total number of spawned processes is equals to --parallel * --nproc"
+        ),
     )
     general_group.add_argument(
         "--parent-version",
@@ -864,7 +867,7 @@ def update(
     nproc : int, default 1
         Make the process parallel when possible.
     parallel : int, default 1
-        Maximum number of processors to process input genomes in parallel.
+        Used to rebuild multiple clusters in parallel.
 
     Raises
     ------
@@ -1074,12 +1077,12 @@ def update(
         dereplicate=dereplicate,
         similarity=similarity,
         quality_dict=quality_dict,
-        logger=logger if parallel == 1 else None,
-        verbose=verbose if parallel == 1 else False,
+        logger=logger if nproc == 1 else None,
+        verbose=verbose if nproc == 1 else False,
     )
 
-    with mp.Pool(processes=parallel) as pool, tqdm.tqdm(
-        total=len(genomes_paths), disable=(not verbose or parallel == 1)
+    with mp.Pool(processes=nproc) as pool, tqdm.tqdm(
+        total=len(genomes_paths), disable=(not verbose or nproc == 1)
     ) as pbar:
         # Wrapper around the update function of tqdm
         def progress(*args):
