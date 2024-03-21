@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 27, 2023"
+__date__ = "Mar 21, 2024"
 
 import argparse as ap
 import errno
@@ -396,22 +396,27 @@ def main() -> None:
                 for bf_filepath in Path(os.path.join(subdir, "filters")).glob("*.bf.gz"):
                     run(["gzip", "-d", bf_filepath])
 
-                for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf.gz"):
-                    run(["gzip", "-d", bf_filepath])
+                if os.path.isdir(os.path.join(subdir, "strains")):
+                    for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf.gz"):
+                        run(["gzip", "-d", bf_filepath])
 
-                fix_paths(
-                    os.path.join(subdir, "strains", "strains.txt"),
-                    os.path.splitext(os.path.basename(tarball_filepath))[0],
-                    args.install_in
-                )
+                    if os.path.isfile(os.path.join(subdir, "strains", "strains.txt")):
+                        fix_paths(
+                            os.path.join(subdir, "strains", "strains.txt"),
+                            os.path.splitext(os.path.basename(tarball_filepath))[0],
+                            args.install_in
+                        )
 
-                run(["gzip", "-d", os.path.join(subdir, "strains", "strains.bf.gz")])
+                    if os.path.isfile(os.path.join(subdir, "strains", "strains.bf.gz")):
+                        run(["gzip", "-d", os.path.join(subdir, "strains", "strains.bf.gz")])
 
-                fix_paths(
-                    os.path.join(subdir, "strains", "index", "index.detbrief.sbt"),
-                    os.path.splitext(os.path.basename(tarball_filepath))[0],
-                    args.install_in
-                )
+                    if os.path.isdir(os.path.join(subdir, "strains", "index")):
+                        if os.path.isfile(os.path.join(subdir, "strains", "index", "index.detbrief.sbt")):
+                            fix_paths(
+                                os.path.join(subdir, "strains", "index", "index.detbrief.sbt"),
+                                os.path.splitext(os.path.basename(tarball_filepath))[0],
+                                args.install_in
+                            )
 
 
 if __name__ == "__main__":
