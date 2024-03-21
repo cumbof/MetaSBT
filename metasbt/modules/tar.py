@@ -106,32 +106,37 @@ def main() -> None:
 
             if dirname[0] == "s":
                 if os.path.isdir(os.path.join(subdir, "strains")):
-                    # Compress the bloom filter representation of the strains
-                    strains_bf_filepath = os.path.join(subdir, "strains", "strains.bf")
-
-                    with open("{}.gz".format(strains_bf_filepath), "w+") as bf_file:
-                        run(["gzip", "-c", strains_bf_filepath], stdout=bf_file, stderr=bf_file)
-
                     with open(os.path.join(subdir, "strains", ".tagignore"), "a+") as exclude_tag:
                         exclude_tag.write("strains.bf\n")
                         exclude_tag.write("tmp")
 
-                    with open(os.path.join(subdir, "strains", "genomes", ".tagignore"), "a+") as exclude_tag:
-                        exclude_tag.write("*")
-
-                    # Compress all the bloom filters under the filters folder at the strain level
-                    for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf"):
-                        with open("{}.gz".format(bf_filepath), "w+") as bf_file:
-                            run(["gzip", "-c", bf_filepath], stdout=bf_file, stderr=bf_file)
-                        
-                        remove.append("{}.gz".format(bf_filepath))
-                    
-                    with open(os.path.join(subdir, "strains", "filters", ".tagignore"), "a+") as exclude_tag:
-                        exclude_tag.write("*.bf")
-
                     remove.append(os.path.join(subdir, "strains", ".tagignore"))
-                    remove.append(os.path.join(subdir, "strains", "genomes", ".tagignore"))
-                    remove.append(os.path.join(subdir, "strains", "filters", ".tagignore"))
+
+                    # Compress the bloom filter representation of the strains
+                    strains_bf_filepath = os.path.join(subdir, "strains", "strains.bf")
+
+                    if os.path.isfile(strains_bf_filepath):
+                        with open("{}.gz".format(strains_bf_filepath), "w+") as bf_file:
+                            run(["gzip", "-c", strains_bf_filepath], stdout=bf_file, stderr=bf_file)
+
+                    if os.path.isdir(os.path.join(subdir, "strains", "genomes")):
+                        with open(os.path.join(subdir, "strains", "genomes", ".tagignore"), "a+") as exclude_tag:
+                            exclude_tag.write("*")
+
+                        remove.append(os.path.join(subdir, "strains", "genomes", ".tagignore"))
+
+                    if os.path.isdir(os.path.join(subdir, "strains", "filters")):
+                        # Compress all the bloom filters under the filters folder at the strain level
+                        for bf_filepath in Path(os.path.join(subdir, "strains", "filters")).glob("*.bf"):
+                            with open("{}.gz".format(bf_filepath), "w+") as bf_file:
+                                run(["gzip", "-c", bf_filepath], stdout=bf_file, stderr=bf_file)
+                            
+                            remove.append("{}.gz".format(bf_filepath))
+                    
+                        with open(os.path.join(subdir, "strains", "filters", ".tagignore"), "a+") as exclude_tag:
+                            exclude_tag.write("*.bf")
+
+                        remove.append(os.path.join(subdir, "strains", "filters", ".tagignore"))
 
                 with open(os.path.join(subdir, "genomes", ".tagignore"), "a+") as exclude_tag:
                     exclude_tag.write("*")
