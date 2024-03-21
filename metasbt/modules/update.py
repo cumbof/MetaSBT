@@ -464,7 +464,10 @@ def profile_and_assign(
                         # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
                         run(["gzip", genome_filepath], silence=True)
 
-                    mags_entries = [line.strip() for line in open(mags_filepath).readlines() if line.strip()]
+                    mags_entries = list()
+
+                    if os.path.isfile(mags_filepath):
+                        mags_entries = [line.strip() for line in open(mags_filepath).readlines() if line.strip()]
 
                     if not genome_name in mags_entries:
                         # Add the current genome to the list of MAGs
