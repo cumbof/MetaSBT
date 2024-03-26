@@ -1376,7 +1376,13 @@ def main() -> None:
         argv = [line.strip() for line in open(args.resume).readlines() if line.strip() and not line.startswith("#")][-1].split()
 
         # Reload command line parameters
-        args = read_params(argv[1:])
+        if argv[0] == TOOL_ID:
+            # It was a direct call to the index module
+            args = read_params(argv[1:])
+
+        else:
+            # The index module has been run through the controller
+            argv = read_params(argv[2:])
 
         if args.parent_version != parent_version:
             println(
