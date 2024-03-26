@@ -227,11 +227,15 @@ def bfaction(
                         line = line.strip()
                         if line:
                             # This is require to replace consecutive space instances with a single space
+                            # TODO: this may break in case the absolute paths to the bloom filters contain one or more spaces;
+                            #       need to find a better solution
                             line_split = " ".join(line.split()).split(" ")
 
                             # Get genome names
-                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_supported=False, check_exists=False)
-                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_supported=False, check_exists=False)
+                            # Set check_exist=True is not required, but it makes sure that the absolute file path to the
+                            # bloom filters has not been altered because of the previous .split(" ")
+                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_supported=False, check_exists=True)
+                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_supported=False, check_exists=True)
 
                             # Remove non informative fields
                             if line_split[-1] == "({})".format("intersection" if mode == "intersect" else mode):
@@ -262,11 +266,15 @@ def bfaction(
                     for line in bfaction_out_file:
                         line = line.strip()
                         if line:
+                            # TODO: this may break in case the absolute paths to the bloom filters contain one or more spaces;
+                            #       need to find a better solution
                             line_split = line.split(" ")
 
                             key = "result"
                             if line_split[0] != key:
                                 # Get genome name
+                                # Set check_exist=True is not required, but it makes sure that the absolute file path to the
+                                # bloom filters has not been altered because of the previous .split(" ")
                                 _, key, _, _ = get_file_info(line_split[0], check_supported=False, check_exists=False)
 
                             # Get active bits
