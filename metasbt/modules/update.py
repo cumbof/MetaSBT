@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.2"
-__date__ = "Mar 21, 2024"
+__date__ = "Mar 27, 2024"
 
 import argparse as ap
 import errno
@@ -463,9 +463,16 @@ def profile_and_assign(
                         shutil.copy(genome_path, os.path.join(closest_taxadir, in_strains, "genomes"))
 
                     genome_filepath = os.path.join(closest_taxadir, in_strains, "genomes", "{}{}".format(genome_name, genome_ext))
-                    if not compression and not os.path.isfile("{}{}".format(genome_filepath, compression)):
-                        # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                        run(["gzip", genome_filepath], silence=True)
+
+                    if not compression:
+                        if not os.path.isfile("{}{}".format(genome_filepath, ".gz")):
+                            # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                            run(["gzip", genome_filepath], silence=True)
+
+                        else:
+                            # There is a genome with the same name or the update module has been run with the --resume option
+                            # We can get rid of the uncompressed version of the genome file
+                            os.unlink(genome_filepath)
 
                     mags_entries = list()
 
@@ -531,9 +538,16 @@ def profile_and_assign(
                             shutil.copy(genome_path, os.path.join(closest_taxadir, in_strains, "genomes"))
 
                         genome_filepath = os.path.join(closest_taxadir, in_strains, "genomes", "{}{}".format(genome_name, genome_ext))
-                        if not compression and not os.path.isfile("{}{}".format(genome_filepath, compression)):
-                            # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
-                            run(["gzip", genome_filepath], silence=True)
+
+                        if not compression:
+                            if not os.path.isfile("{}{}".format(genome_filepath, ".gz")):
+                                # It must be gzip compressed before moving it to the genomes folder of the closest taxonomy
+                                run(["gzip", genome_filepath], silence=True)
+
+                            else:
+                                # There is a genome with the same name or the update module has been run with the --resume option
+                                # We can get rid of the uncompressed version of the genome file
+                                os.unlink(genome_filepath)
 
                         references_entries = [line.strip() for line in open(references_filepath).readlines() if line.strip()]
 
