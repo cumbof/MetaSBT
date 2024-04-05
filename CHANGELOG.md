@@ -6,8 +6,11 @@
 
 ### New features
 
+- New option `--uniform-strand` available with the `index` and `update` modules for processing the input sequences all on the same strand. Mainly used for viral sequences;
 - New option `--use-representatives` available with the `index` module to use only three representative genomes at the species level;
 - New option `--resume` available with the `index` and `update` modules able to resume the index and update processes in case of unexpected errors;
+- New `expand_fasta.py` utility in `scripts` to expand input fasta files into multiple file. One fasta file for each read. Mainly used for viral sequences;
+- New `fastcluster.py` utility in `script` to compute a average-linkage hierarchical clustering of a set of genomes based on their Mash distances;
 - Both the `index` and `update` modules now display a worning message in case the configuration file under `--resume` has been previously generated with a different version of MetaSBT;
 - Both the `index` and `update` modules now integrate `CheckV` and `EukCC` for assessing the quality of viruses and eukaryotes;
 - `CheckM` has been updated to `CheckM2`.
