@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.2"
-__date__ = "Mar 27, 2024"
+__date__ = "Apr 3, 2024"
 
 import argparse as ap
 import errno
@@ -44,6 +44,7 @@ try:
         number,
         println,
         quality,
+        strand,
         run,
     )
 except Exception:
@@ -188,6 +189,16 @@ def read_params(argv: List[str]):
         help=(
             "Path to the \"update.sh\" file with the configuration of a previous run. "
             "Used to resume the update process in case of an unexpected error"
+        ),
+    )
+    general_group.add_argument(
+        "--uniform-strand",
+        action="store_true",
+        default=False,
+        dest="uniform_strand",
+        help=(
+            "Preprocess the input fasta sequences to make them all on the same strand. "
+            "Must be used in case of viral sequences"
         ),
     )
     general_group.add_argument(
@@ -615,7 +626,7 @@ def profile_and_assign(
                             if line:
                                 line_split = line.split("\t")
                                 genomes_in_quality_file.append(line_split[header.index("Name")])
-                    
+
                     if genome_name in genomes_in_quality_file:
                         add_to_quality_table = False
 
@@ -690,7 +701,7 @@ def build_cluster(
 
     if verbose:
         printline("\t{}".format(taxonomy))
-    
+
     tax_dir = os.path.join(db_dir, taxonomy.replace("|", os.sep))
 
     if taxonomy.split("|")[-1].startswith("s__") and use_representatives:
@@ -784,7 +795,7 @@ def build_cluster(
 
             for genome_name in remove_selected_genomes:
                 os.unlink(os.path.join(tax_dir, "filters", "{}.bf".format(genome_name)))
-        
+
         if len(add_selected_genomes) > 0:
             # Create the genomes folder under the species level in case of a new species
             os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
@@ -834,6 +845,7 @@ def update(
     tmp_dir: os.path.abspath,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float=0.0,
+    uniform_strand: bool=False,
     qc_method: str="CheckM2",
     completeness: float=0.0,
     contamination: float=100.0,
@@ -862,6 +874,8 @@ def update(
         Dictionary with boundaries produced by the boundaries module.
     boundary_uncertainty : float, default 0.0
         Percentage of kmers to enlarge and reduce boundaries.
+    uniform_strand : bool, default False
+        Preprocess the input fasta sequences to make them all on the same strand.
     qc_method : {"CheckM2", "CheckV", "EukCC"}, default "CheckM2"
         Quality control method.
     completeness : float, default 0.0
@@ -930,6 +944,24 @@ def update(
 
     # Load the list of input genomes and eventually their taxonomic labels
     taxonomy2genomes = load_input_table(input_list, input_extension=extension)
+
+    if uniform_strand:
+        preprocessed_taxonomy2genomes = dict()
+
+        for taxonomy in taxonomy2genomes:
+            preprocessed_genomes = list()
+
+            for genome in taxonomy2genomes[taxonomy]:
+                preprocessed_genome = strand(genome, os.path.join(tmp_dir, "preprocess_strand"))
+
+                # The result of the strand function can be a file path to the preprocessed genome
+                # or None in case something went wrong with the fasta records inside the input file
+                if preprocessed_genome:
+                    preprocessed_genomes.append(preprocessed_genome)
+
+            preprocessed_taxonomy2genomes[taxonomy] = preprocessed_genomes
+
+        taxonomy2genomes = preprocessed_taxonomy2genomes
 
     # Get the list of genome paths
     input_genomes_paths = set().union(*taxonomy2genomes.values())
@@ -1005,7 +1037,7 @@ def update(
 
                             for idx, value in enumerate(line_split):
                                 quality_dict[genome][header[idx]] = value
-        
+
         if len(quality_dict) < len(genomes_paths):
             # Run the quality control
             # A proper QC method cannot be inferred here because input can be MAGs with no taxonomic label
@@ -1228,7 +1260,7 @@ def update(
                                 "taxonomy": line_split[1],
                                 "cluster": line_split[2]
                             }
-            
+
             # Fix assignments keys with genome file paths
             for genome_filepath in unassigned:
                 _, genome_name, _, _ = get_file_info(genome_filepath)
@@ -1238,7 +1270,7 @@ def update(
 
                 else:
                     not_assigned.append(genome_filepath)
-        
+
         else:
             if os.path.isfile(assignments_filepath):
                 os.unlink(assignments_filepath)
@@ -1460,7 +1492,7 @@ def main() -> None:
     # Check whether the boundaries table exists
     if not os.path.isfile(args.boundaries):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.boundaries)
-    
+
     # Load the boundaries table
     boundaries_table = load_boundaries(args.boundaries)
 
@@ -1477,6 +1509,7 @@ def main() -> None:
         args.tmp_dir,
         boundaries_table,
         boundary_uncertainty=args.boundary_uncertainty,
+        uniform_strand=args.uniform_strand,
         qc_method=args.quality_control,
         completeness=args.completeness,
         contamination=args.contamination,

@@ -4,10 +4,11 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.1"
-__date__ = "May 24, 2023"
+__date__ = "Apr 3, 2024"
 
 import argparse as ap
 import errno
+import itertools
 import math
 import multiprocessing as mp
 import os
@@ -40,6 +41,7 @@ try:
         number,
         optimal_k,
         println,
+        strand,
         quality,
     )
 except Exception:
@@ -222,6 +224,16 @@ def read_params(argv: List[str]):
             "Path to the \"index.sh\" file with the configuration of a previous run. "
             "Used to resume the index process in case of an unexpected error. "
             "Not available with --flat-structure"
+        ),
+    )
+    general_group.add_argument(
+        "--uniform-strand",
+        action="store_true",
+        default=False,
+        dest="uniform_strand",
+        help=(
+            "Preprocess the input fasta sequences to make them all on the same strand. "
+            "Must be used in case of viral sequences"
         ),
     )
     general_group.add_argument(
@@ -1012,6 +1024,7 @@ def index(
     input_list: os.path.abspath,
     tmp_dir: os.path.abspath,
     input_extension: str="fna.gz",
+    uniform_strand: bool=False,
     cluster_prefix: str="MSBT",
     kmer_len: Optional[int]=None,
     filter_size: Optional[int]=None,
@@ -1047,6 +1060,8 @@ def index(
         Path to the temporary folder.
     input_extension : str, default "fna.gz"
         File extension of the input files whose paths are defined into the `input_list` file.
+    uniform_strand : bool, default False
+        Preprocess the input fasta sequences to make them all on the same strand.
     cluster_prefix : str, default "MSBT",
         Prefix of clusters.
     kmer_len : int, optional
@@ -1105,6 +1120,24 @@ def index(
 
     # Load the list of input genomes and eventually their taxonomic labels
     taxonomy2genomes = load_input_table(input_list, input_extension=input_extension)
+
+    if uniform_strand:
+        preprocessed_taxonomy2genomes = dict()
+
+        for taxonomy in taxonomy2genomes:
+            preprocessed_genomes = list()
+
+            for genome in taxonomy2genomes[taxonomy]:
+                preprocessed_genome = strand(genome, os.path.join(tmp_dir, "preprocess_strand"))
+
+                # The result of the strand function can be a file path to the preprocessed genome
+                # or None in case something went wrong with the fasta records inside the input file
+                if preprocessed_genome:
+                    preprocessed_genomes.append(preprocessed_genome)
+
+            preprocessed_taxonomy2genomes[taxonomy] = preprocessed_genomes
+
+        taxonomy2genomes = preprocessed_taxonomy2genomes
 
     # Force flat structure in case of genomes with no taxonomic label
     if "NA" in taxonomy2genomes:
@@ -1288,7 +1321,7 @@ def index(
                             # Wrapper around the update function of tqdm
                             def progress(*args):
                                 pbar.update()
-                            
+
                             # Process strains
                             jobs = [
                                 strains_pool.apply_async(
@@ -1309,7 +1342,7 @@ def index(
                                 # Populate the genomes folder at the species level with the selected genomes
                                 for genome in selected_genomes:
                                     genome_link = os.path.join(species_dir, "genomes", "{}.{}".format(genome, input_extension))
-                                    
+
                                     if not os.path.islink(genome_link):
                                         os.symlink(
                                             os.path.join(strains_dir, "genomes", "{}.{}".format(genome, input_extension)),
@@ -1470,7 +1503,7 @@ def main() -> None:
             if args.kmer_len:
                 # This will be added later if it does not exist
                 manifest.write("--kmer-len {}\n".format(args.kmer_len))
-            
+
             if args.filter_size:
                 # This will be added later if it does not exist
                 manifest.write("--filter-size {}\n".format(args.filter_size))
@@ -1492,6 +1525,7 @@ def main() -> None:
         args.input_list,
         args.tmp_dir,
         input_extension=args.extension,
+        uniform_strand=args.uniform_strand,
         cluster_prefix=args.cluster_prefix,
         kmer_len=args.kmer_len,
         filter_size=args.filter_size,

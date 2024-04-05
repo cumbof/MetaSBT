@@ -3,7 +3,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.2"
-__date__ = "May 25, 2023"
+__date__ = "Apr 3, 2024"
 
 import argparse as ap
 import errno
@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 import numpy as np  # type: ignore
+from Bio import SeqIO  # type: ignore
+from Bio.Seq import Seq  # type: ignore
+from Bio.SeqRecord import SeqRecord  # type: ignore
 
 # Define the list of dependencies
 # This is never used but helps to keep track of the external
@@ -414,7 +417,7 @@ def checkm2(
 
                             for line in table:
                                 line = line.strip()
-                                
+
                                 if line:
                                     line_split = line.split("\t")
 
@@ -690,7 +693,7 @@ def cluster(
                 for level in reversed(levels):
                     # Get level boundaries
                     mink, _ = get_level_boundaries(boundaries, level2match[level]["taxonomy"])
-                
+
                     if level2match[level]["common_kmers"] >= mink and mink > 0:
                         assigned_taxonomy = level2match[level]["taxonomy"]
 
@@ -701,7 +704,7 @@ def cluster(
                 if not assigned_taxonomy:
                     # Unable to assign a taxonomic label to the current genome
                     unassigned.append(genomes_list[i])
-                
+
                 else:
                     assignment = assigned_taxonomy.split("|")
 
@@ -720,7 +723,7 @@ def cluster(
                     # Assigne current genome to the taxonomy
                     if assigned_taxonomy not in assigned_taxa:
                         assigned_taxa[assigned_taxonomy] = list()
-                    
+
                     assigned_taxa[assigned_taxonomy].append(genomes_list[i])
 
                     # Mark current genome as assigned
@@ -816,7 +819,8 @@ def dereplicate_genomes(
 
     Returns
     -------
-    listA list with paths to the genome files that passed the dereplication process.
+    list
+        A list with paths to the genome files that passed the dereplication process.
 
     Notes
     -----
@@ -837,26 +841,22 @@ def dereplicate_genomes(
     )
 
     # Pair-wise comparison of input genomes
-    for i in range(len(genomes)):
-        for j in range(i + 1, len(genomes)):
-            # Get genome file names
-            _, genome1, _, _ = get_file_info(genomes[i])
-            _, genome2, _, _ = get_file_info(genomes[j])
+    for i, genome1_path in enumerate(genomes):
+        # Get genome1 file name
+        _, genome1, _, _ = get_file_info(genome1_path)
 
-            excluded = None
+        genomes_sublist = genomes[i + 1:]
 
-            if bfdistance_theta[genome1][genome2] >= similarity:
-                filtered_genomes.append(genomes[i])
-                excluded = genomes[i]
-            
-            if bfdistance_theta[genome2][genome1] >= similarity:
-                filtered_genomes.append(genomes[j])
-                excluded = genomes[j]
+        for genome2_path in genomes_sublist:
+            # Get genome2 file name
+            _, genome2, _, _ = get_file_info(genome2_path)
 
-            if excluded:
-                # Also take note if the excluded genomes in the filtered file
+            if bfdistance_theta[genome1][genome2] >= similarity and bfdistance_theta[genome2][genome1] >= similarity:
+                filtered_genomes.append(genome2_path)
+
+                # Also take note of the excluded genomes in the filtered file
                 with open(filtered_genomes_filepath, "a+") as f:
-                    f.write("{}\n".format(excluded))
+                    f.write("{}\n".format(genome2_path))
 
                 break
 
@@ -894,6 +894,8 @@ def download(
         If no URLs are provided.
     Exception
         If an error occurs while downloading the files.
+    FileNotFoundError
+        If pass the download process but the file does not exist.
 
     Returns
     -------
@@ -929,12 +931,23 @@ def download(
                 retries=retries,
             )
 
+            filepath = os.path.join(folder, url.split(os.sep)[-1])
+
+            if not os.path.isfile(filepath):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+
+            return filepath
+
         elif urls:
+            filepaths = list()
+
             with tempfile.NamedTemporaryFile() as tmpfile:
                 # Dump the list of bloom filter file paths
                 with open(tmpfile.name, "wt") as tmpfile_list:
                     for url in urls:
                         tmpfile_list.write("{}\n".format(url))
+
+                        filepaths.append(os.path.join(folder, url.split(os.sep)[-1]))
 
                 # Download a list of files from URL
                 run(
@@ -944,6 +957,12 @@ def download(
                     retries=retries,
                 )
 
+            for filepath in filepaths:
+                if not os.path.isfile(filepath):
+                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+
+            return filepaths
+
     except Exception as e:
         if raise_exception:
             raise Exception(
@@ -952,8 +971,6 @@ def download(
 
         # This file does not seem really important after all
         return None
-
-    return os.path.join(folder, url.split(os.sep)[-1])
 
 
 def estimate_bf_size(
@@ -1184,7 +1201,7 @@ def filter_quality(
             # CheckM2
             comp = float(quality_dict[genome]["Completeness_Specific"])
             cont = float(quality_dict[genome]["Contamination"])
-        
+
         elif "completeness" in quality_dict[genome]:
             # CheckV and EukCC
             comp = float(quality_dict[genome]["completeness"])
@@ -1234,12 +1251,12 @@ def get_bf_density(filepath: os.path.abspath) -> float:
         try:
             # Get the result
             density = float(open(dumpbf.name, "rt").readline().strip().split(" ")[-1])
-        
+
         except Exception as ex:
             raise Exception("An error has occurred while retrieving bloom filter density:\n{}".format(filepath)).with_traceback(
                 ex.__traceback__
             )
-    
+
     return density
 
 
@@ -1338,7 +1355,7 @@ def get_file_info(filepath: os.path.abspath, check_supported: bool=True, check_e
     Returns
     -------
     tuple
-        A tuple with the file path, name, extension, and compression.
+        A tuple with the file's folder path, name, extension, and compression.
     """
 
     if check_exists and not os.path.isfile(filepath):
@@ -1829,7 +1846,7 @@ def load_boundaries(boundaries_filepath: os.path.abspath) -> Dict[str, Dict[str,
 
     if not os.path.isfile(boundaries_filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), boundaries_filepath)
-    
+
     boundaries = dict()
 
     with open(boundaries_filepath) as table:
@@ -1838,7 +1855,7 @@ def load_boundaries(boundaries_filepath: os.path.abspath) -> Dict[str, Dict[str,
             if line:
                 if not line.startswith("#"):
                     line_split = line.split("\t")
-                    
+
                     # Indexed by taxonomic labels
                     boundaries[line_split[0]] = {
                         "clusters": int(line_split[1]),
@@ -2084,14 +2101,14 @@ def optimal_k(
 
     if len(genomes) < 2:
         raise Exception("Not enough genomes")
-    
+
     if kl < 4:
         raise ValueError("Initial k-mer length is too small")
-    
+
     # Check whether the destination folder path exists
     if not os.path.isdir(tmpdir):
         os.makedirs(tmpdir, exist_ok=True)
-    
+
     # Take track of the genome file paths in the tmp folder
     genomes_paths = list()
 
@@ -2110,7 +2127,7 @@ def optimal_k(
             # It can always be Gzip compressed here
             with open(genome_file, "w+") as file:
                 run(["gzip", "-dc", genome_path], stdout=file, stderr=file)
-        
+
         genomes_paths.append(genome_file)
 
     if len(genomes_paths) < 2:
@@ -2295,6 +2312,110 @@ def run(
     else:
         # There is nothing to run
         raise Exception("Empty command line!")
+
+
+def strand(filepath: os.path.abspath, tmpdir: os.path.abspath) -> Union[str, None]:
+    """Restructure a fasta file evaluating its records and their reverse-complement. 
+    Sequences are evaluated by translating them and searching for ORFs.
+    The best one is selected according to the highest number of ORFs.
+
+    Parameters
+    ----------
+    filepath : os.path.abspath
+        Path to the input sequence file (can be Gzip compressed).
+    tmpdir : os.path.abspath
+        Path to the temporary folder used to uncompress the input file (if Gzip compressed) 
+        and store the new sequence file with the evaluated records.
+
+    Returns
+    -------
+    str
+        Path to the new fasta file in the temporary folder (always uncompressed).
+    """
+
+    if not os.path.isdir(tmpdir):
+        os.makedirs(tmpdir, exist_ok=True)
+
+    # Call get_file_info to check whether the file exists and it is supported
+    # Also check if it is compressed
+    _, filename, extension, compression = get_file_info(genome_path, check_supported=True, check_exists=True)
+
+    if compression:
+        uncompressed_filepath = os.path.join(tmpdir, "{}{}~".format(filename))
+
+        # Uncompress the input file
+        # This file will be removed at the end of this function
+        with open(uncompressed_filepath, "w+") as file:
+            run(["gzip", "-dc", filepath], stdout=file, stderr=file)
+
+        filepath = uncompressed_filepath
+
+    # A regular expression to search for ORFs
+    regex_orf = re.compile(r'M[^*]{25,}?\*')
+
+    # Keep track of the fasta file records
+    records = list()
+
+    # Iterate over all the record in the input fasta file
+    # Input files are always in fasta format
+    for record in SeqIO.parse(filepath, "fasta"):
+        sequence = record.seq.upper()
+
+        if not re.match("^[ACTUGN]*$", str(sequence)):
+            # Not a valid sequence
+            # Go ahead with the next record
+            continue
+
+        # Replace Us with Ts
+        sequence = sequence.replace("U", "T")
+
+        positive_strand = sequence
+        longest_CDS = 0
+
+        # Search for the positive strand among the original sequence
+        # and its reverse complement
+        strands = [sequence, sequence.reverse_complement()]
+
+        for strand in strands:
+            for frame in range(3):
+                protein_sequence = ""
+
+                for fragment in range(frame, len(strand), 3):
+                    codon = strand[fragment:fragment+3]
+
+                    if len(codon) == 3:
+                        # Translate to aminoacid
+                        # Return a Bio.Seq object
+                        protein_sequence += codon.translate()
+
+                # Search for ORFs
+                matches = regex_orf.findall(str(protein_sequence))
+                all_ORFs = "".join([match for match in matches if match])
+
+                if len(all_ORFs)/float(len(strand)) > longest_CDS:
+                    longest_CDS = len(all_ORFs)/float(len(strand))
+                    positive_strand = strand
+
+        strand_record = SeqRecord(positive_strand, id=record.id, name=record.name,
+                                  description=record.description)
+
+        records.append(strand_record)
+
+    if compression:
+        # Get rid of the uncompressed file
+        os.unlink(filepath)
+
+    if records:
+        # Output sequence file
+        out_filepath = os.path.join(tmpdir, "{}{}".format(filename, extension))
+
+        with open(out_filepath, "w+") as strand_file:
+            for record in records:
+                strand_file.write(strand_record.format("fasta"))
+
+        return out_filepath
+
+    return None
 
 
 def validate_url(url: str) -> bool:
