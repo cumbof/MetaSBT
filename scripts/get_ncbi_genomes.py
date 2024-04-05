@@ -23,6 +23,12 @@ import numpy as np
 
 TOOL_ID = "get_ncbi_genomes"
 
+# Define the list of dependencies
+DEPENDENCIES = [
+    "gzip",
+    "ncbitax2lin",
+]
+
 # Define the url to the NCBI taxdump
 TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 
@@ -181,11 +187,18 @@ def read_params():
     return p.parse_args()
 
 
-def get_genomes_in_db(db_dir: str) -> List[str]:
+def get_genomes_in_db(db_dir: os.path.abspath) -> List[str]:
     """Retrieve the list of reference genomes and MAGs in the MetaSBT database.
 
-    :param db_dir:  Path to the root folder of the MetaSBT database
-    :return:        List with genome IDs in the database
+    Parameters
+    ----------
+    db_dir : os.path.abspath
+        Path to the root folder of the MetaSBT database.
+
+    Returns
+    -------
+    list
+        List with genome IDs in the database.
     """
 
     genomes = list()
@@ -205,9 +218,17 @@ def get_genomes_in_db(db_dir: str) -> List[str]:
 def level_name(current_level: str, prev_level: str) -> str:
     """Define a taxonomic level name.
 
-    :param current_level:   Current level name
-    :param prev_level:      Previous level name in case of unclassified
-    :return:                The new level name
+    Parameters
+    ----------
+    current_level : str
+        Current level name.
+    prev_level : str
+        Previous level name in case of unclassified.
+
+    Returns
+    -------
+    str
+        The new level name.
     """
 
     # Remove special characters from current and previous level names
@@ -227,12 +248,25 @@ def level_name(current_level: str, prev_level: str) -> str:
     return "{}{}".format(level_prefix, level_suffix)
 
 
-def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
+def download_taxdump(taxdump_url: str, folder_path: os.path.abspath) -> Tuple[os.path.abspath, os.path.abspath]:
     """Download and extract the NCBI taxdump tarball.
 
-    :param taxdump_url:     URL to the NCBI taxdump
-    :param folder_path:     Path to the folder in which the taxdump tarball will be unpacked
-    :return:                The nodes.dmp and names.dmp file paths
+    Parameters
+    ----------
+    taxdump_url : str
+        URL to the NCBI taxdump.
+    folder_path : os.path.abspath
+        Path to the folder in which the taxdump tarball will be unpacked.
+
+    Raises
+    ------
+    Exception
+        If it is unable to retrieve data from the remote location.
+
+    Returns
+    -------
+    tuple
+        The nodes.dmp and names.dmp file paths.
     """
 
     # Create the taxdump folder in the temporary directory
@@ -262,20 +296,31 @@ def download_taxdump(taxdump_url: str, folder_path: str) -> Tuple[str, str]:
 
 
 def ncbitax2lin(
-    tmpdir: str,
-    nodes_dmp: str,
-    names_dmp: str,
+    tmpdir: os.path.abspath,
+    nodes_dmp: os.path.abspath,
+    names_dmp: os.path.abspath,
     superkingdom: Optional[str]=None,
     kingdom: Optional[str]=None
 ) -> Dict[str, str]:
     """Run ncbitax2lin over nodes and names dumps and produce the mapping between NCBI tax IDs and ful taxonomic labels.
 
-    :param tmpdir:          Path to the tmp directory
-    :param nodes_dmp:       Path to the NCBI nodes dump
-    :param names_dmp:       Path to the NCBI names dump
-    :param superkingdom:    Filter results on this superkingdom only
-    :param kingdom:         Filter results on this kingdom only
-    :return:                Dictionary with the mapping between NCBI tax IDs and full taxonomic labels
+    Parameters
+    ----------
+    tmpdir : os.path.abspath
+        Path to the tmp directory.
+    nodes_dmp : os.path.abspath
+        Path to the NCBI nodes dump.
+    names_dmp : os.path.abspath
+        Path to the NCBI names dump.
+    superkingdom : str
+        Filter results on this superkingdom only.
+    kingdom : str
+        Filter results on this kingdom only.
+
+    Returns
+    -------
+    dict
+        Dictionary with the mapping between NCBI tax IDs and full taxonomic labels.
     """
     
     ncbitax2lin_table = os.path.join(tmpdir, "ncbi_lineages.csv.gz")
@@ -339,12 +384,20 @@ def ncbitax2lin(
     return taxa_map
 
 
-def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, List[Dict[str, str]]]:
+def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> Dict[str, List[Dict[str, str]]]:
     """Download and load the last available NCBI GenBank Assembly Report table.
 
-    :param assembly_summary_url:    URL to the NCBI GenBank Assembly Report table
-    :param tmpdir:                  Path to the tmp folder
-    :return:                        Dictionary with genomes info
+    Parameters
+    ----------
+    assembly_summary_url : str
+        URL to the NCBI GenBank Assembly Report table.
+    tmpdir : os.path.abspath
+        Path to the tmp folder.
+
+    Returns
+    -------
+    dict
+        Dictionary with genomes info.
     """
 
     assembly_summary = dict()
@@ -410,20 +463,31 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: str) -> Dict[str, Li
 
 def get_genomes_in_ncbi(
     superkingdom: str,
-    tmpdir: str,
+    tmpdir: os.path.abspath,
     kingdom: Optional[str]=None,
     taxa_level_id: Optional[str]=None,
     taxa_level_name: Optional[str]=None,
 ) -> Dict[str, Dict[str, str]]:
     """Retrieve links and taxonomic information about reference genomes and MAGs in NCBI GenBank.
 
-    :param superkingdom:    Archaea, Bacteria, Eukaryota, or Viruses
-    :param tmpdir:          Path to the temporary folder
-    :param kingdom:         A specific kingdom related to the superkingdom. Optional
-    :param taxa_level_id:   Taxonomic level identifier (phylum, class, order, family, genus, or species)
-    :param taxa_level_name: Name of the taxonomic level as appear in NCBI
-    :return:                A dictionary with the genome IDs as keys and URL and taxonomic info as values
-                            and optionally the name of the specified cluster
+    Parameters
+    ----------
+    superkingdom : str
+        Archaea, Bacteria, Eukaryota, or Viruses.
+    tmpdir : os.path.abspath
+        Path to the temporary folder.
+    kingdom : str
+        A specific kingdom related to the superkingdom. Optional.
+    taxa_level_id : str
+        Taxonomic level identifier (phylum, class, order, family, genus, or species).
+    taxa_level_name : str
+        Name of the taxonomic level as appear in NCBI.
+
+    Returns
+    -------
+    dict
+        A dictionary with the genome IDs as keys and URL and taxonomic info as values
+        and optionally the name of the specified cluster
     """
 
     target_cluster = None
@@ -464,12 +528,20 @@ def get_genomes_in_ncbi(
     return ncbi_genomes, target_cluster
 
 
-def urlretrieve_wrapper(url: str, filepath: str, retry: int=5) -> Tuple[str, bool]:
+def urlretrieve_wrapper(url: str, filepath: os.path.abspath, retry: int=5) -> Tuple[str, bool]:
     """Just a wrapper around urlretrieve.
 
-    :param url:         Input URL
-    :param filepath:    Output file path
-    :return:            The output file path
+    Parameters
+    ----------
+    url : str
+        Input URL.
+    filepath : os.path.abspath
+        Output file path.
+
+    Returns
+    -------
+    tuple
+        A tuple with the output file path and a boolean (True if it passes the integrity check).
     """
 
     exists_and_passed_integrity = False
