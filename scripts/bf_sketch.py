@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Build minimal bloom filter sketches with cluster-specific marker kmers 
+"""Build minimal bloom filter sketches with cluster-specific marker kmers.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
@@ -16,6 +15,11 @@ from pathlib import Path
 from typing import List
 
 TOOL_ID = "bf_sketch"
+
+# Define the list of dependencies
+DEPENDENCIES = [
+    "howdesbt",
+]
 
 
 def read_params():
@@ -70,15 +74,33 @@ def read_params():
     return p.parse_args()
 
 
-def build_sketch(bf_filepath: str, bf_bucket: List[str], out_dir: str) -> str:
-    """
-    Build a bloom filter sketch with marker kmers
+def build_sketch(
+    bf_filepath: os.path.abspath, 
+    bf_bucket: List[os.path.abspath], 
+    out_dir: os.path.abspath
+) -> os.path.abspath:
+    """Build a bloom filter sketch with marker kmers.
 
-    :param bf_filepath: Path to the input bloom filter file under a specific taxonomic level
-    :param bf_bucket:   List with paths to the bloom filter files under the same taxonomic level
-                        of the input bf_filepath
-    :param out_dir:     Path to the output folder
-    :return:            Path to the output file
+    Parameters
+    ----------
+    bf_filepath : os.path.abspath
+        Path to the input bloom filter file under a specific taxonomic level.
+    bf_bucket : os.path.abspath
+        List with paths to the bloom filter files under the same taxonomic level of the input bf_filepath.
+    out_dir: os.path.abspath
+        Path to the output folder.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a bloom filter file in the input `bf_bucket` does not exist.
+    Exception
+        In case of an unexpected error while running HowDeSBT..
+
+    Returns
+    -------
+    os.path.abspath
+        Path to the output file.
     """
 
     # Remove the input bf_filepath from the bucket
