@@ -34,7 +34,10 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:main"]},
     install_requires=[
+        "biopython>=1.83",
+        "fastcluster>=1.2.6",
         "kitsune>=1.3.3",
+        "mash>=2.3",
         "ncbitax2lin>=2.3.2",
         "numpy>=1.22.3",
         "packaging>=23.2",
@@ -73,6 +76,7 @@ setuptools.setup(
     python_requires=">=3.8",
     scripts=[
         "scripts/bf_sketch.py",
+        "scripts/expand_fasta.py",
         "scripts/esearch_txid.sh",
         "scripts/get_ncbi_genomes.py",
         "scripts/howdesbt_index.sh",
