@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 4, 2024"
+__date__ = "Apr 6, 2024"
 
 import argparse as ap
 import errno
@@ -119,6 +119,7 @@ def mash_distance(
 
     condensed_distance_matrix = list()
 
+    # TODO: Make it parallel
     for mash_sketch_pos, mash_sketch in enumerate(mash_sketches):
         distance_filepath = os.path.join(mash_folder, "{}.tsv".format(os.path.splitext(os.path.basename(mash_sketch))[0]))
 
@@ -147,7 +148,7 @@ def mash_distance(
 
         distances_dict = {
             os.path.splitext(os.path.basename(line.strip().split("\t")[0]))[0]: float(line.strip().split()[1])
-            for line in open(distance_filepath).readlines() if line.strip()
+            for line in open(distance_filepath).readlines() if line.strip() and not line.strip().startswith("#")
         }
 
         # Sort distances according to input_names
@@ -270,6 +271,7 @@ def mash_sketch(
 
     mash_filepaths = list()
 
+    # TODO: Make it parallel
     for filepath in filepaths:
         # Assume these files are all unzipped, in fasta format, and with .fna extension
         mash_filepath = os.path.join(mash_folder, "{}.msh".format(os.path.splitext(os.path.basename(filepath))[0]))
@@ -286,8 +288,8 @@ def mash_sketch(
                         "-s",
                         str(sketch_size),
                         "-o",
-                        filepath,
                         mash_filepath,
+                        filepath,
                     ],
                     stderr=subprocess.DEVNULL
                 )
