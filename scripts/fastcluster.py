@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 6, 2024"
+__date__ = "Apr 7, 2024"
 
 import argparse as ap
 import errno
@@ -420,12 +420,8 @@ def main() -> None:
     mash_pastes = mash_paste(mash_sketches, args.tmp_dir)
 
     # Compute the MASH distances pair-wise
-    print("Computing MASH distances")
-    mash_distances = mash_distance(mash_sketches, mash_pastes, args.tmp_dir)
-
-    # Build a condensed matrix with distances
-    print("Computing a condensed distance matrix")
-    input_names, condensed_matrix = condense_matrix(mash_distances)
+    print("Computing MASH distances and building the condensed distance matrix")
+    input_names, condensed_matrix = mash_distance(mash_sketches, mash_pastes, args.tmp_dir)
 
     # Run fastcluster
     print("Computing a average-linkage hierarchical clustering")
