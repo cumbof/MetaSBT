@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 7, 2024"
+__date__ = "Apr 8, 2024"
 
 import argparse as ap
 import errno
@@ -15,7 +15,7 @@ from typing import List, Tuple
 import fastcluster
 import scipy.cluster.hierarchy as hier
 
-TOOL_ID = "fastcluster"
+TOOL_ID = "cluster"
 
 # Define the list of dependencies
 DEPENDENCIES = [
