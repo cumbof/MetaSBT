@@ -4,12 +4,13 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.0"
-__date__ = "Apr 8, 2024"
+__date__ = "Apr 9, 2024"
 
 import argparse as ap
 import errno
 import os
 import subprocess
+from collections import Counter
 from typing import List, Tuple
 
 import fastcluster
@@ -56,6 +57,12 @@ def read_params():
         default=10000,
         dest="sketch_size",
         help="Sketch size for building MASH sketches",
+    )
+    p.add_argument(
+        "--taxa",
+        type=os.path.abspath,
+        required=True,
+        help="Path to a two-columns TSV file with the list of input genome file paths and their full taxonomic labels",
     )
     p.add_argument(
         "--threshold",
@@ -405,7 +412,38 @@ def main() -> None:
 
     # Load the list of input file paths
     print("Loading the list of input files")
-    input_filepaths = [line.strip() for line in open(args.filepath).readlines() if line.strip()]
+
+    input_dict = dict()
+
+    with open(args.filepath) as in_file:
+        for line in in_file:
+            line = line.strip()
+
+            if line:
+                if not line.startswith("#"):
+                    filename = os.path.splitext(os.path.basename(line))[0]
+
+                    if line.endswith(".gz"):
+                        filename = os.path.splitext(filename)[0]
+
+                    # Key: filename
+                    # Valule: filepath
+                    input_dict[filename] = line
+
+    input_filepaths = list(input_dict.values())
+
+    if not os.path.isfile(args.taxa):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.taxa)
+
+    # Load the list of input genome file paths and their full taxonomic labels
+    taxa = {
+        line.strip().split("\t")[0]: line.strip().split("\t")[1]
+            for line in open(args.taxa).readlines() if line.strip() and not line.strip().startswith("#")
+    }
+
+    # Check for inconsistencies between genomes in --filepath and --taxa
+    if not (len(set(input_filepaths).intersection(set(taxa.keys()))) == len(input_filepaths) == len(taxa.keys())):
+        raise Exception("The number of input genomes in --filepath differs from the number of genomes in --taxa")
 
     # Unzip input files
     print("Unzipping file if Gzip compressed")
@@ -431,12 +469,46 @@ def main() -> None:
     print("Defining clusters with threshold {}".format(args.threshold))
     clusters = hier.fcluster(dendro, args.threshold, criterion="distance")
 
+    clusters_dict = dict()
+
+    # Define a mapping cluster - input files
+    for filename, cluster in zip(input_names, clusters):
+        if cluster not in clusters_dict:
+            clusters_dict[cluster] = list()
+
+        clusters_dict[cluster].append(input_dict[filename])
+
+    taxa_clusters = dict()
+
+    for cluster in clusters_dict:
+        taxonomies = sorted([taxa[filepath] for filepath in clusters_dict[cluster]])
+
+        counter = Counter(taxonomies)
+
+        # Get the most occurrent taxonomic label in cluster
+        assignment = counter.most_common(1)[0][0]
+
+        if assignment not in taxa_clusters:
+            taxa_clusters[assignment] = list()
+
+        taxa_clusters[assignment].append(cluster)
+
+    clusters_taxa_fixed = dict()
+
+    # Fix cluster names if a taxonomy is assigned to more than one cluster
+    for taxonomy in taxa_clusters:
+        if len(taxa_clusters[taxonomy]) == 1:
+            clusters_taxa_fixed[taxa_clusters[taxonomy][0]] = taxonomy
+
+        else:
+            for i, cluster in enumerate(taxa_clusters[taxonomy]):
+                clusters_taxa_fixed[cluster] = "{}__clade_{}".format(taxonomy, i)
+
     # Write assignments
     with open(args.out_file, "w+") as outfile:
-        outfile.write("# {}\t{}\n".format("Sequence", "Cluster"))
-
-        for name, cluster in zip(input_names, clusters):
-            outfile.write("{}\t{}\n".format(name, cluster))
+        for cluster in clusters_dict:
+            for filepath in clusters_dict:
+                outfile.write("{}\t{}\n".format(filepath, clusters_taxa_fixed[cluster]))
 
 
 if __name__ == "__main__":
