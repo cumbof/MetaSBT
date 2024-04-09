@@ -507,7 +507,7 @@ def main() -> None:
     # Write assignments
     with open(args.out_file, "w+") as outfile:
         for cluster in clusters_dict:
-            for filepath in clusters_dict:
+            for filepath in clusters_dict[cluster]:
                 outfile.write("{}\t{}\n".format(filepath, clusters_taxa_fixed[cluster]))
 
 
