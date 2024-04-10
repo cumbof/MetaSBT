@@ -37,7 +37,6 @@ setuptools.setup(
         "biopython>=1.83",
         "fastcluster>=1.2.6",
         "kitsune>=1.3.3",
-        "mash>=2.3",
         "ncbitax2lin>=2.3.2",
         "numpy>=1.22.3",
         "packaging>=23.2",
