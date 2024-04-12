@@ -2,8 +2,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.2"
-__date__ = "Apr 3, 2024"
+__version__ = "0.1.3"
+__date__ = "Apr 11, 2024"
 
 import argparse as ap
 import errno
@@ -2314,7 +2314,7 @@ def run(
         raise Exception("Empty command line!")
 
 
-def strand(filepath: os.path.abspath, tmpdir: os.path.abspath) -> Union[str, None]:
+def strand(filepath: os.path.abspath, tmpdir: os.path.abspath) -> os.path.abspath:
     """Restructure a fasta file evaluating its records and their reverse-complement. 
     Sequences are evaluated by translating them and searching for ORFs.
     The best one is selected according to the highest number of ORFs.
@@ -2338,7 +2338,7 @@ def strand(filepath: os.path.abspath, tmpdir: os.path.abspath) -> Union[str, Non
 
     # Call get_file_info to check whether the file exists and it is supported
     # Also check if it is compressed
-    _, filename, extension, compression = get_file_info(genome_path, check_supported=True, check_exists=True)
+    _, filename, extension, compression = get_file_info(filepath, check_supported=True, check_exists=True)
 
     if compression:
         uncompressed_filepath = os.path.join(tmpdir, "{}{}~".format(filename))
@@ -2405,17 +2405,14 @@ def strand(filepath: os.path.abspath, tmpdir: os.path.abspath) -> Union[str, Non
         # Get rid of the uncompressed file
         os.unlink(filepath)
 
-    if records:
-        # Output sequence file
-        out_filepath = os.path.join(tmpdir, "{}{}".format(filename, extension))
+    # Output sequence file
+    out_filepath = os.path.join(tmpdir, "{}{}".format(filename, extension))
 
-        with open(out_filepath, "w+") as strand_file:
-            for record in records:
-                strand_file.write(strand_record.format("fasta"))
+    with open(out_filepath, "w+") as strand_file:
+        for record in records:
+            strand_file.write(strand_record.format("fasta"))
 
-        return out_filepath
-
-    return None
+    return out_filepath
 
 
 def validate_url(url: str) -> bool:
