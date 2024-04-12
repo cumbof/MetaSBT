@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Mar 21, 2024"
+__version__ = "0.1.1"
+__date__ = "Apr 12, 2024"
 
 import argparse as ap
 import errno
@@ -360,6 +360,14 @@ def main() -> None:
 
     # Extract the database in --install-in
     with tarfile.open(tarball_filepath, "r") as tf:
+        # Retrieve the real database name
+        db_name = tf.getnames()[0]
+
+        db_path = os.path.join(args.install_in, db_name)
+
+        if os.path.isdir(db_path):
+            raise FileExistsError(errno.ENOENT, os.strerror(errno.ENOENT), db_path)
+
         print("Unpacking tarball into {}".format(args.install_in))
         tf.extractall(path=args.install_in)
 
@@ -369,14 +377,14 @@ def main() -> None:
     # kingdom, phylum, class, order, family, genus, species
     taxonomic_levels_prefixes = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
 
-    for subdir, _, _ in os.walk(os.path.join(args.install_in, os.path.splitext(os.path.basename(tarball_filepath))[0])):
+    for subdir, dirs, _ in os.walk(db_path):
         dirname = os.path.basename(subdir)
 
-        if dirname == os.path.splitext(os.path.basename(tarball_filepath))[0] or dirname[:3] in taxonomic_levels_prefixes:
+        if dirname == db_name or dirname[:3] in taxonomic_levels_prefixes:
             # Edit file with the list of paths to the bloom filter files under this taxonomic level
             fix_paths(
                 os.path.join(subdir, "{}.txt".format(dirname)),
-                os.path.splitext(os.path.basename(tarball_filepath))[0],
+                db_name,
                 args.install_in
             )
 
@@ -386,7 +394,7 @@ def main() -> None:
             # Edit the HowDeSBT index file
             fix_paths(
                 os.path.join(subdir, "index", "index.detbrief.sbt"),
-                os.path.splitext(os.path.basename(tarball_filepath))[0],
+                db_name,
                 args.install_in
             )
 
@@ -403,7 +411,7 @@ def main() -> None:
                     if os.path.isfile(os.path.join(subdir, "strains", "strains.txt")):
                         fix_paths(
                             os.path.join(subdir, "strains", "strains.txt"),
-                            os.path.splitext(os.path.basename(tarball_filepath))[0],
+                            db_name,
                             args.install_in
                         )
 
@@ -414,7 +422,7 @@ def main() -> None:
                         if os.path.isfile(os.path.join(subdir, "strains", "index", "index.detbrief.sbt")):
                             fix_paths(
                                 os.path.join(subdir, "strains", "index", "index.detbrief.sbt"),
-                                os.path.splitext(os.path.basename(tarball_filepath))[0],
+                                db_name,
                                 args.install_in
                             )
 
