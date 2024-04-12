@@ -32,6 +32,7 @@ requirements:
     - howdesbt >=2.00.13
     - kitsune >=1.3.3
     - mash >=2.3
+    - minimizers >=0.1.2
     - ncbitax2lin >=2.3.2
     - ntcard >=1.2.2
     - numpy >=1.19.2
