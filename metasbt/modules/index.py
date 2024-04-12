@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.1"
-__date__ = "Apr 3, 2024"
+__version__ = "0.1.2"
+__date__ = "Apr 11, 2024"
 
 import argparse as ap
 import errno
@@ -1122,18 +1122,34 @@ def index(
     taxonomy2genomes = load_input_table(input_list, input_extension=input_extension)
 
     if uniform_strand:
+        genome_paths = [genome_path for taxonomy in taxonomy2genomes for genome_path in taxonomy2genomes[taxonomy]]
+
+        stranded_genome_paths = dict()
+
+        with mp.Pool(processes=nproc) as pool:
+            jobs = [
+                pool.apply_async(strand, args=(genome_path, os.path.join(tmp_dir, "uniform_strand"),))
+                for genome_path in genome_paths
+            ]
+
+            for job in jobs:
+                stranded_genome_path = job.get()
+
+                # Get the genome name from file path
+                _, stranded_genome_name, _, _ = get_file_info(stranded_genome_path)
+
+                stranded_genome_paths[stranded_genome_name] = stranded_genome_path
+
         preprocessed_taxonomy2genomes = dict()
 
         for taxonomy in taxonomy2genomes:
             preprocessed_genomes = list()
 
             for genome in taxonomy2genomes[taxonomy]:
-                preprocessed_genome = strand(genome, os.path.join(tmp_dir, "preprocess_strand"))
+                # Get the genome name from file path
+                _, genome_name, _, _ = get_file_info(genome)
 
-                # The result of the strand function can be a file path to the preprocessed genome
-                # or None in case something went wrong with the fasta records inside the input file
-                if preprocessed_genome:
-                    preprocessed_genomes.append(preprocessed_genome)
+                preprocessed_genomes.append(stranded_genome_paths[genome_name])
 
             preprocessed_taxonomy2genomes[taxonomy] = preprocessed_genomes
 
