@@ -13,7 +13,8 @@
 - New `fastcluster.py` utility in `script` to compute a average-linkage hierarchical clustering of a set of genomes based on their Mash distances;
 - Both the `index` and `update` modules now display a worning message in case the configuration file under `--resume` has been previously generated with a different version of MetaSBT;
 - Both the `index` and `update` modules now integrate `CheckV` and `EukCC` for assessing the quality of viruses and eukaryotes;
-- `CheckM` has been updated to `CheckM2`.
+- `CheckM` has been upgraded to `CheckM2`;
+- The `howdesbt bfdistance` command ofr computing the distances between bloom filters is now running in parallel.
 
 ### Fixes
 
