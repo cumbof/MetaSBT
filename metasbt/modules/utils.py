@@ -2,13 +2,14 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.3"
-__date__ = "Apr 11, 2024"
+__version__ = "0.1.4"
+__date__ = "Apr 15, 2024"
 
 import argparse as ap
 import errno
 import gzip
 import logging
+import multiprocessing as mp
 import os
 import re
 import shutil
@@ -205,52 +206,28 @@ def bfaction(
 
     dist = dict()
 
-    with tempfile.NamedTemporaryFile() as bflist, tempfile.NamedTemporaryFile() as bfaction_out:
-        # Dump the list of bloom filter file paths
-        with open(bflist.name, "wt") as bflist_file:
-            for filepath in bf_files:
-                bflist_file.write("{}\n".format(filepath))
+    if action == "bfdistance":
+        with mp.Pool(processes=nproc) as pool:
+            bfdistance_tmpdir = os.path.join(tmpdir, "distances")
 
-        with open(bfaction_out.name, "wt") as bfaction_out_file:
-            if action == "bfdistance":
-                run(
-                    [
-                        "howdesbt",
-                        "bfdistance",
-                        "--list={}".format(bflist.name),
-                        "--show:{}".format(mode),
-                    ],
-                    stdout=bfaction_out_file,
-                    stderr=howdesbt_log,
-                )
+            if not os.path.isdir(bfdistance_tmpdir):
+                os.makedirs(bfdistance_tmpdir, exist_ok=True)
 
-                # Retrieve the output of howdesbt bfdistance
-                with open(bfaction_out.name) as bfaction_out_file:
-                    for line in bfaction_out_file:
-                        line = line.strip()
-                        if line:
-                            # This is require to replace consecutive space instances with a single space
-                            # TODO: this may break in case the absolute paths to the bloom filters contain one or more spaces;
-                            #       need to find a better solution
-                            line_split = " ".join(line.split()).split(" ")
+            jobs = [pool.apply_async(bfdistance, args=(filepath, bf_files, mode, bfdistance_tmpdir,)) for filepath in bf_files]
 
-                            # Get genome names
-                            # Set check_exist=True is not required, but it makes sure that the absolute file path to the
-                            # bloom filters has not been altered because of the previous .split(" ")
-                            _, genome1, _, _ = get_file_info(line_split[0].split(":")[0], check_supported=False, check_exists=True)
-                            _, genome2, _, _ = get_file_info(line_split[1].split(":")[0], check_supported=False, check_exists=True)
+            for job in jobs:
+                source, target_dists = job.get()
 
-                            # Remove non informative fields
-                            if line_split[-1] == "({})".format("intersection" if mode == "intersect" else mode):
-                                line_split = " ".join(line_split[:-1]).strip().split(" ")
+                dist[source] = target_dists
 
-                            if genome1 not in dist:
-                                dist[genome1] = dict()
+    elif action == "bfoperate":
+        with tempfile.NamedTemporaryFile() as bflist, tempfile.NamedTemporaryFile() as bfaction_out:
+            # Dump the list of bloom filter file paths
+            with open(bflist.name, "wt") as bflist_file:
+                for filepath in bf_files:
+                    bflist_file.write("{}\n".format(filepath))
 
-                            # Get distance
-                            dist[genome1][genome2] = float(line_split[-1])
-
-            elif action == "bfoperate":
+            with open(bfaction_out.name, "wt") as bfaction_out_file:
                 run(
                     [
                         "howdesbt",
@@ -287,6 +264,98 @@ def bfaction(
     howdesbt_log.close()
 
     return dist
+
+
+def bfdistance(
+    source: os.path.abspath,
+    targets: List[os.path.abspath],
+    mode: str,
+    tmpdir: os.path.abspath,
+) -> Tuple[str, Dict[str, float]]:
+    """Wrapper around `howdesbt bfdistance` for computing the distance between
+    a bloom filter file and a set of bloom filters.
+
+    Parameters
+    ----------
+    source : os.path.abspath
+        Path to the input bloom filter file.
+    targets : list
+        List with paths to a series of bloom filter files.
+    mode : str
+        The `bfdistance` mode.
+    tmpdir : os.path.abspath
+        Path to the temporary foder with the output of `howdesbt bfdistance`.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the input source file does not exist.
+    Exception
+        If there are not target files in the input list or the output distance file already exists.
+
+    Returns
+    -------
+    tuple
+        A tuple with the source input file path and a dictionary with the distances to the target files.
+    """
+
+    # It is ok to check whether `source` exists
+    # Avoid checking whether all the files in `targets` exist
+    # There could be hundred thousands of files and it would dramatically slow down the whole process
+    if not os.path.isfile(source):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), source)
+
+    if not targets:
+        raise Exception("There should be at least one target file!")
+
+    if not os.path.isdir(tmpdir):
+        os.makedirs(tmpdir, exist_ok=True)
+
+    distance_filepath = os.path.join(tmpdir, "{}.txt".format(os.path.splitext(os.path.basename(source))[0]))
+
+    if os.path.isfile(distance_filepath):
+        raise Exception("The distance file already exists: {}".format(distance_filepath))
+
+    with open(distance_filepath, "a+") as distance_file:
+        for target in targets:
+            run(
+                [
+                    "howdesbt",
+                    "bfdistance",
+                    source,
+                    target,
+                    "--show:{}".format(mode),
+                ],
+                stdout=distance_file,
+                stderr=subprocess.DEVNULL,
+            )
+
+    dist = dict()
+
+    _, source_name, _, _ = get_file_info(source, check_supported=False, check_exists=False)
+
+    with open(distance_file) as distance_file:
+        for line in distance_file:
+            line = line.strip()
+            if line:
+                # This is require to replace consecutive space instances with a single space
+                # TODO: this may break in case the absolute paths to the bloom filters contain one or more spaces;
+                #       need to find a better solution
+                line_split = " ".join(line.split()).split(" ")
+
+                # Get genome names
+                # Set check_exist=True is not required, but it makes sure that the absolute file path to the
+                # bloom filters has not been altered because of the previous .split(" ")
+                _, target_name, _, _ = get_file_info(line_split[1].split(":")[0], check_supported=False, check_exists=True)
+
+                # Remove non informative fields
+                if line_split[-1] == "({})".format("intersection" if mode == "intersect" else mode):
+                    line_split = " ".join(line_split[:-1]).strip().split(" ")
+
+                # Get distance
+                dist[target_name] = float(line_split[-1])
+
+    return source_name, dist
 
 
 def build_sh(argv: List[str], module: str, outfolder: os.path.abspath) -> None:
