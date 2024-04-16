@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.3"
-__date__ = "Apr 11, 2024"
+__version__ = "0.1.4"
+__date__ = "Apr 16, 2024"
 
 import argparse as ap
 import errno
@@ -1257,7 +1257,7 @@ def update(
     if unassigned:
         printline("Defining new clusters for {} unassigned genomes".format(len(unassigned)))
 
-        assignments_filepath = os.path.join(db_dir, "assignments.txt")
+        assignments_filepath = os.path.join(db_dir, "assignments.tsv")
         unassigned_filepath = os.path.join(db_dir, "unassigned.txt")
 
         if os.path.isfile(assignments_filepath) and os.path.isfile(unassigned_filepath):
