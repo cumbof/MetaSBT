@@ -2,8 +2,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.4"
-__date__ = "Apr 15, 2024"
+__version__ = "0.1.5"
+__date__ = "Apr 17, 2024"
 
 import argparse as ap
 import errno
@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
 import numpy as np  # type: ignore
+import tqdm  # type: ignore
 from Bio import SeqIO  # type: ignore
 from Bio.Seq import Seq  # type: ignore
 from Bio.SeqRecord import SeqRecord  # type: ignore
@@ -633,7 +634,7 @@ def cluster(
     min_occurrences: int=2,
     nproc: int=1,
 ) -> Tuple[Dict[os.path.abspath, Dict[str, str]], List[os.path.abspath]]:
-    """Define new clusters with the unassigned MAGs.
+    """Define new clusters with unassigned genomes.
 
     Parameters
     ----------
@@ -699,9 +700,6 @@ def cluster(
         nproc=nproc
     )
 
-    # Retrieve the list of input genomes
-    genomes = [get_file_info(genome_path)[1] for genome_path in genomes_list]
-
     # Start counting new clusters
     clusters_counter = clusters_counter_manifest
 
@@ -711,7 +709,7 @@ def cluster(
 
     # Keep track of the already assigned genomes
     assigned_taxa: Dict[str, List[str]] = dict()
-    assigned_genomes: List[str] = list()
+    assigned_genomes: Set[str] = set()
 
     # Keep track of those genomes that MetaSBT is not able to assign
     unassigned: List[os.path.abspath] = list()
@@ -723,10 +721,13 @@ def cluster(
     )
 
     # Iterate over genomes
-    for i in range(len(genomes_list)):
-        if genomes[i] not in assigned_genomes:
+    # There could be hundred of thousands of genomes in `genomes_list`. It is better to show a progress bar
+    for i, genome_i_filepath in tqdm.tqdm(enumerate(genomes_list), total=len(genomes_list)):
+        _, genome_i_name, _, _ = get_file_info(genome_i_filepath, check_supported=False, check_exists=False)
+
+        if genome_i_name not in assigned_genomes:
             # Retrieve the genome profile
-            profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genomes[i]))
+            profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genome_i_name))
 
             # Check whether the profile exists
             if os.path.isfile(profile):
@@ -736,9 +737,11 @@ def cluster(
                 with open(profile) as file:
                     for line in file:
                         line = line.strip()
+
                         if line:
                             if not line.startswith("#"):
                                 line_split = line.split("\t")
+
                                 if line_split[1] in levels:
                                     # Key: taxonomic level
                                     # Value: kmers in common with the taxonomic level
@@ -772,7 +775,7 @@ def cluster(
 
                 if not assigned_taxonomy:
                     # Unable to assign a taxonomic label to the current genome
-                    unassigned.append(genomes_list[i])
+                    unassigned.append(genome_i_filepath)
 
                 else:
                     assignment = assigned_taxonomy.split("|")
@@ -793,24 +796,37 @@ def cluster(
                     if assigned_taxonomy not in assigned_taxa:
                         assigned_taxa[assigned_taxonomy] = list()
 
-                    assigned_taxa[assigned_taxonomy].append(genomes_list[i])
+                    assigned_taxa[assigned_taxonomy].append(genome_i_filepath)
 
                     # Mark current genome as assigned
-                    assigned_genomes.append(genomes[i])
+                    assigned_genomes.add(genome_i_name)
 
-                    # Check whether other input genomes look pretty close to the current genome by computing
-                    # the number of kmers in common between the current genome and all the other input genomes
-                    for j in range(i + 1, len(genomes_list)):
+                    with mp.Pool(processes=nproc) as pool:
                         try:
-                            # Kmers in common have been already computed
-                            # It returns a float by default
-                            common = int(bfdistance_intersect[genomes[i]][genomes[j]])
+                            # Check whether other input genomes look pretty close to the current genome by computing
+                            # the number of kmers in common between the current genome and all the other input genomes
+                            jobs = [
+                                pool.apply_async(
+                                    _assign_closest, 
+                                    args=(
+                                        genome_j_filepath, 
+                                        int(bfdistance_intersect[genome_i_name][get_file_info(genome_j_filepath)[1]]),
+                                        last_known_level_mink,
+                                    )
+                                ) for genome_j_filepath in genomes_list[i+1:]
+                            ]
 
-                            if common >= last_known_level_mink:
-                                # Set the second genome as assigned
-                                assigned_genomes.append(genomes[j])
-                                # Also assign these genomes to the same taxonomy assigned to the current genome
-                                assigned_taxa[assigned_taxonomy].append(genomes_list[j])
+                            for job in jobs:
+                                genome_j_filepath, is_close = job.get()
+
+                                if is_close:
+                                    _, genome_j_name, _, _ = get_file_info(genome_j_filepath, check_supported=False, check_exists=False)
+
+                                    # Set this genome as assigned
+                                    assigned_genomes.add(genome_j_name)
+
+                                    # Also assign this genome to the same cluster assigned
+                                    assigned_taxa[assigned_taxonomy].append(genome_j_filepath)
 
                         except KeyError:
                             # Only in case the current genome is not into the bfdistance_intersect dict
@@ -826,10 +842,13 @@ def cluster(
         with open(manifest_filepath, "w+") as manifest_file:
             for line in manifest_lines:
                 line = line.strip()
+
                 if line:
                     line_split = line.split(" ")
+
                     if line_split[0] == "--clusters-counter":
                         line_split[-1] = str(clusters_counter)
+
                     manifest_file.write("{}\n".format(" ".join(line_split)))
 
     # Mapping genome -> taxonomy, cluster
@@ -856,6 +875,40 @@ def cluster(
                 }
 
     return assignment, unassigned
+
+
+def _assign_closest(
+    genome_filepath: os.path.abspath,
+    common_kmers: int,
+    last_known_level_mink: int
+) -> Tuple[os.path.abspath, bool]:
+    """This is private! Just a simple function used in `cluster()` for comaring kmers in multiprocessing.
+    
+    This is used to compare the number of common kmers between two genomes and the minimum amount 
+    of kmers in common among all the genomes in the closest, most taxonomically defined cluster.
+
+    Parameters
+    ----------
+    genome_filepath : os.path.abspath
+        Path to the genome file path. It is not really used here, but it is required
+        to take track of the genome file while running this in multiprocessing.
+    common_kmers : int
+        Number of kmers in common between the two genomes.
+    last_known_level_mink : int
+        Number of kmers in common among all the genomes in the closest, most taxonomically defined cluster.
+
+    Returns
+    -------
+    tuple
+        A tuple with the input `genome_filepath` and a boolean. This is `True` if the input genome must be
+        assigned to the same cluster of the genomes with which it shares `common_kmers` kmers.
+        Otherwise, it is `False`.
+    """
+
+    if common_kmers >= last_known_level_mink:
+        return genome_filepath, True
+
+    return genome_filepath, False
 
 
 def dereplicate_genomes(
