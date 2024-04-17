@@ -14,7 +14,8 @@
 - Both the `index` and `update` modules now display a worning message in case the configuration file under `--resume` has been previously generated with a different version of MetaSBT;
 - Both the `index` and `update` modules now integrate `CheckV` and `EukCC` for assessing the quality of viruses and eukaryotes;
 - `CheckM` has been upgraded to `CheckM2`;
-- The `howdesbt bfdistance` command ofr computing the distances between bloom filters is now running in parallel.
+- The `cluster()` function in `utils` is now running in parallel;
+- The `howdesbt bfdistance` command for computing the distances between bloom filters is now running in parallel.
 
 ### Fixes
 
