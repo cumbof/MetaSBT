@@ -2,8 +2,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.5"
-__date__ = "Apr 17, 2024"
+__version__ = "0.1.6"
+__date__ = "Apr 18, 2024"
 
 import argparse as ap
 import errno
@@ -633,7 +633,7 @@ def cluster(
     cluster_prefix: str="MSBT",
     min_occurrences: int=2,
     nproc: int=1,
-) -> Tuple[Dict[os.path.abspath, Dict[str, str]], List[os.path.abspath]]:
+) -> Tuple[Dict[str, List[os.path.abspath]], List[os.path.abspath]]:
     """Define new clusters with unassigned genomes.
 
     Parameters
@@ -668,7 +668,7 @@ def cluster(
     Returns
     -------
     tuple
-        A tuple with the assignments as a dictionary mapping the genome file path with the taxonomic label
+        A tuple with the assignments as a dictionary mapping the taxonomic label with the genome file paths 
         in addition to the list of paths to the unassigned genomes.
     """
 
@@ -851,9 +851,6 @@ def cluster(
 
                     manifest_file.write("{}\n".format(" ".join(line_split)))
 
-    # Mapping genome -> taxonomy, cluster
-    assignment = dict()
-
     # Dumpt the new assignments to the output file
     with open(outpath, "w+") as out:
         # Add header line
@@ -868,13 +865,7 @@ def cluster(
 
                 out.write("{}\t{}\t{}\n".format(genome, taxonomy, cluster_id))
 
-                # Take track of mapping genome - taxonomy
-                assignment[genome_path] = {
-                    "taxonomy": taxonomy,
-                    "cluster": cluster_id
-                }
-
-    return assignment, unassigned
+    return assigned_taxa, unassigned
 
 
 def _assign_closest(

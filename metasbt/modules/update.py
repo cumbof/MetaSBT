@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.4"
-__date__ = "Apr 16, 2024"
+__version__ = "0.1.5"
+__date__ = "Apr 18, 2024"
 
 import argparse as ap
 import errno
@@ -1266,26 +1266,31 @@ def update(
 
             not_assigned = list()
 
+            unassigned_names = {get_file_info(filepath)[1]: filepath for filepath in unassigned}
+
+            unassigned_paths_processed = set()
+
             with open(assignments_filepath) as assignments_file:
                 for line in assignments_file:
                     line = line.strip()
+
                     if line:
                         if not line.startswith("#"):
                             line_split = line.split("\t")
-                            assignments[line_split[0]] = {
-                                "taxonomy": line_split[1],
-                                "cluster": line_split[2]
-                            }
 
-            # Fix assignments keys with genome file paths
-            for genome_filepath in unassigned:
-                _, genome_name, _, _ = get_file_info(genome_filepath)
+                            if line_split[1] not in assignments:
+                                assignments[line_split[1]] = list()
 
-                if genome_name in assignments:
-                    assignments[genome_filepath] = assignments.pop(genome_name)
+                            # The assignments file table contains the genome names
+                            # It must be fixed to retrieve the genome file path
+                            genome_name = line_split[0]
 
-                else:
-                    not_assigned.append(genome_filepath)
+                            if genome_name in unassigned_names:
+                                assignments[line_split[1]].append(unassigned_names[genome_name])
+
+                                unassigned_paths_processed.add(unassigned_names[genome_name])
+
+            not_assigned = list(set(unassigned).difference(unassigned_paths_processed))
 
         else:
             if os.path.isfile(assignments_filepath):
@@ -1320,76 +1325,83 @@ def update(
                     for genome_path in not_assigned:
                         unassigned_file.write("{}\n".format(get_file_info(genome_path)[1]))
 
-        # Iterate over the input genomes
-        for genome_path in assignments:
-            _, genome_name, genome_ext, compressed = get_file_info(genome_path)
-
+        # Iterate over the taxonomic labels in assignments
+        for tax_label in assignments:
             # Create the new cluster folder in the database
-            tax_dir = os.path.join(db_dir, assignments[genome_path]["taxonomy"].replace("|", os.sep))
+            tax_dir = os.path.join(db_dir, tax_label.replace("|", os.sep))
+
             os.makedirs(os.path.join(tax_dir, "genomes"), exist_ok=True)
 
             # Also create the strains folder
             os.makedirs(os.path.join(tax_dir, in_strains, "genomes"), exist_ok=True)
-
-            # Copy the input genome into the genomes folder of the new cluster
-            if not os.path.isfile(os.path.join(tax_dir, in_strains, "genomes", os.path.basename(genome_path))):
-                shutil.copy(genome_path, os.path.join(tax_dir, in_strains, "genomes"))
-
-            # In case the input genome is not gzip compressed
-            if not compressed:
-                genome_filepath = os.path.join(tax_dir, in_strains, "genomes", "{}{}".format(genome_name, genome_ext))
-                if not os.path.isfile("{}{}".format(genome_filepath, compressed)):
-                    run(["gzip", genome_filepath], silence=True)
 
             mags_entries = list()
 
             if os.path.isfile(os.path.join(tax_dir, "mags.txt")):
                 mags_entries = [line.strip() for line in open(os.path.join(tax_dir, "mags.txt")).readlines() if line.strip()]
 
-            if not genome_name in mags_entries:
-                # Also update the mags.txt file
-                with open(os.path.join(tax_dir, "mags.txt"), "a+") as mags_file:
-                    mags_file.write("{}\n".format(genome_name))
+            for genome_path in assignments[tax_label]:
+                _, genome_name, genome_ext, compressed = get_file_info(genome_path)
 
-            # Also report the quality stats of the genomes in the new clusters
-            if genome_name in quality_dict:
-                quality_filepath = os.path.join(tax_dir, "quality.tsv")
-                add_to_quality_table = True
+                # Copy the genome into the genomes folder of the new cluster
+                if not os.path.isfile(os.path.join(tax_dir, in_strains, "genomes", os.path.basename(genome_path))):
+                    shutil.copy(genome_path, os.path.join(tax_dir, in_strains, "genomes"))
 
-                if os.path.isfile(quality_filepath):
-                    genomes_in_quality_file = list()
+                # In case the genome is not gzip compressed
+                if not compressed:
+                    genome_filepath = os.path.join(tax_dir, in_strains, "genomes", "{}{}".format(genome_name, genome_ext))
 
-                    with open(quality_filepath) as table:
-                        header = table.readline().strip()
-                        for line in table:
-                            line = line.strip()
-                            if line:
-                                line_split = line.split("\t")
-                                genomes_in_quality_file.append(line_split[header.index("Name")])
+                    if not os.path.isfile("{}{}".format(genome_filepath, compressed)):
+                        run(["gzip", genome_filepath], silence=True)
 
-                    if genome_name in genomes_in_quality_file:
-                        add_to_quality_table = False
+                if genome_name not in mags_entries:
+                    # Also update the mags.txt file
+                    with open(os.path.join(tax_dir, "mags.txt"), "a+") as mags_file:
+                        mags_file.write("{}\n".format(genome_name))
 
-                if add_to_quality_table:
-                    not_exists = not os.path.isfile(quality_filepath)
+                # Also report the quality stats of the genomes in the new clusters
+                if genome_name in quality_dict:
+                    quality_filepath = os.path.join(tax_dir, "quality.tsv")
+                    add_to_quality_table = True
 
-                    with open(quality_filepath, "a+") as quality_file:
-                        header = sorted(list(quality_dict[genome_name].keys()))
+                    if os.path.isfile(quality_filepath):
+                        genomes_in_quality_file = list()
 
-                        if not_exists:                                
-                            quality_file.write("{}\n".format("\t".join(header)))
+                        with open(quality_filepath) as table:
+                            header = table.readline().strip()
 
-                        quality_file.write("{}\n".format("\t".join([quality_dict[genome_name][h] for h in header])))
+                            for line in table:
+                                line = line.strip()
+
+                                if line:
+                                    line_split = line.split("\t")
+                                    genomes_in_quality_file.append(line_split[header.index("Name")])
+
+                        if genome_name in genomes_in_quality_file:
+                            add_to_quality_table = False
+
+                    if add_to_quality_table:
+                        not_exists = not os.path.isfile(quality_filepath)
+
+                        with open(quality_filepath, "a+") as quality_file:
+                            header = sorted(list(quality_dict[genome_name].keys()))
+
+                            if not_exists:                                
+                                quality_file.write("{}\n".format("\t".join(header)))
+
+                            quality_file.write("{}\n".format("\t".join([quality_dict[genome_name][h] for h in header])))
 
             # Also initialize the metadata table with the cluster ID
             metadata_filepath = os.path.join(tax_dir, "metadata.tsv")
 
             if not os.path.isfile(metadata_filepath):
+                cluster_id = tax_label.split("|")[-1][3:]
+
                 with open(metadata_filepath, "w+") as metadata_file:
-                    metadata_file.write("# Cluster ID: {}".format(assignments[genome_path]["cluster"]))
+                    metadata_file.write("# Cluster ID: {}".format(cluster_id))
 
             # Add the full taxonomy to the list of taxonomic labels that must be rebuilt
-            rebuild.append(assignments[genome_path]["taxonomy"])
+            rebuild.append(tax_label)
 
     # Check whether there is at least one lineage that must be rebuilt
     rebuild = list(set(rebuild))
@@ -1407,8 +1419,10 @@ def update(
         # Process all the species first, then all the genera, and so on up to the kingdom level
         for i in range(6, -1, -1):
             taxalist = set()
+
             for label in rebuild:
                 levels = label.split("|")
+
                 # Temporarily skip partial taxonomic labels if the number of levels is lower than i
                 # Waiting for the right i
                 if len(levels) < i + 1:
