@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.0"
-__date__ = "Apr 9, 2024"
+__version__ = "0.1.1"
+__date__ = "Apr 22, 2024"
 
 import argparse as ap
 import errno
@@ -35,7 +35,10 @@ def read_params():
         "--filepath",
         type=os.path.abspath,
         required=True,
-        help="Path to the input file with the list of paths to the input genomes (can be Gzip compressed)",
+        help=(
+            "Path to a two-columns TSV file with the list of input genome file paths (can be Gzip compressed) "
+            "and their full taxonomic labels"
+        ),
     )
     p.add_argument(
         "--kmer-size",
@@ -57,12 +60,6 @@ def read_params():
         default=10000,
         dest="sketch_size",
         help="Sketch size for building MASH sketches",
-    )
-    p.add_argument(
-        "--taxa",
-        type=os.path.abspath,
-        required=True,
-        help="Path to a two-columns TSV file with the list of input genome file paths and their full taxonomic labels",
     )
     p.add_argument(
         "--threshold",
@@ -413,37 +410,26 @@ def main() -> None:
     # Load the list of input file paths
     print("Loading the list of input files")
 
-    input_dict = dict()
-
-    with open(args.filepath) as in_file:
-        for line in in_file:
-            line = line.strip()
-
-            if line:
-                if not line.startswith("#"):
-                    filename = os.path.splitext(os.path.basename(line))[0]
-
-                    if line.endswith(".gz"):
-                        filename = os.path.splitext(filename)[0]
-
-                    # Key: filename
-                    # Valule: filepath
-                    input_dict[filename] = line
-
-    input_filepaths = list(input_dict.values())
-
-    if not os.path.isfile(args.taxa):
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.taxa)
+    if not os.path.isfile(args.filepath):
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.filepath)
 
     # Load the list of input genome file paths and their full taxonomic labels
     taxa = {
         line.strip().split("\t")[0]: line.strip().split("\t")[1]
-            for line in open(args.taxa).readlines() if line.strip() and not line.strip().startswith("#")
+            for line in open(args.filepath).readlines() if line.strip() and not line.strip().startswith("#")
     }
 
-    # Check for inconsistencies between genomes in --filepath and --taxa
-    if not (len(set(input_filepaths).intersection(set(taxa.keys()))) == len(input_filepaths) == len(taxa.keys())):
-        raise Exception("The number of input genomes in --filepath differs from the number of genomes in --taxa")
+    input_dict = dict()
+
+    for filepath in taxa:
+        filename = os.path.splitext(os.path.basename(filepath))[0]
+
+        if filepath.lower().endswith(".gz"):
+            filename = os.path.splitext(filename)[0]
+
+        input_dict[filename] = filepath
+
+    input_filepaths = list(input_dict.values())
 
     # Unzip input files
     print("Unzipping file if Gzip compressed")
