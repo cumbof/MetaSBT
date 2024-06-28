@@ -4,7 +4,7 @@
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
 __version__ = "0.1.1"
-__date__ = "Dec 1, 2023"
+__date__ = "Jun 26, 2024"
 
 import argparse as ap
 import datetime
@@ -667,7 +667,7 @@ def main() -> None:
             for sp in species:
                 if len(species[sp]) > args.max_genomes_per_species:
                     # Always use the same seed for reproducibility
-                    rng = numpy.random.default_rng(0)
+                    rng = np.random.default_rng(0)
 
                     sp_genomes = species[sp]
 
