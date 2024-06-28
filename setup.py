@@ -1,3 +1,5 @@
+import errno
+import os
 import platform
 import sys
 
@@ -14,6 +16,11 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] 
             sys.version_info[0], sys.version_info[1], sys.version_info[2]
         )
     )
+
+REQUIREMENTS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "metasbt", "requirements.txt")
+
+if not os.path.isfile(REQUIREMENTS):
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), REQUIREMENTS)
 
 setuptools.setup(
     author="Fabio Cumbo",
@@ -34,16 +41,7 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:main"]},
     install_requires=[
-        "biopython>=1.83",
-        "fastcluster>=1.2.6",
-        "kitsune>=1.3.3",
-        "minimizers>=0.1.2",
-        "ncbitax2lin>=2.3.2",
-        "numpy>=1.22.3",
-        "packaging>=23.2",
-        "requests>=2.28.0",
-        "tabulate>=0.9.0",
-        "tqdm>=4.38.0",
+        requirement.strip() for requirement in open(REQUIREMENTS).readlines() if requirement.strip()
     ],
     keywords=[
         "bioinformatics",
@@ -76,11 +74,14 @@ setuptools.setup(
     python_requires=">=3.8",
     scripts=[
         "scripts/bf_sketch.py",
-        "scripts/expand_fasta.py",
+        "scripts/cluster.py",
         "scripts/esearch_txid.sh",
+        "scripts/expand_fasta.py",
         "scripts/get_ncbi_genomes.py",
         "scripts/howdesbt_index.sh",
+        "scripts/minimizers.sh",
         "scripts/uniform_inputs.sh",
+        "scripts/uniform_strands.py",
     ],
     url="http://github.com/cumbof/MetaSBT",
     version=__version__,
