@@ -79,6 +79,7 @@ setuptools.setup(
         "scripts/expand_fasta.py",
         "scripts/get_ncbi_genomes.py",
         "scripts/howdesbt_index.sh",
+        "scripts/kraken.py",
         "scripts/minimizers.sh",
         "scripts/uniform_inputs.sh",
         "scripts/uniform_strands.py",
