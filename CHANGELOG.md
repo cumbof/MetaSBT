@@ -1,5 +1,18 @@
 # Changelog
 
+## Version 0.1.4
+
+[@cumbof/metasbt@0.1.4](https://github.com/cumbof/MetaSBT/releases/tag/0.1.4)
+
+### New features
+
+- New `kraken.py` utility in `scripts` to create custom _kraken2_ databases with MetaSBT taxonomic labels;
+- The `tar` and `install` commands have been replaced with the `pack.sh` and `unpack.sh` utilities in `scripts`.
+
+### Fixes
+
+- Clusters' boundaries are now defined as the minimum and maximum Average Nucleotide Identity (ANI) between all the genomes under a specific cluster.
+
 ## Version 0.1.3
 
 [@cumbof/metasbt@0.1.3](https://github.com/cumbof/MetaSBT/releases/tag/0.1.3)
