@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.5"
-__date__ = "Apr 18, 2024"
+__version__ = "0.1.9"
+__date__ = "Oct 10, 2024"
 
 import argparse as ap
 import errno
@@ -28,6 +28,7 @@ import tqdm  # type: ignore
 try:
     # Load utility functions
     from utils import (  # type: ignore  # isort: skip
+        ani_distance,
         bfaction,
         build_sh,
         cluster,
@@ -249,10 +250,10 @@ def read_params(argv: List[str]):
     )
     dereplication_group.add_argument(
         "--similarity",
-        type=number(float, minv=0.0, maxv=100.0),
-        default=100.0,
+        type=number(float, minv=0.0, maxv=1.0),
+        default=0.99,
         help=(
-            "Dereplicate genomes if they have a percentage of common kmers greater than or equals to the specified one. "
+            "Dereplicate genomes based on the ANI similarity. "
             "This is used exclusively in conjunction with the --dereplicate argument"
         ),
     )
@@ -266,11 +267,14 @@ def profile_and_assign(
     tmp_dir: os.path.abspath,
     db_dir: os.path.abspath,
     tmp_genomes_dir: os.path.abspath,
+    kmer_len: int,
+    filter_size: int,
+    min_occurrences: int,
     boundaries: Dict[str, Dict[str, Union[int, float]]],
     boundary_uncertainty: float=0.0,
     taxonomies: Optional[dict]=None,
     dereplicate: bool=False,
-    similarity: float=100.0,
+    similarity: float=0.99,
     quality_dict: Optional[Dict[str, Dict[str, str]]]=None,
     use_representatives: bool=False,
     logger: Optional[Logger]=None,
@@ -282,14 +286,20 @@ def profile_and_assign(
     ----------
     genome_path : os.path.abspath
         Path to the input genome file.
-    input_type : {"MAGs", "references"}
-        The nature of the input genomes.
+    input_type : str
+        The nature of the input genomes (i.e., "MAGs" or "references").
     tmp_dir : os.path.abspath
         Path to the temporary folder.
     db_dir : os.path.abspath
         Path to the database root folder.
     tmp_genomes_dir : os.path.abspath
         Path to the temporary folder for uncompressing input genomes.
+    kmer_len : int
+        Length of the kmers.
+    filter_size : int
+        Size of the bloom filters.
+    min_occurrences : int
+        Minimum number of kmer occurrences
     boundaries : dict
         Content of the boundaries table as produced by the boundaries module.
     boundary_uncertainty : float, default 0.0
@@ -298,7 +308,7 @@ def profile_and_assign(
         Dictionary with mapping between input genome names and their taxonomic labels (for reference genomes only).
     dereplicate : bool, default False
         Enable dereplication of input genome against genomes in the closest cluster.
-    similarity : float, default 100.0
+    similarity : float, default 0.99
         Exclude input genome if its similarity with the closest genome in the database exceed this threshold.
     quality_dict : dict, optional
         Dictionary with quality stats.
@@ -370,11 +380,19 @@ def profile_and_assign(
             "genome",
             "--tree",
             os.path.join(db_dir, "index", "index.detbrief.sbt"),
+            "--kmer-len",
+            str(kmer_len),
+            "--filter-size",
+            str(filter_size),
+            "--min-occurrences",
+            str(min_occurrences),
             "--expand",
             "--output-dir",
             os.path.join(tmp_dir, "profiling"),
             "--output-prefix",
             genome_name,
+            "--tmp-dir",
+            os.path.join(tmp_dir, "filters"),
         ]
 
         run(profiler, silence=True)
@@ -383,36 +401,36 @@ def profile_and_assign(
 
     # Check whether the profile exists
     if os.path.isfile(profile_path):
-        # Load the profile
-        profile_data: Dict[str, Dict[str, Any]] = dict()
+        # Read the profile and load the closest genome
+        closest_genome: Dict[str, Any] = dict()
 
         with open(profile_path) as profile:
             for line in profile:
                 line = line.strip()
+
                 if line:
                     if not line.startswith("#"):
                         line_split = line.split("\t")
-                        profile_data[line_split[1]] = {
-                            "taxonomy": line_split[2],
-                            "common_kmers": int(line_split[3].split("/")[0]),
-                            "score": float(line_split[4]),
-                        }
 
-        closest_genome: Dict[str, Any] = profile_data["genome"]
+                        if line_split[1] == "genome":
+                            closest_genome = {
+                                "taxonomy": line_split[2],
+                                "score": float(line_split[4])
+                            }
 
-        # Get the closest species
-        closest_taxa = profile_data["species"]["taxonomy"]
-        closest_common_kmers = profile_data["species"]["common_kmers"]
-        closest_score = profile_data["species"]["score"]
-
-        printline("Closest lineage: {} (score {})".format(closest_taxa, closest_score))
-        printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_genome["score"]))
+        # Use the species assigned to the closest genome
+        # Exclude the t__ level at the end of the taxonomic label
+        closest_taxa = "|".join(closest_genome["taxonomy"].split("|")[:-1])
+        closest_score = closest_genome["score"]
 
         # Define the folder path of the closest taxonomy under the database
         closest_taxadir = os.path.join(db_dir, closest_taxa.replace("|", os.sep))
 
+        printline("Closest genome: {} (score {})".format(closest_genome["taxonomy"], closest_score))
+
         # Load the set of reference genomes that belongs to the closest species
         references_filepath = os.path.join(closest_taxadir, "references.txt")
+
         references = list()
 
         if os.path.isfile(references_filepath):
@@ -420,6 +438,7 @@ def profile_and_assign(
 
         # Also load the set of MAGs that belongs to the closest species
         mags_filepath = os.path.join(closest_taxadir, "mags.txt")
+
         mags = list()
 
         if os.path.isfile(mags_filepath):
@@ -431,44 +450,53 @@ def profile_and_assign(
         # Check whether the quality table must be updated
         add_quality_info = False
 
-        if dereplicate and closest_genome["score"] * 100.0 >= similarity:
-            # Discard the genome if it is too similar with the closest genome according to the similarity score
+        if dereplicate and closest_score >= similarity:
+            # Discard the genome if it is too similar with the closest genome according to the ANI similarity score
             # Also, do not discard the input genome if it is a reference genome and the closest genome in the database is
             # a MAG with a high number of overlapped kmers according to the similarity score
             printline("Dereplicating genome")
 
             if input_type == "MAGs":
                 # In case the input genome is a MAG
-                if closest_genome["taxonomy"] in references:
-                    # In case the closest genome is a reference genome
-                    skip_genome = True
-                    # Print the reason why the current genome is excluded
-                    printline("Discarding genome\nInput genome is a MAG and the closest genome is a reference")
+                # It does not matter whether the closest genome is a reference or a MAG here
+                skip_genome = True
 
-                elif closest_genome["taxonomy"] in mags:
-                    # In case the closest genome is a MAG
-                    skip_genome = True
-                    # Print the reason why the current genome is excluded
-                    printline("Discarding genome\nInput genome and the closest genome are both MAGs")
-
-            elif input_type == "references":
-                # In case the input genome is a reference genome
-                if closest_genome["taxonomy"] in references:
-                    # In case the closest genome is a reference genome
-                    skip_genome = True
-                    # Print the reason why the current genome is excluded
-                    printline("Discarding genome\nInput genome and the closest genome are both reference genomes")
+            elif input_type == "references" and closest_genome["taxonomy"] in references:
+                # In case the input genome is a reference genome and the closest genome is another reference genome
+                skip_genome = True
 
         # In case the input genome survived the dereplication with the closest genome in the database
         if not skip_genome:
-            # Retrieve the minimum number of common kmers for the closest taxa
-            min_bound, _ = get_level_boundaries(boundaries, closest_taxa)
+            # Retrieve the closest species boundaries and centroid
+            min_bound, _, closest_species_centroid = get_level_boundaries(boundaries, closest_taxa)
+
             # Add uncertainty to the boundaries
-            min_bound -= int(min_bound * boundary_uncertainty / 100.0)
+            min_bound -= min_bound * boundary_uncertainty / 100.0
+
+            # `closest_species_centroid` could be `None` in case it does not contain enough genomes to compute its boundaries
+            # In that case we can still use the closest genome
+            if closest_species_centroid is not None and closest_genome["taxonomy"].split("|")[-1][3:] != closest_species_centroid:
+                # Compute the distance between the input genome and the centroid
+                # `closest_taxa` is always defined at the species level here
+                _, distances = ani_distance(
+                    os.path.join(tmp_dir, "filters", "{}.bf".format(genome_name)),
+                    kmer_len,
+                    [os.path.join(db_dir, closest_taxa.replace("|", os.sep), "filters", "{}.bf".format(closest_species_centroid))],
+                    os.path.join(tmp_dir, "filters"),
+                )
+
+                # `distances` contains a single value here
+                # Convert the distance back to a similarity measure
+                # Replace `closest_score` with the similarity between the input genome and the centroid of the closest species
+                closest_score = abs(distances[0] - 1)
+
+            # Is it close enough to be assigned to the closest cluster?
+            close_enough = closest_score >= min_bound
 
             if input_type == "MAGs":
                 # In case the input genome is a MAG
-                if closest_common_kmers >= min_bound:
+                # Cehck whether the input genome falls within the closest cluster boundary
+                if close_enough:
                     if not os.path.isfile(os.path.join(closest_taxadir, in_strains, "genomes", os.path.basename(genome_path))):
                         # Assign the current genome to the closest lineage
                         shutil.copy(genome_path, os.path.join(closest_taxadir, in_strains, "genomes"))
@@ -516,9 +544,10 @@ def profile_and_assign(
                 # Retrieve the taxonomic label from the input mapping file
                 taxalabel = taxonomies[genome_name]
 
-                if closest_common_kmers >= min_bound:
+                if close_enough:
                     # Check whether the closest taxonomy contains any reference genome
                     how_many_references = 0
+
                     if os.path.isfile(references_filepath):
                         how_many_references = sum([1 for ref in open(references_filepath).readlines() if ref.strip()])
 
@@ -529,6 +558,7 @@ def profile_and_assign(
                         # Assign a new taxonomy according to a majority rule applied on the reference genomes taxa
                         if closest_taxa not in to_known_taxa:
                             to_known_taxa[closest_taxa] = list()
+
                         to_known_taxa[closest_taxa].append(genome_path)
 
                         printline("{} has been characterised as {}".format(genome_name, closest_taxa))
@@ -641,10 +671,6 @@ def profile_and_assign(
 
                         quality_file.write("{}\n".format("\t".join([quality_dict[genome_name][h] for h in header])))
 
-    # Remove the uncompressed version of the input genome in the temporary folder
-    if os.path.isfile(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0])):
-        os.unlink(os.path.join(tmp_genomes_dir, os.path.splitext(os.path.basename(genome_path))[0]))
-
     return to_known_taxa, rebuild, unassigned
 
 
@@ -755,7 +781,7 @@ def build_cluster(
             # Compute the theta distance between genomes
             bfdistance_theta = bfaction(
                 bf_filepaths,
-                os.path.join(tmp_dir, "howdesbt_strains"),
+                os.path.join(tmp_dir, "filters"),
                 kmer_len,
                 min_occurrences=min_kmer_occurrences,
                 filter_size=strains_manifest["filter_size"],
@@ -850,7 +876,7 @@ def update(
     completeness: float=0.0,
     contamination: float=100.0,
     dereplicate: bool=False,
-    similarity: float=100.0,
+    similarity: float=0.99,
     cluster_prefix: str="MSBT",
     logger: Optional[Logger]=None,
     verbose: bool=False,
@@ -884,7 +910,7 @@ def update(
         Threshold on the contamination.
     dereplicate : bool, default False
         Enable the dereplication step to get rid of replicated genomes.
-    similarity : float, default 100.0
+    similarity : float, default 0.99
         Get rid of genomes according to this threshold in case the dereplication step is enabled.
     cluster_prefix : str, default "MSBT"
         Prefix of clusters numerical identifiers.
@@ -1089,7 +1115,7 @@ def update(
         before_dereplication = len(genomes_paths)
 
         # Search for the filtered file with the list of excluded genomes
-        filtered_filepath = os.path.join(tmp_dir, "howdesbt", "filtered.txt")
+        filtered_filepath = os.path.join(tmp_dir, "filters", "filtered.txt")
 
         if os.path.isfile(filtered_filepath):
             filtered_genomes_paths = [line.strip() for line in open(filtered_filepath).readlines() if line.strip()]
@@ -1103,6 +1129,7 @@ def update(
                 "",
                 tmp_dir,
                 kmer_len,
+                min_occurrences=min_kmer_occurrences,
                 filter_size=filter_size,
                 nproc=nproc,
                 similarity=similarity,
@@ -1133,6 +1160,9 @@ def update(
         tmp_dir=tmp_dir,
         db_dir=db_dir,
         tmp_genomes_dir=tmp_genomes_dir,
+        kmer_len=kmer_len,
+        filter_size=filter_size,
+        min_occurrences=min_kmer_occurrences,
         boundaries=boundaries,
         boundary_uncertainty=boundary_uncertainty,
         taxonomies=taxonomies,
@@ -1301,7 +1331,7 @@ def update(
 
             # Define a temporary folder for building bloom filters
             # This already exists in case the dereplication step has been executed
-            howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt_unassigned")
+            howdesbt_tmp_dir = os.path.join(tmp_dir, "filters")
 
             # Cluster genomes according to the boundaries defined by the boundaries module
             # Define a cluster for each taxomomic level
@@ -1559,9 +1589,11 @@ def main() -> None:
             logger=logger,
             verbose=args.verbose,
         )
+
         shutil.rmtree(args.tmp_dir, ignore_errors=True)
 
     t1 = time.time()
+
     println(
         "Total elapsed time {}s".format(int(t1 - t0)),
         logger=logger,

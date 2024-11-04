@@ -2,13 +2,14 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.6"
-__date__ = "Apr 18, 2024"
+__version__ = "0.1.7"
+__date__ = "Sep 24, 2024"
 
 import argparse as ap
 import errno
 import gzip
 import logging
+import math
 import multiprocessing as mp
 import os
 import re
@@ -21,9 +22,11 @@ from collections.abc import Callable
 from logging import Logger
 from logging.config import dictConfig
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, TextIO, Tuple, Union
 
+import fastcluster  # type: ignore
 import numpy as np  # type: ignore
+import scipy.cluster.hierarchy as hier  # type: ignore
 import tqdm  # type: ignore
 from Bio import SeqIO  # type: ignore
 from Bio.Seq import Seq  # type: ignore
@@ -127,9 +130,7 @@ def bfaction(
     bfoperate_modes = ["and", "or", "xor", "eq", "not"]
     bfdistance_modes = ["hamming", "intersect", "union", "theta"]
 
-    if (action == "bfoperate" and mode not in bfoperate_modes) or (
-        action == "bfdistance" and mode not in bfdistance_modes
-    ):
+    if (action == "bfoperate" and mode not in bfoperate_modes) or (action == "bfdistance" and mode not in bfdistance_modes):
         raise ValueError('Unsupported mode "{}" for action "{}"!'.format(mode, action))
 
     # Check whether the input genomes exist
@@ -172,8 +173,14 @@ def bfaction(
 
         if not os.path.exists(genome_file):
             if not compression:
-                # Make a symbolic link in case of an uncompressed file
-                os.symlink(genome_path, genome_file)
+                try:
+                    # Make a symbolic link in case of an uncompressed file
+                    os.symlink(genome_path, genome_file)
+
+                except FileExistsError:
+                    # This may occur in a multiprocessing scenario, where different processes
+                    # call this function on the same `genome_path`
+                    pass
 
             else:
                 # Uncompress the genome file
@@ -208,18 +215,27 @@ def bfaction(
     dist = dict()
 
     if action == "bfdistance":
-        with mp.Pool(processes=nproc) as pool:
-            bfdistance_tmpdir = os.path.join(tmpdir, "distances")
+        bfdistance_tmpdir = os.path.join(tmpdir, "distances")
 
-            if not os.path.isdir(bfdistance_tmpdir):
-                os.makedirs(bfdistance_tmpdir, exist_ok=True)
+        if not os.path.isdir(bfdistance_tmpdir):
+            os.makedirs(bfdistance_tmpdir, exist_ok=True)
 
-            jobs = [pool.apply_async(bfdistance, args=(filepath, bf_files, mode, bfdistance_tmpdir,)) for filepath in bf_files]
+        processes = nproc if nproc <= len(bf_files) else len(bf_files)
 
-            for job in jobs:
-                source, target_dists = job.get()
+        if processes == 1:
+            for filepath in bf_files:
+                source, target_dists = bfdistance(filepath, bf_files, mode, bfdistance_tmpdir)
 
                 dist[source] = target_dists
+
+        else:
+            with mp.Pool(processes=processes) as pool:
+                jobs = [pool.apply_async(bfdistance, args=(filepath, bf_files, mode, bfdistance_tmpdir,)) for filepath in bf_files]
+
+                for job in jobs:
+                    source, target_dists = job.get()
+
+                    dist[source] = target_dists
 
     elif action == "bfoperate":
         with tempfile.NamedTemporaryFile() as bflist, tempfile.NamedTemporaryFile() as bfaction_out:
@@ -252,6 +268,7 @@ def bfaction(
                             line_split = line.split(" ")
 
                             key = "result"
+
                             if line_split[0] != key:
                                 # Get genome name
                                 # Set check_exist=True is not required, but it makes sure that the absolute file path to the
@@ -300,9 +317,6 @@ def bfdistance(
         A tuple with the source input file path and a dictionary with the distances to the target files.
     """
 
-    # It is ok to check whether `source` exists
-    # Avoid checking whether all the files in `targets` exist
-    # There could be hundred thousands of files and it would dramatically slow down the whole process
     if not os.path.isfile(source):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), source)
 
@@ -312,10 +326,7 @@ def bfdistance(
     if not os.path.isdir(tmpdir):
         os.makedirs(tmpdir, exist_ok=True)
 
-    distance_filepath = os.path.join(tmpdir, "{}.txt".format(os.path.splitext(os.path.basename(source))[0]))
-
-    if os.path.isfile(distance_filepath):
-        raise Exception("The distance file already exists: {}".format(distance_filepath))
+    distance_filepath = os.path.join(tmpdir, "{}__{}.txt".format(os.path.splitext(os.path.basename(source))[0], mode))
 
     with open(distance_filepath, "a+") as distance_file:
         for target in targets:
@@ -333,9 +344,7 @@ def bfdistance(
 
     dist = dict()
 
-    _, source_name, _, _ = get_file_info(source, check_supported=False, check_exists=False)
-
-    with open(distance_file) as distance_file:
+    with open(distance_filepath) as distance_file:
         for line in distance_file:
             line = line.strip()
             if line:
@@ -355,6 +364,8 @@ def bfdistance(
 
                 # Get distance
                 dist[target_name] = float(line_split[-1])
+
+    _, source_name, _, _ = get_file_info(source, check_supported=False, check_exists=False)
 
     return source_name, dist
 
@@ -623,6 +634,59 @@ def checkv(
     return output_dict
 
 
+def ani_distance(
+    bf_filepath: os.path.abspath,
+    kmer_size: int,
+    target_bf_filepaths: List[os.path.abspath],
+    tmp_dir: os.path.abspath
+) -> Tuple[os.path.abspath, List[float]]:
+    """Compute the ANI distances between one sketch and a list of sketches.
+
+    Parameters
+    ----------
+    bf_filepath : os.path.abspath
+        Path to the source BF.
+    kmer_size : int
+        The length of the k-mers.
+    target_bf_filepaths : list
+        List with paths to the target BFs.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
+
+    Returns
+    -------
+    tuple
+        A tuple with the path to the source BF file and a list with ANI distances.
+    """
+
+    distances = list()
+
+    if target_bf_filepaths:
+        # Compute the number of kmer in common between the sketches
+        _, intersects = bfdistance(bf_filepath, target_bf_filepaths, "intersect", tmp_dir)
+
+        # Also compute the number of total kmers between sketches
+        _, unions = bfdistance(bf_filepath, target_bf_filepaths, "union", tmp_dir)
+
+        for bf_filepath_2 in target_bf_filepaths:
+            bf_filepath_2_name = os.path.splitext(os.path.basename(bf_filepath_2))[0]
+
+            # Compute the Jaccard similarity
+            jaccard_similarity = round(intersects[bf_filepath_2_name]/unions[bf_filepath_2_name], 5)
+
+            if jaccard_similarity == 0.0:
+                # This is to avoid ValueError: math domain error
+                jaccard_similarity = sys.float_info.min
+
+            # https://doi.org/10.1093/bioinformatics/btae452 Formula #8
+            # Same distance measure implemented in MASH
+            ani_distance = 1 - (1 + (1/kmer_size) * math.log((2*jaccard_similarity) / (1+jaccard_similarity)))
+
+            distances.append(ani_distance)
+
+    return bf_filepath, distances
+
+
 def cluster(
     genomes_list: List[os.path.abspath],
     boundaries: Dict[str, Dict[str, Union[int, float]]],
@@ -684,156 +748,241 @@ def cluster(
     if not os.path.isdir(profiles_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), profiles_dir)
 
-    # Retrieve the kmer length, filter size, and clusters counter from the manifest file
+    # Load the database manifest file
     manifest = load_manifest(manifest_filepath)
 
+    # Retrieve the kmer length
     kmer_len = manifest["kmer_len"]
-    clusters_counter_manifest = manifest["clusters_counter"]
 
-    # Estimate the proper bloom filter size for the set of unassigned genomes
-    filter_size = estimate_bf_size(
-        genomes_list,
-        kmer_len=kmer_len,
-        min_occurrences=min_occurrences,
-        prefix="genomes",
-        tmp_dir=tmpdir,
-        nproc=nproc
-    )
+    # Also, retrieve the clusters counter
+    clusters_counter = manifest["clusters_counter"]
 
-    # Start counting new clusters
-    clusters_counter = clusters_counter_manifest
+    # Build up a condensed ANI distance matrix
+    condensed_distance_matrix = list()
 
-    # Define the list of taxonomic levels for sorting profiles
+    dists = dict()
+
+    # Define the path to the bloom filters
+    bfs = list()
+
+    for filepath in genomes_list:
+        genome_name = get_file_info(filepath, check_supported=False, check_exists=False)[1]
+
+        # Filters should all already be under this temporary folder
+        bf_path = os.path.join(tmpdir, "{}.bf".format(genome_name))
+
+        bfs.append(bf_path)
+
+    with mp.Pool(processes=nproc) as pool:
+        jobs = [
+            pool.apply_async(
+                ani_distance,
+                args=(
+                    filepath,
+                    kmer_len,
+                    bfs[filepath_pos+1:],
+                    os.path.join(tmpdir, "distances"),
+                )
+            ) for filepath_pos, filepath in enumerate(bfs)
+        ]
+
+        for job in jobs:
+            source_bf, target_dists = job.get()
+
+            dists[source_bf] = target_dists
+
+    for filepath in genomes_list:
+        genome_name = get_file_info(filepath, check_supported=False, check_exists=False)[1]
+
+        bf_filepath = os.path.join(tmpdir, "{}.bf".format(genome_name))
+
+        condensed_distance_matrix.extend(dists[bf_filepath])
+
+    dendro = fastcluster.linkage(condensed_distance_matrix, method="average")
+
+    profiles = dict()
+
+    # Define the list of taxonomic levels
     levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
-    level_ids = [lv[0] for lv in levels]
 
-    # Keep track of the already assigned genomes
-    assigned_taxa: Dict[str, List[str]] = dict()
-    assigned_genomes: Set[str] = set()
+    for filepath in genomes_list:
+        genome_name = get_file_info(filepath, check_supported=False, check_exists=False)[1]
 
-    # Keep track of those genomes that MetaSBT is not able to assign
-    unassigned: List[os.path.abspath] = list()
+        # Retrieve the genome profile
+        profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genome_name))
 
-    # Compute pair-wise distance between genomes as the number of common kmers
-    # This could take a while
-    bfdistance_intersect = bfaction(
-        genomes_list, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="intersect"
-    )
+        # Check whether the profile exists
+        if os.path.isfile(profile):
+            profiles[filepath] = dict()
 
-    # Iterate over genomes
-    # There could be hundred of thousands of genomes in `genomes_list`. It is better to show a progress bar
-    for i, genome_i_filepath in tqdm.tqdm(enumerate(genomes_list), total=len(genomes_list)):
-        _, genome_i_name, _, _ = get_file_info(genome_i_filepath, check_supported=False, check_exists=False)
+            with open(profile) as file:
+                for line in file:
+                    line = line.strip()
 
-        if genome_i_name not in assigned_genomes:
-            # Retrieve the genome profile
-            profile = os.path.join(profiles_dir, "{}__profiles.tsv".format(genome_i_name))
+                    if line:
+                        if not line.startswith("#"):
+                            line_split = line.split("\t")
 
-            # Check whether the profile exists
-            if os.path.isfile(profile):
-                # Load levels and scores
-                level2match = dict()
+                            if line_split[1] in levels:
+                                profiles[filepath][line_split[1]] = {
+                                    "taxonomy": line_split[2],
+                                    "score": float(line_split[4])
+                                }
 
-                with open(profile) as file:
-                    for line in file:
-                        line = line.strip()
+                            if line_split[1] == "genome":
+                                profiles[filepath][line_split[1]] = {
+                                    "taxonomy": "|".join(line_split[2].split("|")[:-1]),
+                                    "score": float(line_split[4])
+                                }
 
-                        if line:
-                            if not line.startswith("#"):
-                                line_split = line.split("\t")
+    assignments = dict()
 
-                                if line_split[1] in levels:
-                                    # Key: taxonomic level
-                                    # Value: kmers in common with the taxonomic level
-                                    level2match[line_split[1]] = {
-                                        "taxonomy": line_split[2],
-                                        "common_kmers": int(line_split[3].split("/")[0])
-                                    }
+    unassigned = list()
 
-                                if line_split[1] == "genome":
-                                    # Override the species level with strains info
-                                    level2match["species"] = {
-                                        "taxonomy": "|".join(line_split[2].split("|")[:-1]),
-                                        "common_kmers": int(line_split[3].split("/")[0])
-                                    }
+    for level_pos, level in enumerate(reversed(levels)):
+        # Start from the species level up to the kingdom
+        processed = set()
 
-                assigned_taxonomy = None
+        for filepath_pos, filepath in enumerate(genomes_list):
+            if filepath in profiles and filepath not in processed:
+                # Retrieve the closest cluster under the current taxonomic level
+                level_taxonomy = profiles[filepath][level]["taxonomy"]
 
-                last_known_level_mink = 0
+                level_taxonomy_split = level_taxonomy.split("|")
 
-                # From the species up to the kingdom level
-                for level in reversed(levels):
-                    # Get level boundaries
-                    mink, _ = get_level_boundaries(boundaries, level2match[level]["taxonomy"])
+                # Retrieve the closeness score
+                level_score = profiles[filepath][level]["score"]
 
-                    if level2match[level]["common_kmers"] >= mink and mink > 0:
-                        assigned_taxonomy = level2match[level]["taxonomy"]
+                # Retrive the closest cluster boundaries
+                min_score, _, level_centroid = get_level_boundaries(boundaries, level_taxonomy)
 
-                        last_known_level_mink = mink
+                # `level_centroid` could be `None` in case it does not contain enough clusters/genomes to compute its boundaries
+                # In that case we can still use the closest cluster/genome
+                if level_centroid is not None and level_taxonomy_split[-1][3:] != level_centroid:
+                    # Retrieve the input genome name
+                    genome_name = get_file_info(filepath, check_supported=False, check_exists=False)[1]
 
-                        break
+                    # Retrieve the database root folder from the manifest file path
+                    db_dir = os.path.dirname(manifest_filepath)
 
-                if not assigned_taxonomy:
-                    # Unable to assign a taxonomic label to the current genome
-                    unassigned.append(genome_i_filepath)
+                    if level == "species":
+                        centroid_bf = os.path.join(db_dir, level_taxonomy.replace("|", os.sep), "filters", "{}.bf".format(level_centroid))
 
-                else:
-                    assignment = assigned_taxonomy.split("|")
+                    else:
+                        centroid_bf = os.path.join(db_dir, level_taxonomy.replace("|", os.sep), level_centroid, "{}.bf".format(level_centroid))
 
-                    # Fill the assignment with missing levels
-                    assigned_levels = len(assignment)
+                    # Compute the distance between the input genome and the centroid
+                    _, distances = ani_distance(
+                        os.path.join(tmpdir, "{}.bf".format(genome_name)),
+                        kmer_len,
+                        [centroid_bf],
+                        tmpdir,
+                    )
 
-                    for pos in range(assigned_levels, len(levels)):
+                    # `distances` contains a single value here
+                    # Convert the distance back to a similarity measure
+                    # Replace `level_score` with the similarity between the input genome and the centroid of the closest cluster
+                    level_score = abs(distances[0] - 1)
+
+                if level_score >= min_score:
+                    # The current genome must be assigned to the closest cluster
+                    # We should cut the dendrogram using the closest cluster boundaries to check for other assignments
+                    # `min_score` is a similarity, thus, it must be converted to a distance measure
+                    clusters = hier.fcluster(dendro, 1 - min_score, criterion="distance")
+
+                    # Search for the cluster id assigned to the current genome
+                    cluster_id = clusters[filepath_pos]
+
+                    # Collect all the genomes that have been assigned to the same cluster
+                    for filepath2, assigned_cluster in zip(genomes_list, clusters):
+                        if assigned_cluster == cluster_id:
+                            # All genomes that fall under this cluster are assigned to an already defined cluster in MetaSBT
+                            assignments[filepath2] = level_taxonomy
+
+                            # Mark the assigned genomes as processed
+                            processed.add(filepath2)
+
+            if level == "kingdom" and filepath not in processed:
+                # This genome has not been characterized, not even at the kingdom level
+                # We should simply report these genomes, we are not going to define new kingdoms
+                unassigned.append(filepath)
+
+    # Get full and partial assignments first
+    characterized = dict()
+
+    partially_characterized = dict()
+
+    for filepath in assignments:
+        if "|s__" not in assignments[filepath]:
+            if assignments[filepath] not in partially_characterized:
+                partially_characterized[assignments[filepath]] = set()
+
+            # These genomes have not been fully characterized and must be further processed
+            partially_characterized[assignments[filepath]].add(filepath)
+
+        else:
+            if assignments[filepath] not in characterized:
+                characterized[assignments[filepath]] = set()
+
+            characterized[assignments[filepath]].add(filepath)
+
+    # We can now finish characterizing the partially characterized genomes
+    # Genomes in `partially_characterized` are all characterized at the kingdom level at least
+    while len(partially_characterized) > 0:
+        for taxonomic_assignment in list(partially_characterized.keys()):
+            # We previously defined the assignments starting from the species level up to the kingdom
+            # We should now start from the kingdom level down to the species level to finish characterizing genomes
+            # If a genome has not been characterized, it means that it is not close enough to its closest cluster according to its boundaries
+            # We can now create new clusters and estimate their boundaries, then cut the dendrogram to see how many genomes fall in them
+            tmp_level_taxonomy = "{}|{}__tmp".format(taxonomic_assignment, levels[taxonomic_assignment.count("|")+1][0])
+
+            # Estimate the boundaries for the temporary cluster
+            # This is a totally new cluster. There is no need to search for a centroid here
+            min_score, _, _ = get_level_boundaries(boundaries, tmp_level_taxonomy)
+
+            # Cluster genomes according to the temporary cluster's boundaries
+            clusters = hier.fcluster(dendro, 1 - min_score, criterion="distance")
+
+            # Keep track of the mapping between fcluster ids and MetaSBT cluster ids
+            clusters_map = dict()
+
+            for filepath, assigned_cluster in zip(genomes_list, clusters):
+                # Consider genomes under the current partially characterized taxonomy only
+                if filepath in partially_characterized[taxonomic_assignment]:
+                    if assigned_cluster not in clusters_map:
+                        # Create a new MSBT cluster
+                        # Increment the cluster counter
                         clusters_counter += 1
 
-                        # Create new clusters
-                        assignment.append("{}__{}{}".format(level_ids[pos], cluster_prefix, clusters_counter))
+                        clusters_map[assigned_cluster] = clusters_counter
 
-                    # Compose the assigned (partial) label
-                    assigned_taxonomy = "|".join(assignment)
+                    # Define the assigned taxonomic label
+                    assigned_taxonomy = "{}|{}__{}{}".format(
+                        taxonomic_assignment,
+                        levels[taxonomic_assignment.count("|")+1][0],
+                        cluster_prefix,
+                        clusters_map[assigned_cluster]
+                    )
 
-                    # Assigne current genome to the taxonomy
-                    if assigned_taxonomy not in assigned_taxa:
-                        assigned_taxa[assigned_taxonomy] = list()
+                    if "|s__" not in assigned_taxonomy:
+                        # This is not fully characterized yet
+                        if assigned_taxonomy not in partially_characterized:
+                            partially_characterized[assigned_taxonomy] = set()
 
-                    assigned_taxa[assigned_taxonomy].append(genome_i_filepath)
+                        partially_characterized[assigned_taxonomy].add(filepath)
 
-                    # Mark current genome as assigned
-                    assigned_genomes.add(genome_i_name)
+                    else:
+                        # This is fully characterized now
+                        if assigned_taxonomy not in characterized:
+                            characterized[assigned_taxonomy] = set()
 
-                    with mp.Pool(processes=nproc) as pool:
-                        try:
-                            # Check whether other input genomes look pretty close to the current genome by computing
-                            # the number of kmers in common between the current genome and all the other input genomes
-                            jobs = [
-                                pool.apply_async(
-                                    _assign_closest, 
-                                    args=(
-                                        genome_j_filepath, 
-                                        int(bfdistance_intersect[genome_i_name][get_file_info(genome_j_filepath)[1]]),
-                                        last_known_level_mink,
-                                    )
-                                ) for genome_j_filepath in genomes_list[i+1:]
-                            ]
+                        characterized[assigned_taxonomy].add(filepath)
 
-                            for job in jobs:
-                                genome_j_filepath, is_close = job.get()
-
-                                if is_close:
-                                    _, genome_j_name, _, _ = get_file_info(genome_j_filepath, check_supported=False, check_exists=False)
-
-                                    # Set this genome as assigned
-                                    assigned_genomes.add(genome_j_name)
-
-                                    # Also assign this genome to the same cluster assigned
-                                    assigned_taxa[assigned_taxonomy].append(genome_j_filepath)
-
-                        except KeyError:
-                            # Only in case the current genome is not into the bfdistance_intersect dict
-                            pass
+            # The partial taxonomy must be removed from the bucket of partially characterized labels
+            del partially_characterized[taxonomic_assignment]
 
     # Update the manifest with the new clusters counter
-    if clusters_counter > clusters_counter_manifest:
+    if clusters_counter > manifest["clusters_counter"]:
         # Load the manifest file
         with open(manifest_filepath) as manifest_file:
             manifest_lines = manifest_file.readlines()
@@ -851,13 +1000,13 @@ def cluster(
 
                     manifest_file.write("{}\n".format(" ".join(line_split)))
 
-    # Dumpt the new assignments to the output file
+    # Dump the new assignments to the output file
     with open(outpath, "w+") as out:
         # Add header line
         out.write("# Genome\tAssignment\tCluster ID\n")
 
-        for taxonomy in sorted(assigned_taxa.keys()):
-            for genome_path in sorted(assigned_taxa[taxonomy]):
+        for taxonomy in sorted(characterized.keys()):
+            for genome_path in sorted(characterized[taxonomy]):
                 # Get genome name
                 _, genome, _, _ = get_file_info(genome_path)
 
@@ -865,41 +1014,7 @@ def cluster(
 
                 out.write("{}\t{}\t{}\n".format(genome, taxonomy, cluster_id))
 
-    return assigned_taxa, unassigned
-
-
-def _assign_closest(
-    genome_filepath: os.path.abspath,
-    common_kmers: int,
-    last_known_level_mink: int
-) -> Tuple[os.path.abspath, bool]:
-    """This is private! Just a simple function used in `cluster()` for comaring kmers in multiprocessing.
-    
-    This is used to compare the number of common kmers between two genomes and the minimum amount 
-    of kmers in common among all the genomes in the closest, most taxonomically defined cluster.
-
-    Parameters
-    ----------
-    genome_filepath : os.path.abspath
-        Path to the genome file path. It is not really used here, but it is required
-        to take track of the genome file while running this in multiprocessing.
-    common_kmers : int
-        Number of kmers in common between the two genomes.
-    last_known_level_mink : int
-        Number of kmers in common among all the genomes in the closest, most taxonomically defined cluster.
-
-    Returns
-    -------
-    tuple
-        A tuple with the input `genome_filepath` and a boolean. This is `True` if the input genome must be
-        assigned to the same cluster of the genomes with which it shares `common_kmers` kmers.
-        Otherwise, it is `False`.
-    """
-
-    if common_kmers >= last_known_level_mink:
-        return genome_filepath, True
-
-    return genome_filepath, False
+    return characterized, unassigned
 
 
 def dereplicate_genomes(
@@ -907,11 +1022,12 @@ def dereplicate_genomes(
     tax_id: str,
     tmp_dir: os.path.abspath,
     kmer_len: int,
+    min_occurrences: int=2,
     filter_size: Optional[int]=None,
     nproc: int=1,
-    similarity: float=1.0,
+    similarity: float=0.99,
 ) -> List[os.path.abspath]:
-    """Dereplicate genomes.
+    """Dereplicate genomes based on ANI similarity.
 
     Parameters
     ----------
@@ -923,55 +1039,79 @@ def dereplicate_genomes(
         Path to the temporary folder.
     kmer_len : int
         The length of the kmers.
+    min_occurrences : int, default 2
+        Minimum number of kmer occurrences.
     filter_size : int, optional
         The size of the bloom filters.
     nproc : int, default 1
         Make it parallel.
-    similarity : float, default 1.0
-        The similarity threshold on the theta distance.
+    similarity : float, default 0.99
+        The similarity threshold on the ANI similarity.
 
     Returns
     -------
     list
         A list with paths to the genome files that passed the dereplication process.
-
-    Notes
-    -----
-    Theta between two genomes A and B is defined as N/D, where N is the number of 1s in common
-    between A and B, and D is the number of 1s in A.
     """
 
-    # Define the HowDeSBT temporary folder
-    howdesbt_tmp_dir = os.path.join(tmp_dir, "howdesbt", tax_id)
-    os.makedirs(howdesbt_tmp_dir, exist_ok=True)
+    # Define the temporary folders
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    filtered_genomes_filepath = os.path.join(howdesbt_tmp_dir, "filtered.txt")
-    filtered_genomes = list()
-
-    # Compute the theta distance between all the input genomes
-    bfdistance_theta = bfaction(
-        genomes, howdesbt_tmp_dir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="theta"
+    # Compute the intersection of kmers between all the input genomes
+    bfdistance_intersect = bfaction(
+        genomes,
+        tmp_dir,
+        kmer_len,
+        min_occurrences=min_occurrences,
+        filter_size=filter_size,
+        nproc=nproc,
+        action="bfdistance",
+        mode="intersect"
     )
+
+    # Compute the union of kmers between all the input genomes
+    bfdistance_union = bfaction(
+        genomes,
+        tmp_dir,
+        kmer_len,
+        min_occurrences=min_occurrences,
+        filter_size=filter_size,
+        nproc=nproc,
+        action="bfdistance",
+        mode="union"
+    )
+
+    filtered_genomes_filepath = os.path.join(tmp_dir, "filtered.txt")
+ 
+    filtered_genomes = set()
 
     # Pair-wise comparison of input genomes
     for i, genome1_path in enumerate(genomes):
-        # Get genome1 file name
-        _, genome1, _, _ = get_file_info(genome1_path)
+        if genome1_path not in filtered_genomes:
+            # Get genome1 file name
+            _, genome1, _, _ = get_file_info(genome1_path)
 
-        genomes_sublist = genomes[i + 1:]
+            for genome2_path in genomes[i+1:]:
+                # Get genome2 file name
+                _, genome2, _, _ = get_file_info(genome2_path)
 
-        for genome2_path in genomes_sublist:
-            # Get genome2 file name
-            _, genome2, _, _ = get_file_info(genome2_path)
+                # Compute the Jaccard similarity
+                jaccard_similarity = bfdistance_intersect[genome1][genome2]/bfdistance_union[genome1][genome2]
 
-            if bfdistance_theta[genome1][genome2] >= similarity and bfdistance_theta[genome2][genome1] >= similarity:
-                filtered_genomes.append(genome2_path)
+                if jaccard_similarity == 0.0:
+                    # This is to avoid ValueError: math domain error
+                    jaccard_similarity = sys.float_info.min
 
-                # Also take note of the excluded genomes in the filtered file
-                with open(filtered_genomes_filepath, "a+") as f:
-                    f.write("{}\n".format(genome2_path))
+                # https://doi.org/10.1093/bioinformatics/btae452 Formula #8
+                # Same similarity measure implemented in MASH
+                ani_similarity = round(1 + (1/kmer_len) * math.log((2*jaccard_similarity) / (1+jaccard_similarity)), 5)
 
-                break
+                if ani_similarity >= similarity:
+                    # Keep track of the excluded genomes in the filtered file
+                    with open(filtered_genomes_filepath, "a+") as f:
+                        f.write("{}\n".format(genome2_path))
+
+                    filtered_genomes.add(genome2_path)
 
     # Redefine the list of genomes by removing the filtered ones
     genomes = list(set(genomes).difference(set(filtered_genomes)))
@@ -1374,10 +1514,15 @@ def get_bf_density(filepath: os.path.abspath) -> float:
 
 
 def get_boundaries(
-    bfs: List[os.path.abspath], tmpdir: os.path.abspath, kmer_len: int, filter_size: Optional[int]=None, nproc: int=1
-) -> Tuple[int, int, int]:
+    bfs: List[os.path.abspath],
+    tmpdir: os.path.abspath,
+    kmer_len: int,
+    filter_size: Optional[int]=None,
+    min_occurrences: int=2,
+    nproc: int=1
+) -> Tuple[int, int, str]:
     """Return kmers boundaries for a specific set of genomes defined as the minimum and
-    maximum number of common kmers among all the genomes in the current taxonomic level.
+    maximum ANI similarities between all the genomes in the current taxonomic level.
 
     Parameters
     ----------
@@ -1389,61 +1534,113 @@ def get_boundaries(
         The length of the kmers.
     filter_size : int, optional
         The bloom filter size.
+    min_occurrences : int, default 2
+        Minimum number of kmer occurrences.
     nproc : int, default 1
         Make it parallel.
 
     Returns
     -------
     tuple
-        A tuple with the total number, the minimum, and maximum number of kmers in common among the input genomes.
+        A tuple with the minimum and maximum ANI similarities between all the input genomes
+        in addition to the centroid defined as the genome that maximize the similarity with
+        all the other genomes
     """
 
-    # Search for the minimum and maximum number of common kmers among all the input genomes
-    kmers = 0
+    # Define the clusters' boundaries
     minv = np.Inf
     maxv = 0
 
     # Compute the number of kmers in common between all pairs of genomes
     bfdistance_intersect = bfaction(
-        bfs, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfdistance", mode="intersect"
+        bfs,
+        tmpdir,
+        kmer_len,
+        min_occurrences=min_occurrences,
+        filter_size=filter_size,
+        nproc=nproc,
+        action="bfdistance",
+        mode="intersect"
     )
 
-    # Iterate over the bloom filters
-    for i in range(len(bfs)):
-        for j in range(i + 1, len(bfs)):
-            # Get genome file names
-            _, genome1, _, _ = get_file_info(bfs[i])
-            _, genome2, _, _ = get_file_info(bfs[j])
+    # Also, compute the total number of kmers as the union of kmers in every pair of genomes
+    bfdistance_union = bfaction(
+        bfs,
+        tmpdir,
+        kmer_len,
+        min_occurrences=min_occurrences,
+        filter_size=filter_size,
+        nproc=nproc,
+        action="bfdistance",
+        mode="union"
+    )
+
+    similarities = dict()
+
+    # Pair-wise comparison of input bloom filters
+    for i, bf1_path in enumerate(bfs):
+        # Get bf1 file name
+        _, bf1, _, _ = get_file_info(bf1_path)
+
+        if bf1 not in similarities:
+            similarities[bf1] = list()
+
+        for bf2_path in bfs[i+1:]:
+            # Get bf2 file name
+            _, bf2, _, _ = get_file_info(bf2_path)
+
+            if bf2 not in similarities:
+                similarities[bf2] = list()
 
             try:
-                # It returns a float by default
-                common = int(bfdistance_intersect[genome1][genome2])
-
-                if common == 0:
+                if bfdistance_intersect[bf1][bf2] == 0:
                     # This could be only due to a wrong classification and must be reported
                     with open(os.path.join(tmpdir, "zero_common_kmers.tsv"), "a+") as zck:
-                        zck.write("{}\t{}\n".format(genome1, genome2))
+                        zck.write("{}\t{}\n".format(bf1, bf2))
 
                     # Pass to the next comparison
                     continue
 
-                # Update the minimum and maximum number of common kmers
-                if common > maxv:
-                    maxv = common
-                if common < minv:
-                    minv = common
+                # Compute the Jaccard similarity
+                jaccard_similarity = bfdistance_intersect[bf1][bf2]/bfdistance_union[bf1][bf2]
+
+                if jaccard_similarity == 0.0:
+                    # This is to avoid ValueError: math domain error
+                    jaccard_similarity = sys.float_info.min
+
+                # https://doi.org/10.1093/bioinformatics/btae452 Formula #8
+                # Same similarity measure implemented in MASH
+                ani_similarity = round(1 + (1/kmer_len) * math.log((2*jaccard_similarity) / (1+jaccard_similarity)), 5)
+
+                similarities[bf1].append(ani_similarity)
+                similarities[bf2].append(ani_similarity)
+
+                # Update the minimum and maximum scores
+                if ani_similarity > maxv:
+                    maxv = ani_similarity
+
+                if ani_similarity < minv:
+                    minv = ani_similarity
 
             except KeyError:
-                # Only in case the current genome is not into the bfdistance_intersect dict
+                # Only in case one of the two current genomes is not into the bfdistance_intersect dictionary
+                # This should never happen
                 pass
 
-    # Use bfoperate --or (union) to retrieve the total number of kmers
-    bfoperate_or = bfaction(bfs, tmpdir, kmer_len, filter_size=filter_size, nproc=nproc, action="bfoperate", mode="or")
+    # Search for the centroid as the genome that maximize the similarity with all the other genomes
+    centroid = None
 
-    # Result is under the key "result"
-    kmers = bfoperate_or["result"]
+    average_similarity = 0.0
 
-    return kmers, minv, maxv
+    for bf in similarities:
+        bf_average_similarity = sum(similarities[bf])/len(similarities[bf])
+
+        if bf_average_similarity > average_similarity:
+            average_similarity = bf_average_similarity
+
+            centroid = bf
+
+    return minv, maxv, centroid
 
 
 def get_file_info(filepath: os.path.abspath, check_supported: bool=True, check_exists: bool=True) -> Tuple[str, str, str, str]:
@@ -1508,60 +1705,48 @@ def get_level_boundaries(boundaries: Dict[str, Dict[str, Union[int, float]]], ta
     taxonomy : str
         The taxonomic label.
 
+    Raises
+    ------
+    Exception
+        If it is not able to retrieve the boundaries.
+
     Returns
     -------
     tuple
-        A tuple with the minimum and maximum number of kmers in common among all the genomes under the specified cluster.
+        A tuple with the minimum and maximum scores as the specified cluster's boundaries, plus the centroid.
+        The centroid could be `None` in case of temporary boundaries.
     """
 
-    minv = 0
-    maxv = 0
+    if taxonomy in boundaries:
+        return boundaries[taxonomy]["min_ani"], boundaries[taxonomy]["max_ani"], boundaries[taxonomy]["centroid"]
 
-    # Keep track of the min and max common kmers
+    taxonomy_levels = taxonomy.split("|")[:-1]
+
+    # Keep track of the min and max 
     min_bounds = list()
     max_bounds = list()
 
-    # Try searching for boundaries again with a redefined taxonomic label
-    retry = False
+    factor = 1
 
-    while minv == 0 and maxv == 0:
-        taxonomic_boundaries = dict()
+    while not min_bounds and not max_bounds:
+        for tax in boundaries:
+            tax_split = tax.split("|")
 
-        if not retry:
-            if taxonomy in boundaries:
-                # Exact search of the current taxonomic label in boundaries
-                taxonomic_boundaries[taxonomy] = boundaries[taxonomy]
+            if len(tax_split) == len(taxonomy_levels) + factor and "|".join(tax_split[:-factor]) == "|".join(taxonomy_levels):
+                min_bounds.append(boundaries[tax]["min_ani"])
+                max_bounds.append(boundaries[tax]["max_ani"])
 
-        else:
-            for tax in boundaries:
-                if tax.startswith("{}|".format(taxonomy)):
-                    # Expand the search to all the taxonomies with a common prefix
-                    taxonomic_boundaries[tax] = boundaries[tax]
+        if not min_bounds and not max_bounds and len(taxonomy_levels) == 1:
+            raise Exception("Unable to retrieve boundaries for {}".format(taxonomy))
 
-        if taxonomic_boundaries:
-            # In case the current taxonomy is in the boundaries file
-            for tax in taxonomic_boundaries:
-                min_bounds.append(taxonomic_boundaries[tax]["min_kmers"])
-                max_bounds.append(taxonomic_boundaries[tax]["max_kmers"])
+        factor += 1
 
-            minv = int(sum(min_bounds) / len(min_bounds))
-            maxv = int(sum(max_bounds) / len(max_bounds))
+        taxonomy_levels = taxonomy_levels[:-1]
 
-        else:
-            # Split the taxonomic label into levels
-            taxonomic_levels = taxonomy.split("|")
+    min_bound = round(sum(min_bounds)/len(min_bounds), 5)
+    max_bound = round(sum(max_bounds)/len(max_bounds), 5)
 
-            if len(taxonomic_levels) == 1:
-                # Get out of the loop of there are no other levels available
-                break
-
-            # Redefine the taxonomic label
-            taxonomy = "|".join(taxonomic_levels[:-1])
-
-            # Retry
-            retry = True
-
-    return minv, maxv
+    return min_bound, max_bound, None
 
 
 def howdesbt(
@@ -1954,7 +2139,7 @@ def load_boundaries(boundaries_filepath: os.path.abspath) -> Dict[str, Dict[str,
     Returns
     -------
     dict
-        A dictionary with the table content indexed by taxa.
+        A dictionary with the content of the boundaries table indexed by taxa.
     """
 
     if not os.path.isfile(boundaries_filepath):
@@ -1971,13 +2156,10 @@ def load_boundaries(boundaries_filepath: os.path.abspath) -> Dict[str, Dict[str,
 
                     # Indexed by taxonomic labels
                     boundaries[line_split[0]] = {
-                        "clusters": int(line_split[1]),
-                        "references": int(line_split[2]),
-                        "all_kmers": int(line_split[3]),
-                        "min_kmers": int(line_split[4]),
-                        "max_kmers": int(line_split[5]),
-                        "min_score": float(line_split[6]),
-                        "max_score": float(line_split[7]),
+                        "nodes": int(line_split[1]),
+                        "min_ani": float(line_split[2]),
+                        "max_ani": float(line_split[3]),
+                        "centroid": line_split[4],
                     }
 
     return boundaries

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Define taxonomy-specific boundaries as the minimum and maximum number of
-kmers in common between all the genomes under a specific cluster.
+"""Define taxonomy-specific boundaries as the minimum and maximum ANI similarities
+between all the genomes under a specific cluster.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.1"
-__date__ = "May 25, 2023"
+__version__ = "0.1.4"
+__date__ = "Oct 10, 2024"
 
 import argparse as ap
 import errno
@@ -56,7 +56,7 @@ def read_params():
     p = ap.ArgumentParser(
         prog=TOOL_ID,
         description=(
-            "Define taxonomy-specific boundaries as the minimum and maximum number of kmers in common "
+            "Define taxonomy-specific boundaries as the minimum and maximum ANI similarities "
             "between all the genomes under a specific cluster"
         ),
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
@@ -66,13 +66,6 @@ def read_params():
         action="store_true",
         default=False,
         help="Remove temporary data at the end of the pipeline",
-    )
-    p.add_argument(
-        "--consider-mags",
-        action="store_true",
-        default=False,
-        dest="consider_mags",
-        help="Also consider MAGs while counting genomes",
     )
     p.add_argument(
         "--db-dir",
@@ -91,7 +84,10 @@ def read_params():
     p.add_argument(
         "--superkingdom",
         type=str,
-        help="Consider genomes whose lineage belongs to a specific superkingdom",
+        help=(
+            "Consider genomes whose lineage belongs to a specific superkingdom. "
+            "Warning: it does not compute the boundaries of the specified kingdom"
+        ),
     )
     p.add_argument(
         "--log",
@@ -99,21 +95,22 @@ def read_params():
         help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
     )
     p.add_argument(
-        "--max-genomes",
+        "--max-nodes",
         type=number(int, minv=3),
-        dest="max_genomes",
+        dest="max_nodes",
         help=(
-            "Maximum number of genomes per cluster to be considered for computing boundaries. "
-            "Genomes are selected randomly in case the size of clusters is greater than this number. "
-            "This must always be greater than or equals to --min-genomes"
+            "Maximum number of nodes per cluster to be considered for computing boundaries. "
+            "Nodes are selected randomly in case the size of clusters is greater than this number. "
+            "This must always be greater than or equals to --min-nodes. "
+            "WARNING: This works at the species level only!"
         ),
     )
     p.add_argument(
-        "--min-genomes",
+        "--min-nodes",
         type=number(int, minv=3),
         default=3,
-        dest="min_genomes",
-        help="Consider clusters with a minimum number of genomes only",
+        dest="min_nodes",
+        help="Consider clusters with a minimum number of nodes only",
     )
     p.add_argument(
         "--nproc",
@@ -157,9 +154,8 @@ def define_boundaries(
     output: os.path.abspath,
     kmer_len: int,
     filter_size: int,
-    consider_mags: bool=False,
-    max_genomes: Optional[int]=None,
-    min_genomes: int=3,
+    max_nodes: Optional[int]=None,
+    min_nodes: int=3,
     nproc: int=1,
 ) -> None:
     """Compute boundaries for the specified taxonomic level.
@@ -178,107 +174,79 @@ def define_boundaries(
         The length of the kmers.
     filter_size : int
         The size of the bloom filters.
-    consider_mags : bool, default False
-        Consider MAGs while counting genomes.
-    max_genomes : int, optional
-        Consider this number of genomes at most for computing boundaries.
-    min_genomes : int, default 3
-        Consider clusters with at least this number of genomes.
+    max_nodes : int, optional
+        Consider this number of nodes at most for computing boundaries. This works at the species level only!
+    min_nodes : int, default 3
+        Consider clusters with at least this number of nodes.
     nproc : int, default 1
         Make the process parallel when possible.
     """
 
-    # Search and merge all the reference genomes paths under all references.txt files in the current taxonomic level
-    samples: Dict[str, List[str]] = dict()
+    bf_filepaths = list()
 
-    # Genomes are usually listed in references.txt files
-    references_paths = list(Path(level_dir).glob("**/references.txt"))
+    if level_id == "species":
+        genome_ids = list()
 
-    # Databases without a taxonomic structure use genomes.txt
-    references_paths.extend(list(Path(level_dir).glob("**/genomes.txt")))
+        if os.path.isfile(os.path.join(level_dir, "references.txt")):
+            # Load the list of reference genomes
+            genome_ids.extend([line.strip() for line in open(os.path.join(level_dir, "references.txt")).readlines() if line.strip()])
 
-    if consider_mags:
-        # Extend the set of genomes to the MAGs
-        references_paths.extend(list(Path(level_dir).glob("**/mags.txt")))
+        if os.path.isfile(os.path.join(level_dir, "mags.txt")):
+            # Load the list of MAGs
+            genome_ids.extend([line.strip() for line in open(os.path.join(level_dir, "mags.txt")).readlines() if line.strip()])
 
-    # Take track of the overall number of reference genomes
-    # under a specific taxonomic level
-    references_count = 0
+        for genome_id in genome_ids:
+            genome_path = os.path.join(level_dir, "strains", "filters", "{}.bf".format(genome_id))
 
-    for references_path in references_paths:
-        path_split = str(references_path).split(os.sep)
-        # In case the current level_id is species
-        next_level = "NA"
-        for path_pos, path_level in enumerate(path_split):
-            if path_level.strip():
-                if ("{}__".format(path_level[0]) == "{}__".format(level_id[0])) and level_id != "species":
-                    next_level = path_split[path_pos + 1]
-                    break
+            if not os.path.isfile(genome_id):
+                # In this case, the database has been built by using only 3 representatives per species
+                genome_path = os.path.join(level_dir, "filters", "{}.bf".format(genome_id))
 
-        if level_id != "species" and next_level not in samples:
-            samples[next_level] = list()
+            bf_filepaths.append(genome_path)
 
-        with open(str(references_path)) as references:
-            for line in references:
-                line = line.strip()
-                if line:
-                    if level_id == "species":
-                        genome_path = os.path.join(os.path.dirname(str(references_path)), "strains", "filters", "{}.bf".format(line))
+    else:
+        levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
-                        if not os.path.isfile(genome_path):
-                            # In this case, the database has been built by using only 3 representatives per species
-                            genome_path = os.path.join(os.path.dirname(str(references_path)), "filters", "{}.bf".format(line))
+        # Define the next taxonomic level
+        next_level_id = levels[levels.index(level_id.lower())+1]
 
-                        samples[line] = [genome_path]
+        # Get the root nodes of all the SBTs under a specific taxonomic level
+        for filepath in Path(os.path.join(level_dir, "index")).glob("{}__*.bf".format(next_level_id[0])):
+            bf_filepaths.append(
+                os.path.join(
+                    level_dir,
+                    os.path.basename(filepath).split(".")[0],  # e.g., p__Nucleocytoviricota.detbrief.rrr.bf
+                    "{}.bf".format(os.path.basename(filepath).split(".")[0])
+                )
+            )
 
-                        references_count += 1
+    # In case the number of BFs in the current taxonomic level
+    # is greater than or equals to the minimum number of nodes specified in input
+    if len(bf_filepaths) >= min_nodes:
+        nodes_count = len(bf_filepaths)
 
-                    else:
-                        genome_path = os.path.join(
-                            os.path.dirname(str(references_path)),
-                            "filters",
-                            "{}.bf".format(line),
-                        )
-
-                        if os.path.isfile(genome_path):
-                            samples[next_level].append(genome_path)
-
-                            references_count += 1
-
-    # In case the current taxonomic level is not the species level
-    if level_id != "species":
-        # Get rid of clusters with not enough genomes according to min_genomes
-        for sample_id in list(samples.keys()):
-            if len(samples[sample_id]) < min_genomes:
-                # Redefine references count
-                references_count -= len(samples[sample_id])
-
-                # Remove cluster
-                del samples[sample_id]
-
-    # In case the number of genomes in the current taxonomic level
-    # is greater than or equals to the minimum number of genomes specified in input
-    if len(samples) >= min_genomes:
-        # Create a temporary folder for the specific taxonomic level
-        tmp_level_dir = os.path.join(tmp_dir, "boundaries", level_id, os.path.basename(level_dir))
-        os.makedirs(tmp_level_dir, exist_ok=True)
-
-        # Consider all the genomes under a particular level
-        genome_paths = list()
-        for tax_level_id in samples:
-            genome_paths.extend(samples[tax_level_id])
-
-        if max_genomes:
+        if max_nodes and level_id == "species" and len(bf_filepaths) > max_nodes:
+            # Pick `max_nodes` random nodes (only at the species level)
             # Always use the same seed for reproducibility
             rng = numpy.random.default_rng(0)
 
-            # Shuffle the list of genome paths and get the first "max_genomes"
-            rng.shuffle(genome_paths)
-            genome_paths = genome_paths[:max_genomes]
+            # Shuffle the list of genome paths and get the first `max_nodes`
+            rng.shuffle(bf_filepaths)
+
+            bf_filepaths = bf_filepaths[:max_nodes]
+
+        # Create a temporary folder for the specific taxonomic level
+        tmp_level_dir = os.path.join(tmp_dir, "boundaries", level_id, os.path.basename(level_dir))
+
+        os.makedirs(tmp_level_dir, exist_ok=True)
 
         # Extract boundaries
-        all_kmers, min_kmers, max_kmers = get_boundaries(
-            genome_paths, tmp_level_dir, kmer_len, filter_size=filter_size, nproc=nproc
+        min_score, max_score, centroid = get_boundaries(
+            bf_filepaths,
+            tmp_level_dir,
+            kmer_len,
+            filter_size=filter_size,
+            nproc=nproc,
         )
 
         # Get the full lineage from the level folder path
@@ -291,15 +259,12 @@ def define_boundaries(
         # Dump results to the boundaries table
         with open(output, "a+") as table:
             table.write(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                "{}\t{}\t{}\t{}\t{}\n".format(
                     lineage,
-                    len(samples) if level_id != "species" else 0,
-                    references_count,
-                    all_kmers,
-                    min_kmers,
-                    max_kmers,
-                    round(min_kmers / all_kmers, 3),
-                    round(max_kmers / all_kmers, 3),
+                    nodes_count,
+                    min_score,
+                    max_score,
+                    centroid,
                 )
             )
 
@@ -330,6 +295,7 @@ def get_lineage_from_path(folder_path: os.path.abspath) -> str:
     """
 
     lineage_list = list()
+
     superkingdom_found = False
 
     for level in folder_path.split(os.sep):
@@ -349,16 +315,15 @@ def boundaries(
     tmp_dir: os.path.abspath,
     output: os.path.abspath,
     flat_structure: bool = False,
-    max_genomes: Optional[int] = None,
-    min_genomes: int = 3,
-    consider_mags: bool = False,
+    max_nodes: Optional[int] = None,
+    min_nodes: int = 3,
     superkingdom: Optional[str] = None,
     logger: Optional[Logger] = None,
     verbose: bool = False,
     nproc: int = 1,
 ) -> None:
     """Define boundaries for each of the taxonomic levels in the database. 
-    Boundaries are defined as the minimum and maximum number of common kmers among all the reference genomes under a specific taxonomic level.
+    Boundaries are defined as the minimum and maximum ANI similarities among all the genomes under a specific taxonomic level.
 
     Parameters
     ----------
@@ -370,12 +335,10 @@ def boundaries(
         Path to the output table file with boundaries.
     flat_structure : bool, default False
         If True, genomes in the database have been organized without a taxonomic structure.
-    max_genomes : int, optional
-        Consider this number of genomes at most for computing boundaries.
-    min_genomes : int, default 3
-        Consider clusters with at least this number of genomes.
-    consider_mags : bool, default False
-        Consider MAGs while counting genomes.
+    max_nodes : int, optional
+        Consider this number of nodes at most for computing boundaries. This works at the species level only!
+    min_nodes : int, default 3
+        Consider clusters with at least this number of nodes.
     superkingdom : str, optional
         Retrieve genomes that belong to a specific superkingdom.
     logger : logging.Logger, optional
@@ -401,37 +364,38 @@ def boundaries(
     with open(output, "w+") as file:
         # Write header lines
         file.write("# {} version {} ({})\n".format(TOOL_ID, __version__, __date__))
+
         file.write("# timestamp: {}\n".format(datetime.today().strftime("%Y%m%d")))
+
         file.write("# --db-dir {}\n".format(db_dir))
 
         if superkingdom:
             file.write("# --superkingdom {}\n".format(superkingdom))
 
-        file.write("# --min-genomes {}\n".format(min_genomes))
+        file.write("# --min-nodes {}\n".format(min_nodes))
 
-        if max_genomes:
-            file.write("# --max-genomes {}\n".format(max_genomes))
+        if max_nodes:
+            file.write("# --max-nodes {}\n".format(max_nodes))
 
         file.write(
-            "# {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+            "# {}\t{}\t{}\t{}\t{}\n".format(
                 "Lineage",  # Taxonomic label
-                "Clusters",  # Number of clusters, valid for every taxonomic level except the species one
-                "References",  # Number of reference genomes or clustrs under a specific taxonomic level
-                "Kmers",  # Total number of kmers
-                "Min kmers",  # Minimum number of common kmers among the reference genomes/clusters
-                "Max kmers",  # Maximum number of common kmers among the reference genomes/clusters
-                "Min score",  # Percentage of min kmers on the total number of genomes/clusters
-                "Max score",  # Percentage of max kmers on the total number of genomes/clusters
+                "Nodes",  # Number of genomes/clusters under a specific taxonomic level
+                "Min ANI",  # The left boundary of a specific lineage (see definition of boundaries)
+                "Max ANI",  # The right boundary of a specific lineage (see definition of boundaries)
+                "Centroid",  # The cluster centroid defined as the genome that maximize the similarity with all the other genomes
             )
         )
 
     # Check whether the manifest file exists
     manifest_filepath = os.path.join(db_dir, "manifest.txt")
+
     if not os.path.isfile(manifest_filepath):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), manifest_filepath)
 
     # Load the manifest file
     manifest = load_manifest(manifest_filepath)
+
     if "kmer_len" not in manifest or "filter_size" not in manifest:
         raise Exception(
             "Manifest file does not contain --kmer-len and --filter-size information: {}".format(manifest_filepath)
@@ -450,16 +414,17 @@ def boundaries(
             output,
             manifest["kmer_len"],
             manifest["filter_size"],
-            consider_mags=consider_mags,
-            max_genomes=max_genomes,
-            min_genomes=min_genomes,
+            max_nodes=max_nodes,
+            min_nodes=min_nodes,
             nproc=nproc,
         )
 
     else:
         # Genomes have been taxonomically organized
         target_dir = db_dir if not superkingdom else os.path.join(db_dir, "k__{}".format(superkingdom))
+
         levels = ["species", "genus", "family", "order", "class", "phylum"]
+
         if not superkingdom:
             levels.append("kingdom")
 
@@ -490,9 +455,8 @@ def boundaries(
                         output,
                         manifest["kmer_len"],
                         species_manifest["filter_size"] if species_manifest else manifest["filter_size"],
-                        consider_mags=consider_mags,
-                        max_genomes=max_genomes,
-                        min_genomes=min_genomes,
+                        max_nodes=max_nodes,
+                        min_nodes=min_nodes,
                         nproc=nproc,
                     )
 
@@ -505,9 +469,8 @@ def boundaries(
                 output,
                 manifest["kmer_len"],
                 manifest["filter_size"],
-                consider_mags=consider_mags,
-                max_genomes=max_genomes,
-                min_genomes=min_genomes,
+                max_nodes=max_nodes,
+                min_nodes=min_nodes,
                 nproc=nproc,
             )
 
@@ -524,6 +487,7 @@ def main() -> None:
 
     # Check whether the database folder exists
     target_dir = args.db_dir if not args.superkingdom else os.path.join(args.db_dir, "k__{}".format(args.superkingdom))
+
     if not os.path.isdir(target_dir):
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), target_dir)
 
@@ -531,9 +495,8 @@ def main() -> None:
     if os.path.isfile(args.output):
         raise Exception("The output boundaries table already exists")
 
-    # Check whether --max-genomes >= --min-genomes
-    if args.max_genomes and args.max_genomes < args.min_genomes:
-        raise ValueError("--max-genomes must always be greater than or equals to --min-genomes")
+    if args.max_nodes and args.max_nodes < args.min_nodes:
+        raise ValueError("--max-nodes must always be greater than or equals to --min-nodes")
 
     # Also create the temporary folder
     # Do not raise an exception in case it already exists
@@ -549,9 +512,8 @@ def main() -> None:
         args.tmp_dir,
         args.output,
         flat_structure=args.flat_structure,
-        max_genomes=args.max_genomes,
-        min_genomes=args.min_genomes,
-        consider_mags=args.consider_mags,
+        max_nodes=args.max_nodes,
+        min_nodes=args.min_nodes,
         superkingdom=args.superkingdom,
         logger=logger,
         verbose=args.verbose,
@@ -565,9 +527,11 @@ def main() -> None:
             logger=logger,
             verbose=args.verbose,
         )
+
         shutil.rmtree(args.tmp_dir, ignore_errors=True)
 
     t1 = time.time()
+
     println(
         "Total elapsed time {}s".format(int(t1 - t0)),
         logger=logger,

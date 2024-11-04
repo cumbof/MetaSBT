@@ -1,34 +1,56 @@
 #!/usr/bin/env python3
-"""Average-linkage hierarchical clustering based on MASH genomic distances with Fastcluster.
+"""Average-linkage hierarchical clustering based on ANI distances with Fastcluster.
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.1"
-__date__ = "Apr 22, 2024"
+__version__ = "0.1.2"
+__date__ = "Sep 12, 2024"
 
 import argparse as ap
 import errno
+import math
+import multiprocessing as mp
 import os
 import subprocess
+import sys
 from collections import Counter
 from typing import List, Tuple
 
 import fastcluster
 import scipy.cluster.hierarchy as hier
 
+import metasbt  # type: ignore
+
 TOOL_ID = "cluster"
 
 # Define the list of dependencies
 DEPENDENCIES = [
     "gzip",
-    "mash",
+    "howdesbt",
 ]
+
+# Assume MetaSBT is installed
+# Define the modules root directory
+MODULES_DIR = os.path.join(os.path.dirname(metasbt.__file__), "modules")
+
+# Define the path to utils.py
+UTILS_FILEPATH = os.path.join(MODULES_DIR, "utils.py")
+
+# Check whether utils.py exists
+if not os.path.isfile(UTILS_FILEPATH):
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), UTILS_FILEPATH)
+
+# Add the modules dir to the system path
+sys.path.append(MODULES_DIR)
+
+# Finally import utils
+import utils
 
 
 def read_params():
     p = ap.ArgumentParser(
         prog=TOOL_ID,
-        description="Average-linkage hierarchical clustering based on MASH genomic distances with Fastcluster.",
+        description="Average-linkage hierarchical clustering based on ANI distances with Fastcluster.",
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -45,7 +67,20 @@ def read_params():
         type=int,
         default=21,
         dest="kmer_size",
-        help="Kmer size for building MASH sketches",
+        help="Kmer size for building Bloom Filter sketches",
+    )
+    p.add_argument(
+        "--min-occurrences",
+        type=int,
+        default=21,
+        dest="min_occurrences",
+        help="Minimum number of kmer occurrences",
+    )
+    p.add_argument(
+        "--nproc",
+        type=int,
+        default=1,
+        help="Make it parallel",
     )
     p.add_argument(
         "--out-file",
@@ -59,13 +94,13 @@ def read_params():
         type=int,
         default=10000,
         dest="sketch_size",
-        help="Sketch size for building MASH sketches",
+        help="Sketch size for building Bloom Filters",
     )
     p.add_argument(
         "--threshold",
         type=float,
         default=0.05,
-        help="MASH distance threshold for defining clusters with Fastcluster",
+        help="ANI distance threshold for defining clusters with Fastcluster",
     )
     p.add_argument(
         "--tmp-dir",
@@ -84,29 +119,29 @@ def read_params():
     return p.parse_args()
 
 
-def mash_distance(
-    mash_sketches: List[os.path.abspath],
-    mash_pastes: List[os.path.abspath],
+def bf_distances(
+    bf_sketches: List[os.path.abspath],
+    kmer_size: int,
     tmp_dir: os.path.abspath,
     nproc: int=1,
 ) -> Tuple[List[str], List[float]]:
-    """Compute the MASH distances between sketches and pastes, and build the condensed distance matrix.
+    """Compute the ANI distances between sketches, and build the condensed distance matrix.
 
     Parameters
     ----------
-    mash_sketches : list
-        List with paths to the MASH sketch files.
-    mash_pastes : list
-        List with paths to the MASH paste files.
+    bf_sketches : list
+        List with paths to the BF sketch files.
+    kmer_size : int
+        The length of the k-mers.
     tmp_dir : os.path.abspath
         Path to the temporary folder.
     nproc : int, default 1
-        Make the computation of MASH distances parallel.
+        Make the computation of BF distances parallel.
 
     Raises
     ------
     Exception
-        In case an unexpected error occurred while computing MASH dist.
+        In case an unexpected error occurred while computing BF distances.
 
     Returns
     -------
@@ -114,135 +149,50 @@ def mash_distance(
         A tuple with the list of sequence names and the condensed distance matrix as list.
     """
 
-    mash_folder = os.path.join(tmp_dir, "distances")
+    dist_folder = os.path.join(tmp_dir, "distances")
 
-    if not os.path.isdir(mash_folder):
-        os.makedirs(mash_folder, exist_ok=True)
+    if not os.path.isdir(dist_folder):
+        os.makedirs(dist_folder, exist_ok=True)
 
-    input_names = [os.path.splitext(os.path.basename(filepath))[0] for filepath in mash_sketches]
+    input_names = [os.path.splitext(os.path.basename(filepath))[0] for filepath in bf_sketches]
 
     condensed_distance_matrix = list()
 
-    # TODO: Make it parallel
-    for mash_sketch_pos, mash_sketch in enumerate(mash_sketches):
-        distance_filepath = os.path.join(mash_folder, "{}.tsv".format(os.path.splitext(os.path.basename(mash_sketch))[0]))
+    dists = dict()
 
-        if not os.path.isfile(distance_filepath):
-            # TODO: A distance file cannot be recovered in this way.
-            #       It should take track of the last mash paste file first.
-            for mash_paste in mash_pastes:
-                try:
-                    with open(distance_filepath, "a+") as dist_file:
-                        subprocess.check_call(
-                            [
-                                "mash",
-                                "dist",
-                                "-p",
-                                str(nproc),
-                                "-t",
-                                mash_sketch,
-                                mash_paste,
-                            ],
-                            stdout=dist_file,
-                            stderr=subprocess.DEVNULL
-                        )
+    with mp.Pool(processes=nproc) as pool:
+        jobs = [
+            pool.apply_async(
+                utils.ani_distance,
+                args=(
+                    bf_sketch_1,
+                    kmer_size,
+                    bf_sketches[bf_sketch_pos+1:],
+                    dist_folder,
+                )
+            ) for bf_sketch_pos, bf_sketch_1 in enumerate(bf_sketches)
+        ]
 
-                except subprocess.CalledProcessError as e:
-                    raise Exception("An error has occurred while running MASH dist on {}".format(mash_sketch)).with_traceback(e.__traceback__) 
+        for job in jobs:
+            source, target_dists = job.get()
 
-        distances_dict = {
-            os.path.splitext(os.path.basename(line.strip().split("\t")[0]))[0]: float(line.strip().split()[1])
-            for line in open(distance_filepath).readlines() if line.strip() and not line.strip().startswith("#")
-        }
+            dists[source] = target_dists
 
-        # Sort distances according to input_names
-        distances = [distances_dict[input_name] for input_name in input_names]
-
-        # Populate the condensed distance matrix
-        condensed_distance_matrix.extend(distances[mash_sketch_pos+1:])
+    for bf_sketch in bf_sketches:
+        condensed_distance_matrix.extend(dists[bf_sketch])
 
     return input_names, condensed_distance_matrix
 
 
-def mash_paste(filepaths: List[os.path.abspath], tmp_dir: os.path.abspath) -> os.path.abspath:
-    """Paste MASH sketches.
-
-    Parameters
-    ----------
-    filepaths : list
-        List of paths to the MASH sketch files..
-    tmp_dir : os.path.abspath
-        Path to the temporary folder.
-
-    Raises
-    ------
-    FileNotFoundError
-        If a paste file does not exist.
-    Exception
-        In case an unexpected error occurred while building a MASH paste file.
-
-    Returns
-    -------
-    list
-        A list of paths to the MASH pastes.
-    """
-
-    mash_folder = os.path.join(tmp_dir, "pastes")
-
-    if not os.path.isdir(mash_folder):
-        os.makedirs(mash_folder, exist_ok=True)
-
-    mash_pastes = list()
-
-    # Split the list of input file paths into N chunks of up to 50000 elements each
-    filepaths_chunks = [filepaths[i:i+50000] for i in range(0, len(filepaths), 50000)]
-
-    for chunk_count, filepaths_chunk in enumerate(filepaths_chunks):
-        sketches_filepath = os.path.join(mash_folder, "paste_{}.txt".format(chunk_count))
-
-        if not os.path.isfile(sketches_filepath):
-            # Write a file with the list of sketches file paths to paste
-            with open(sketches_filepath, "w+") as sketches_paste_list:
-                for sketch_filepath in filepaths_chunk:
-                    sketches_paste_list.write("{}\n".format(sketch_filepath))
-
-        mash_paste_filepath = os.path.join(
-            os.path.dirname(sketches_filepath),
-            "{}.msh".format(os.path.splitext(os.path.basename(sketches_filepath))[0])
-        )
-
-        if not os.path.isfile(mash_paste_filepath):
-            try:
-                # Paste the MASH sketches
-                subprocess.check_call(
-                    [
-                        "mash",
-                        "paste",
-                        "-l",
-                        os.path.splitext(mash_paste_filepath)[0],
-                        sketches_filepath,
-                    ],
-                    stderr=subprocess.DEVNULL
-                )
-
-                if not os.path.isfile(mash_paste_filepath):
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), mash_paste_filepath)
-
-            except subprocess.CalledProcessError as e:
-                raise Exception("An error has occurred while running MASH paste").with_traceback(e.__traceback__)
-
-        mash_pastes.append(mash_paste_filepath)
-
-    return mash_pastes
-
-
-def mash_sketch(
+def bf_sketch(
     filepaths: List[os.path.abspath],
     tmp_dir: os.path.abspath,
     kmer_size: int=21,
+    min_occurrences: int=2,
     sketch_size: int=10000,
+    nproc: int=1
 ) -> List[os.path.abspath]:
-    """Build MASH sketches.
+    """Build Bloom Filter sketches.
 
     Parameters
     ----------
@@ -251,62 +201,68 @@ def mash_sketch(
     tmp_dir : os.path.abspath
         Path to the temporary folder.
     kmer_size : int, default 21
-        Length of kmers for building MASH sketches.
+        Length of kmers for building BF sketches.
+    min_occurrences : int, default 2
+        Minimum number of kmer occurrences.
     sketch_size : int, default 10000
-        Size of the MASH sketch.
+        Size of the BF sketch.
+    nproc : int, default 1
+        Make it parallel.
 
     Raises
     ------
     FileNotFoundError
         If a sketch file does not exist.
     Exception
-        In case an unexpected error occurred while building a MASH sketch file.
+        In case an unexpected error occurred while building a BF sketch file.
 
     Returns
     -------
     list
-        A list of paths to the MASH sketches.
+        A list of paths to the BF sketches.
     """
 
-    mash_folder = os.path.join(tmp_dir, "sketches")
+    bf_folder = os.path.join(tmp_dir, "sketches")
 
-    if not os.path.isdir(mash_folder):
-        os.makedirs(mash_folder, exist_ok=True)
+    if not os.path.isdir(bf_folder):
+        os.makedirs(bf_folder, exist_ok=True)
 
-    mash_filepaths = list()
+    bf_filepaths = list()
 
     # TODO: Make it parallel
     for filepath in filepaths:
         # Assume these files are all unzipped, in fasta format, and with .fna extension
-        mash_filepath = os.path.join(mash_folder, "{}.msh".format(os.path.splitext(os.path.basename(filepath))[0]))
+        bf_filepath = os.path.join(bf_folder, "{}.bf".format(os.path.splitext(os.path.basename(filepath))[0]))
 
-        if not os.path.isfile(mash_filepath):
+        if not os.path.isfile(bf_filepath):
             try:
-                # Build the MASH sketch
+                # Build the BF sketch
                 subprocess.check_call(
                     [
-                        "mash",
-                        "sketch",
-                        "-k",
-                        str(kmer_size),
-                        "-s",
-                        str(sketch_size),
-                        "-o",
-                        mash_filepath,
+                        "howdesbt",
+                        "makebf",
+                        "--k={}".format(kmer_size),
+                        "--min={}".format(min_occurrences),
+                        "--bits={}".format(sketch_size),
+                        "--hashes=1",
+                        "--seed=0,0",
                         filepath,
+                        "--out={}".format(bf_filepath),
+                        "--threads={}".format(nproc),
                     ],
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
 
-                if not os.path.isfile(mash_filepath):
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), mash_filepath)
+                if not os.path.isfile(bf_filepath):
+                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), bf_filepath)
 
             except subprocess.CalledProcessError as e:
-                raise Exception("An error has occurred while running MASH sketch on {}".format(filepath)).with_traceback(e.__traceback__)
+                raise Exception("An error has occurred while running BF sketch on {}".format(filepath)).with_traceback(e.__traceback__)
 
-        mash_filepaths.append(mash_filepath)
+        bf_filepaths.append(bf_filepath)
 
-    return mash_filepaths
+    return bf_filepaths
 
 
 def unzip_files(filepaths: List[os.path.abspath], tmp_dir: os.path.abspath) -> List[os.path.abspath]:
@@ -435,17 +391,20 @@ def main() -> None:
     print("Unzipping file if Gzip compressed")
     input_filepaths = unzip_files(input_filepaths, args.tmp_dir)
 
-    # Compute MASH sketches
-    print("Computing MASH sketches")
-    mash_sketches = mash_sketch(input_filepaths, args.tmp_dir, kmer_size=args.kmer_size, sketch_size=args.sketch_size)
+    # Compute BF sketches
+    print("Computing BF sketches")
+    bf_sketches = bf_sketch(
+        input_filepaths,
+        args.tmp_dir,
+        kmer_size=args.kmer_size,
+        min_occurrences=args.min_occurrences,
+        sketch_size=args.sketch_size,
+        nproc=args.nproc,
+    )
 
-    # Paste all the MASH sketches
-    print("Pasting MASH sketches")
-    mash_pastes = mash_paste(mash_sketches, args.tmp_dir)
-
-    # Compute the MASH distances pair-wise
-    print("Computing MASH distances and building the condensed distance matrix")
-    input_names, condensed_matrix = mash_distance(mash_sketches, mash_pastes, args.tmp_dir)
+    # Compute the BF distances pair-wise
+    print("Computing BF ANI distances and building the condensed similarity matrix")
+    input_names, condensed_matrix = bf_distances(bf_sketches, args.kmer_size, args.tmp_dir, args.nproc)
 
     # Run fastcluster
     print("Computing a average-linkage hierarchical clustering")

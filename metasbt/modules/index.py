@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.2"
-__date__ = "Apr 11, 2024"
+__version__ = "0.1.3"
+__date__ = "Sep 24, 2024"
 
 import argparse as ap
 import errno
@@ -532,6 +532,7 @@ def process_input_genomes(
     db_dir: os.path.abspath,
     tmp_dir: os.path.abspath,
     kmer_len: int,
+    min_kmer_occurrences: int=2,
     input_extension: str="fna.gz",
     cluster_prefix: str="MSBT",
     nproc: int=1,
@@ -559,6 +560,8 @@ def process_input_genomes(
         Path to the temporary folder.
     kmer_len : int
         Length of the kmers.
+    min_kmer_occurrences : int, default 2
+        Minimum number of kmer occurrences.
     input_extension : str, default "fna.gz"
         File extension of the input files in `genomes_list`.
     cluster_prefix : str, default "MSBT"
@@ -739,6 +742,7 @@ def process_input_genomes(
                 cluster_id,
                 tmp_dir,
                 kmer_len,
+                min_occurrences=min_kmer_occurrences,
                 filter_size=None,
                 nproc=nproc,
                 similarity=similarity,
@@ -994,7 +998,7 @@ def estimate_bf_size_and_howdesbt(
             # Compute the theta distance between genomes
             bfdistance_theta = bfaction(
                 bf_filepaths,
-                os.path.join(tmp_dir, "howdesbt"),
+                os.path.join(tmp_dir, "filters"),
                 kmer_len,
                 min_occurrences=min_kmer_occurrences,
                 filter_size=filter_size,
@@ -1129,7 +1133,7 @@ def index(
         with mp.Pool(processes=nproc) as pool:
             jobs = [
                 pool.apply_async(strand, args=(genome_path, os.path.join(tmp_dir, "uniform_strand"),))
-                for genome_path in genome_paths
+                    for genome_path in genome_paths
             ]
 
             for job in jobs:
@@ -1165,6 +1169,7 @@ def index(
         db_dir=db_dir,
         tmp_dir=tmp_dir,
         kmer_len=kmer_len,
+        min_kmer_occurrences=min_kmer_occurrences,
         input_extension=input_extension,
         cluster_prefix=cluster_prefix,
         nproc=nproc,
@@ -1386,7 +1391,7 @@ def index(
                     # Run HowDeSBT only in case the bloom filter representation of the current cluster does not exist
                     jobs = [
                         pool.apply_async(howdesbt_partial, args=(level_dir,), callback=progress)
-                        for level_dir in folders if not os.path.isfile(os.path.join(level_dir, "{}.bf".format(os.path.basename(level_dir))))
+                            for level_dir in folders if not os.path.isfile(os.path.join(level_dir, "{}.bf".format(os.path.basename(level_dir))))
                     ]
 
                     for job in jobs:
@@ -1573,9 +1578,11 @@ def main() -> None:
             logger=logger,
             verbose=args.verbose,
         )
+
         shutil.rmtree(args.tmp_dir, ignore_errors=True)
 
     t1 = time.time()
+
     println(
         "Total elapsed time {}s".format(int(t1 - t0)),
         logger=logger,

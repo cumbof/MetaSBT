@@ -4,12 +4,14 @@ with a list of sequences, one per line. In case of an input genomes, results on 
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.1"
-__date__ = "May 25, 2023"
+__version__ = "0.1.2"
+__date__ = "Sep 24, 2024"
 
 import argparse as ap
 import errno
+import math
 import os
+import sys
 import time
 from functools import partial
 from logging import Logger
@@ -19,7 +21,7 @@ from typing import Optional
 # tries to load them for accessing their variables
 try:
     # Load utility functions
-    from utils import get_file_info, init_logger, number, println, run  # type: ignore
+    from utils import bfaction, get_file_info, init_logger, number, println, run  # type: ignore
 except Exception:
     pass
 
@@ -70,6 +72,13 @@ def read_params():
         help="Expand the input query on all the taxonomic levels",
     )
     p.add_argument(
+        "--filter-size",
+        type=int,
+        required=True,
+        dest="filter_size",
+        help="The bloom filter size"
+    )
+    p.add_argument(
         "--input-file",
         type=os.path.abspath,
         required=True,
@@ -94,9 +103,23 @@ def read_params():
         ),
     )
     p.add_argument(
+        "--kmer-len",
+        type=int,
+        required=True,
+        dest="kmer_len",
+        help="The length of the k-mers used to build the BF sketches in a Sequence Bloom Tree"
+    )
+    p.add_argument(
         "--log",
         type=os.path.abspath,
         help="Path to the log file. Used to keep track of messages and errors printed on the stdout and stderr"
+    )
+    p.add_argument(
+        "--min-occurrences",
+        type=int,
+        required=True,
+        dest="min_occurrences",
+        help="The minimum number of occurrences of k-mers"
     )
     p.add_argument(
         "--output-dir",
@@ -130,6 +153,13 @@ def read_params():
             "Fraction of query kmers that must be present in a leaf to be considered a match. "
             "This must be between 0.0 and 1.0"
         ),
+    )
+    p.add_argument(
+        "--tmp-dir",
+        type=os.path.abspath,
+        required=True,
+        dest="tmp_dir",
+        help="The path to the temporary folder",
     )
     p.add_argument(
         "--tree",
@@ -218,7 +248,11 @@ def profile_genome(
     input_file: os.path.abspath,
     input_id: str,
     tree: os.path.abspath,
+    kmer_len : int,
+    min_occurrences : int,
+    filter_size : int,
     output_dir: os.path.abspath,
+    tmp_dir: os.path.abspath,
     threshold: float=0.0,
     expand: bool=False,
     stop_at: Optional[str]=None,
@@ -238,8 +272,16 @@ def profile_genome(
         Unique identifier of the input file.
     tree : os.path.abspath
         Path to the tree definition file.
+    kmer_len : int
+        The length of k-mers used to build the sketches on genomes in the tree.
+    min_occurrences : int,
+        Minimum number of k-mer occurrences.
+    filter_size : int,
+        The bloom filter size.
     output_dir : os.path.abspath
         Path to the output folder.
+    tmp_dir : os.path.abspath
+        Path to the temporary folder.
     threshold : float, default 0.0
         The query threshold.
     expand : bool, default False
@@ -266,7 +308,7 @@ def profile_genome(
     matches_dir = os.path.join(output_dir, input_id)
     os.makedirs(matches_dir, exist_ok=True)
 
-    # Best matches and their scores
+    # Best matches and their ANI scores
     best_matches = dict()
 
     # Path to the trees for keeping querying the database
@@ -278,11 +320,11 @@ def profile_genome(
         printline("Querying {}".format(curr_tree))
 
         # Retrieve the taxonomic level name from the tree file path
-        id_dir = os.path.dirname(curr_tree)
-        level_dir = os.path.dirname(id_dir)
+        level_dir = os.path.dirname(os.path.dirname(curr_tree))
         level = os.path.basename(level_dir)
 
         levels = [level_dir.split(os.sep).index(level) for level in level_dir.split(os.sep) if level.startswith("k__")]
+
         curr_taxonomy = ""
 
         if levels:
@@ -320,7 +362,7 @@ def profile_genome(
             )
 
         if os.path.isfile(output_file):
-            # Take track of common and total kmers
+            # Keep track of common and total kmers
             matches_kmers = dict()
 
             # Read the output file
@@ -332,6 +374,7 @@ def profile_genome(
                             line_split = line.split(" ")
 
                             node = line_split[0]
+
                             if level.startswith("s__"):
                                 node = "t__{}".format(node)
 
@@ -343,8 +386,10 @@ def profile_genome(
                             
                             matches_kmers[node]["common"] += int(hits[0])
                             matches_kmers[node]["total"] += int(hits[1])
+
+                            # Define the score as the fraction of common kmers on the total number of kmers in the input genome
                             matches_kmers[node]["score"] = round(matches_kmers[node]["common"] / matches_kmers[node]["total"], 2)
-            
+
             # Search for the best match
             # The best match is defined as the genome with the highest score
             best_match = sorted(matches_kmers.keys(), key=lambda match: matches_kmers[match]["score"])[-1]
@@ -443,6 +488,9 @@ def profile_genome(
             )
 
     if best_matches:
+        # Retrieve the root folder path from `tree`
+        root_folder = os.path.dirname(os.path.dirname(tree))
+
         for level in [
             "kingdom",
             "phylum",
@@ -471,11 +519,59 @@ def profile_genome(
 
             best_common = sorted(equally_best, key=lambda match: best_matches[match]["common"])[-1]
 
+            best_common_name = best_common.split("|")[-1]
+
+            if level == "t__":
+                best_common_name = best_common_name[3:]
+
+                node_bf_filepath = os.path.join(root_folder, os.sep.join(best_common.split("|")[:-1]), "filters", "{}.bf".format(best_common_name))
+
+            else:
+                node_bf_filepath = os.path.join(root_folder, best_common.replace("|", os.sep), "{}.bf".format(best_common_name))
+
+            common_kmers = bfaction(
+                [input_file, node_bf_filepath],
+                tmp_dir,
+                kmer_len,
+                min_occurrences=min_occurrences,
+                filter_size=filter_size,
+                nproc=1,
+                action="bfdistance",
+                mode="intersect"
+            )
+
+            union_kmers = bfaction(
+                [input_file, node_bf_filepath],
+                tmp_dir,
+                kmer_len,
+                min_occurrences=min_occurrences,
+                filter_size=filter_size,
+                nproc=1,
+                action="bfdistance",
+                mode="union"
+            )
+
+            _, input_file_name, _, _ = get_file_info(input_file, check_supported=False, check_exists=False)
+
+            _, node_bf_name, _, _ = get_file_info(node_bf_filepath, check_supported=False, check_exists=False)
+
+            # Compute the Jaccard similarity
+            jaccard_similarity = common_kmers[input_file_name][node_bf_name]/union_kmers[input_file_name][node_bf_name]
+
+            if jaccard_similarity == 0.0:
+                # This is to avoid ValueError: math domain error
+                jaccard_similarity = sys.float_info.min
+
+            # https://doi.org/10.1093/bioinformatics/btae452 Formula #8
+            # Same similarity measure implemented in MASH
+            # Compute the ANI between the input genome and the best match
+            ani_similarity = round(1 + (1/kmer_len) * math.log((2*jaccard_similarity) / (1+jaccard_similarity)), 5)
+
             printline(
                 "Closest {}: {} (score {})".format(
                     level if not level.startswith("t__") else "genome",
                     best_common,
-                    best_matches[best_common]["score"],
+                    ani_similarity,
                 )
             )
 
@@ -490,7 +586,7 @@ def profile_genome(
                             best_matches[best_common]["common"],  # Number of kmers in common
                             best_matches[best_common]["total"],  # Total number of kmers in query
                         ),
-                        best_matches[best_common]["score"],  # Score
+                        ani_similarity,  # Score
                     )
                 )
 
@@ -549,7 +645,11 @@ def main() -> None:
             args.input_file,
             args.input_id,
             args.tree,
+            args.kmer_len,
+            args.min_occurrences,
+            args.filter_size,
             args.output_dir,
+            tmp_dir=args.tmp_dir,
             threshold=args.threshold,
             expand=args.expand,
             stop_at=args.stop_at,
@@ -560,6 +660,7 @@ def main() -> None:
         )
 
     t1 = time.time()
+
     println(
         "Total elapsed time {}s".format(int(t1 - t0)),
         logger=logger,
