@@ -5,71 +5,23 @@
 [@cumbof/metasbt@0.1.4](https://github.com/cumbof/MetaSBT/releases/tag/0.1.4)
 
 New object-oriented implementation of MetaSBT.
-
-Warning: this version is not compatible with the previous ones!
-
-### New features
-
-- The whole framework has been reimplemented from scratch;
-- It provides the following subroutines:
-  - `db`: List and retrieve public MetaSBT databases;
-  - `index`: Index a set of reference genomes and build the first baseline of a MetaSBT database;
-  - `kraken`: Export a MetaSBT database into a custom kraken database;
-  - `pack`: Build a compressed tarball with a MetaSBT database and report its sha256;
-  - `profile`: Profile an input genome and report the closest cluster at all the seven taxonomic levels and the closest genome in a MetaSBT database;
-  - `sketch`: Sketch the input genomes;
-  - `summarize`: Summarize the content of a MetaSBT database and report some statistics;
-  - `test`: Check for dependencies and run unit tests. This must be used by code maintainers only;
-  - `unpack`: Unpack a local MetaSBT tarball database;
-  - `update`: Update a MetaSBT database with new metagenome-assembled genomes.
-
-### Fixes
-
-- Clusters' boundaries are now defined as the minimum and maximum Average Nucleotide Identity (ANI) between all the genomes under a specific cluster.
-
-## Version 0.1.3
-
-[@cumbof/metasbt@0.1.3](https://github.com/cumbof/MetaSBT/releases/tag/0.1.3)
+Clusters are consistent with the definition of Average Nucleotide Identity (ANI).
+Clusters' boundaries are defined as the minimum and maximum ANI distance between all the genomes under a specific cluster.
 
 ### New features
 
-- New option `--uniform-strand` available with the `index` and `update` modules for processing the input sequences all on the same strand. Mainly used for viral sequences;
-- New option `--use-representatives` available with the `index` module to use only three representative genomes at the species level;
-- New option `--resume` available with the `index` and `update` modules able to resume the index and update processes in case of unexpected errors;
-- New `expand_fasta.py` utility in `scripts` to expand input fasta files into multiple file. One fasta file for each read. Mainly used for viral sequences;
-- New `fastcluster.py` utility in `script` to compute a average-linkage hierarchical clustering of a set of genomes based on their Mash distances;
-- Both the `index` and `update` modules now display a worning message in case the configuration file under `--resume` has been previously generated with a different version of MetaSBT;
-- Both the `index` and `update` modules now integrate `CheckV` and `EukCC` for assessing the quality of viruses and eukaryotes;
-- `CheckM` has been upgraded to `CheckM2`;
-- The `cluster()` function in `utils` is now running in parallel;
-- The `howdesbt bfdistance` command for computing the distances between bloom filters is now running in parallel.
+It provides the following subroutines:
+- `db`: List and retrieve public MetaSBT databases;
+- `index`: Index a set of reference genomes and build the first baseline of a MetaSBT database;
+- `kraken`: Export a MetaSBT database into a custom kraken database;
+- `pack`: Build a compressed tarball with a MetaSBT database and report its sha256;
+- `profile`: Profile an input genome and report the closest cluster at all the seven taxonomic levels and the closest genome in a MetaSBT database;
+- `sketch`: Sketch the input genomes;
+- `summarize`: Summarize the content of a MetaSBT database and report some statistics;
+- `test`: Check for dependencies and run unit tests. This must be used by code maintainers only;
+- `unpack`: Unpack a local MetaSBT tarball database;
+- `update`: Update a MetaSBT database with new metagenome-assembled genomes.
 
 ### Fixes
 
-- It correctly checks now for new framework versions when starting a new `metasbt` instance;
-- Fixed genome quality filtering on completeness and contamination during the `update`;
-- Improving docstring adopting the [numpydoc](https://numpydoc.readthedocs.io/en/latest/) documentation format.
-
-## Version 0.1.2
-
-[@cumbof/metasbt@0.1.2](https://github.com/cumbof/MetaSBT/releases/tag/0.1.2)
-
-First public stable release of MetaSBT.
-
-It is composed of the following modules:
-
-- `index`: build a MetaSBT database by building a series of Sequence Bloom Trees at different taxonomic levels;
-- `boundaries`: define taxonomy-specific boundaries as the minimum and maximum number of kmers in common between all the genomes under a specific cluster;
-- `profile`: taxonomically profile a genome by querying a MetaSBT database at different taxonomic levels;
-- `report`: build a report table describing the content of a MetaSBT database;
-- `update`: update a MetaSBT database with new genomes;
-- `tar`: pack a MetaSBT database into a ready-to-be-distributed tarball;
-- `install`: install a MetaSBT database tarball locally under a specific location of the file system.
-
-The framework also comes with a set of utilities:
-
-- `bf_sketch.py`: build minimal bloom filter sketches with cluster-specific marker kmers;
-- `esearch_txid.sh`: retrieve GCAs from NCBI GenBank given a specific taxonomic ID;
-- `get_ncbi_genomes.py`: retrieve reference genomes and metagenome-assembled genomes under a specific superkingdom and kingdom from NCBI GenBank;
-- `howdesbt_index.sh`: index genomes with HowDeSBT;
-- `uniform_inputs.sh`: uniform input genome files extension.
+None
