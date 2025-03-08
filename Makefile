@@ -14,8 +14,8 @@ format:
 	black --line-length 120 .
 
 # Install requirements and software
-install: metasbt/requirements.txt dist
-	pip install -r metasbt/requirements.txt
+install: requirements.txt dist
+	pip install -r requirements.txt
 	find dist -type f -iname "MetaSBT-*.tar.gz" -exec pip install {} \;
 
 # Run linting with tox
@@ -31,7 +31,7 @@ sdist: setup.py
 
 # Run all unit tests
 test:
-	find metasbt/tests/ -type f -iname "*.py" -exec python {} \;
+	python metasbt/metasbt.py test all
 
 # Uninstall package
 uninstall:
