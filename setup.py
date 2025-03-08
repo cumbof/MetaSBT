@@ -1,11 +1,9 @@
-import errno
-import os
 import platform
 import sys
 
 import setuptools
 
-from metasbt.metadata import __version__
+from metasbt.core import __version__
 
 if platform.system() not in ["Darwin", "Linux"]:
     sys.exit("MetaSBT does not work on {} platforms".format(platform.system()))
@@ -16,11 +14,6 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] 
             sys.version_info[0], sys.version_info[1], sys.version_info[2]
         )
     )
-
-REQUIREMENTS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "metasbt", "requirements.txt")
-
-if not os.path.isfile(REQUIREMENTS):
-    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), REQUIREMENTS)
 
 setuptools.setup(
     author="Fabio Cumbo",
@@ -41,7 +34,12 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:main"]},
     install_requires=[
-        requirement.strip() for requirement in open(REQUIREMENTS).readlines() if requirement.strip()
+        "biopython>=1.83",
+        "fastcluster>=1.2.6",
+        "packaging>=23.2",
+        "requests>=2.28.0",
+        "tabulate>=0.9.0",
+        "tqdm>=4.38.0",
     ],
     keywords=[
         "bioinformatics",
@@ -60,9 +58,6 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     name="MetaSBT",
     packages=setuptools.find_packages(),
-    package_data={
-        "metasbt": ["requirements.txt"],
-    },
     platforms=["Linux", "Mac OSX"],
     project_urls={
         "Databases": "https://github.com/cumbof/MetaSBT-DBs",
@@ -73,18 +68,7 @@ setuptools.setup(
     },
     python_requires=">=3.8",
     scripts=[
-        "scripts/bf_sketch.py",
-        "scripts/cluster.py",
-        "scripts/esearch_txid.sh",
-        "scripts/expand_fasta.py",
         "scripts/get_ncbi_genomes.py",
-        "scripts/howdesbt_index.sh",
-        "scripts/kraken.py",
-        "scripts/minimizers.sh",
-        "scripts/pack.sh",
-        "scripts/uniform_inputs.sh",
-        "scripts/uniform_strands.py",
-        "scripts/unpack.sh",
     ],
     url="http://github.com/cumbof/MetaSBT",
     version=__version__,
