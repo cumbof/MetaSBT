@@ -6,7 +6,7 @@ Please visit the official [wiki](https://github.com/cumbof/MetaSBT/wiki) to get 
 
 Also note that we maintain a series of public databases built with our framework over a set of curated microbial genomes. They are all indexed in our [MetaSBT-DBs](https://github.com/cumbof/MetaSBT-DBs) repository.
 
-> __Note:__
+> [!NOTE]
 > Are you interested in using our software and databases, or you want to build your own private database, but you do not have enough computational resources? Get in touch with us, we are always happy to collaborate!
 
 ## Credits
