@@ -22,6 +22,8 @@ It provides the following subroutines:
 - `unpack`: Unpack a local MetaSBT tarball database;
 - `update`: Update a MetaSBT database with new metagenome-assembled genomes.
 
+The MetaSBT [core](https://github.com/cumbof/MetaSBT/blob/main/metasbt/core.py) provides an interface to the `Database` and `Entry` class abstractions.
+
 ### Fixes
 
 None
