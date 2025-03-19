@@ -1,6 +1,6 @@
 # MetaSBT
 
-__A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees__
+A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees
 
 Please visit the official [wiki](https://github.com/cumbof/MetaSBT/wiki) to get started playing with MetaSBT.
 
