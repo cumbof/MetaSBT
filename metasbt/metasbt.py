@@ -330,6 +330,17 @@ class MetaSBT(object):
             )
         )
         general_group.add_argument(
+            "--dereplicate-threshold",
+            required=False,
+            default=0.0,
+            type=float,
+            dest="dereplicate_threshold",
+            help=(
+                "Dereplicate genomes based of their ANI distance according the specified threshold. "
+                "The dereplication process is triggered in case of a threshold >0.0."
+            )
+        )
+        general_group.add_argument(
             "--nproc",
             required=False,
             default=os.cpu_count(),
@@ -393,6 +404,24 @@ class MetaSBT(object):
             help="Limit the estimation of the optimal kmer size with kitsune to this size at most.",
         )
 
+        # Group of arguments for assessing the quality of genomes
+        quality_group = parser.add_argument_group("Assess the quality of input genomes")
+
+        quality_group.add_argument(
+            "--completeness",
+            type=float,
+            required=False,
+            default=0.0,
+            help="Percentage threshold on genomes completeness.",
+        )
+        quality_group.add_argument(
+            "--contamination",
+            type=float,
+            required=False,
+            default=100.0,
+            help="Percentage threshold on genomes contamination.",
+        )
+
         # Load arguments
         args = parser.parse_args(argv)
 
@@ -435,16 +464,38 @@ class MetaSBT(object):
                         # Index the references dict by the genome filepath
                         references[genome_filepath] = taxonomy
 
+        # Define the set of paths to the reference genomes
+        genomes = set(references.keys())
+
         # Define the database metadata
         # Eventually, estimate the optimal kmer size and a proper bloom filter size
         self.database.set_configs(
-            set(references.keys()),
+            genomes,
             min_kmer_occurrence=args.min_kmer_occurrences,
             kmer_size=args.kmer_size,
             kmer_max=args.limit_kmer_size,
             filter_size=args.filter_size,
             filter_expand_by=args.increase_filter_size
         )
+
+        if args.completeness > 0.0 or args.contamination < 100.0:
+            # Retrieve the kingdom
+            # Assume the input genomes are all under the same kingdom
+            kingdom = references[list(references.keys())[0]].split("|")[0][3:]
+
+            # Asses the quality of the input genomes
+            quality = Database.qc(genomes, kingdom, nproc=args.nproc, tmp=tmp_dir)
+
+            # Filter out genomes according to the completeness and contamination thresholds
+            genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
+
+        if args.dereplicate_threshold > 0.0:
+            # Dereplicate genomes based on their ANI distance
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold)
+
+        # Reshape the references dict
+        # Consider genomes that passed the dereplication process only
+        references = {genome: references[genome] for genome in genomes}
 
         # Add references to the database
         for genome in references:
@@ -874,6 +925,7 @@ class MetaSBT(object):
             def progress(*args):
                 progress_bar.update()
 
+            # TODO Uncertainty and pruning threshold should not be hardcoded
             jobs = [
                 pool.apply_async(
                     Database._profile, 
@@ -881,8 +933,8 @@ class MetaSBT(object):
                         self.database,
                         genome_filepath,
                         sketch_filepath, 
-                        uncertainty,
-                        pruning_threshold,
+                        20.0,  # uncertainty
+                        0.0,  # pruning threshold
                     ),
                     callback=progress
                 ) for genome_filepath, sketch_filepath in zip(genomes, sketches)
@@ -1374,6 +1426,31 @@ class MetaSBT(object):
             help="Path to the file with a list of paths to the input genomes."
         )
         parser.add_argument(
+            "--dereplicate-threshold",
+            required=False,
+            default=0.0,
+            type=float,
+            dest="dereplicate_threshold",
+            help=(
+                "Dereplicate genomes based of their ANI distance according the specified threshold. "
+                "The dereplication process is triggered in case of a threshold >0.0."
+            )
+        )
+        parser.add_argument(
+            "--completeness",
+            type=float,
+            required=False,
+            default=0.0,
+            help="Percentage threshold on genomes completeness.",
+        )
+        parser.add_argument(
+            "--contamination",
+            type=float,
+            required=False,
+            default=100.0,
+            help="Percentage threshold on genomes contamination.",
+        )
+        parser.add_argument(
             "--nproc",
             required=False,
             type=os.cpu_count(),
@@ -1402,15 +1479,36 @@ class MetaSBT(object):
         # Use a flat structure by default
         self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
 
-        # Load the list of paths to the input genomes
-        # TODO These could be reference genomes as well
-        genomes = [args.genome] if args.genome else [line.strip() for line in open(args.genomes).readlines() if line.strip()]
+        # Load the set of paths to the input genomes
+        # TODO There could be reference genomes as well
+        genomes = {args.genome} if args.genome else {line.strip() for line in open(args.genomes).readlines() if line.strip()}
+
+        if args.completeness > 0.0 or args.contamination < 100.0:
+            # Retrieve the kingdom from the root node of the target database
+            # Assume the input genomes are all under the same kingdom
+            kingdom = list(self.database.clusters["kingdom"].keys())[0].split("|")[0][3:]
+
+            # Asses the quality of the input genomes
+            quality = Database.qc(genomes, kingdom, nproc=args.nproc, tmp=tmp_dir)
+
+            # Filter out genomes according to the completeness and contamination thresholds
+            genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
+
+        if args.dereplicate_threshold > 0.0:
+            # Dereplicate genomes based on their ANI distance
+            # Reshape the set of genomes
+            # Consider genomes that passed the dereplication process only (input-vs-input)
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold)
 
         # Profile the input genomes first
         # This also produce the bloom filter representation of the input genomes
         # Note that this function and `profile()` have the same set of arguments
         # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
         self.profile(argv)
+
+        if args.dereplicate_threshold > 0.0:
+            # Dereplicate the input genomes again versus the genomes in the database
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold, compare_with="database")
 
         species_assignments = dict()
 
