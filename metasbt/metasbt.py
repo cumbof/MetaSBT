@@ -190,7 +190,7 @@ class MetaSBT(object):
             "--folder",
             type=os.path.abspath,
             default=os.getcwd(),
-            help="The database version. It automatically select the most recent one if a version is not provided."
+            help="Store the selected database under this folder."
         )
 
         # Load arguments
@@ -314,7 +314,7 @@ class MetaSBT(object):
         )
         general_group.add_argument(
             "--database",
-            default="MetaSBT",
+            required=True,
             type=str,
             help="The database name."
         )
@@ -330,11 +330,10 @@ class MetaSBT(object):
             )
         )
         general_group.add_argument(
-            "--dereplicate-threshold",
+            "--dereplicate",
             required=False,
             default=0.0,
             type=float,
-            dest="dereplicate_threshold",
             help=(
                 "Dereplicate genomes based of their ANI distance according the specified threshold. "
                 "The dereplication process is triggered in case of a threshold >0.0."
@@ -347,7 +346,7 @@ class MetaSBT(object):
             type=int,
             help="Process the input genomes in parallel."
         )
-        parser.add_argument(
+        general_group.add_argument(
             "--pack",
             action="store_true",
             default=False,
@@ -362,7 +361,10 @@ class MetaSBT(object):
             type=int,
             required=False,
             dest="filter_size",
-            help="This is the size of the bloom filters."
+            help=(
+                "This is the size of the bloom filters. "
+                "It automatically estimates a proper bloom filter size if not provided."
+            )
         )
         filter_size_group.add_argument(
             "--increase-filter-size",
@@ -371,7 +373,6 @@ class MetaSBT(object):
             dest="increase_filter_size",
             help=(
                 "Increase the estimated filter size by the specified percentage. "
-                "This is used in conjunction with the --estimate-filter-size argument only. "
                 "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes."
             )
         )
@@ -394,7 +395,10 @@ class MetaSBT(object):
             type=int,
             required=False,
             dest="kmer_size",
-            help="The kmer size.",
+            help=(
+                "The kmer size. "
+                "It automatically estimates a proper bloom filter size if not provided."
+            )
         )
         kitsune_group.add_argument(
             "--limit-kmer-size",
@@ -489,9 +493,9 @@ class MetaSBT(object):
             # Filter out genomes according to the completeness and contamination thresholds
             genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
 
-        if args.dereplicate_threshold > 0.0:
+        if args.dereplicate > 0.0:
             # Dereplicate genomes based on their ANI distance
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold)
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
 
         # Reshape the references dict
         # Consider genomes that passed the dereplication process only
@@ -568,6 +572,9 @@ class MetaSBT(object):
             dest="ncbi_nodes",
             help="Path to the NCBI nodes.dmp file.",
         )
+
+        # Load arguments
+        args = parser.parse_args(argv)
 
         # Load the list of paths to the genome files
         # This is a dict with the paths to the input genomes indexed by their file name
@@ -891,7 +898,8 @@ class MetaSBT(object):
         parser.add_argument(
             "--nproc",
             required=False,
-            type=os.cpu_count(),
+            type=int,
+            default=os.cpu_count(),
             help="Process the input genomes in parallel."
         )
 
@@ -1426,11 +1434,11 @@ class MetaSBT(object):
             help="Path to the file with a list of paths to the input genomes."
         )
         parser.add_argument(
-            "--dereplicate-threshold",
+            "--dereplicate",
             required=False,
             default=0.0,
             type=float,
-            dest="dereplicate_threshold",
+            dest="dereplicate",
             help=(
                 "Dereplicate genomes based of their ANI distance according the specified threshold. "
                 "The dereplication process is triggered in case of a threshold >0.0."
@@ -1494,11 +1502,11 @@ class MetaSBT(object):
             # Filter out genomes according to the completeness and contamination thresholds
             genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
 
-        if args.dereplicate_threshold > 0.0:
+        if args.dereplicate > 0.0:
             # Dereplicate genomes based on their ANI distance
             # Reshape the set of genomes
             # Consider genomes that passed the dereplication process only (input-vs-input)
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold)
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
 
         # Profile the input genomes first
         # This also produce the bloom filter representation of the input genomes
@@ -1506,9 +1514,9 @@ class MetaSBT(object):
         # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
         self.profile(argv)
 
-        if args.dereplicate_threshold > 0.0:
+        if args.dereplicate > 0.0:
             # Dereplicate the input genomes again versus the genomes in the database
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate_threshold, compare_with="database")
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, compare_with="database")
 
         species_assignments = dict()
 
