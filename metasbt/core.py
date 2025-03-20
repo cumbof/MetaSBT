@@ -1,6 +1,7 @@
 """Object-Oriented implementation of MetaSBT with Database and Entry abstractions.
 """
 
+import copy
 import datetime
 import errno
 import json
@@ -28,12 +29,15 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__date__ = "Jan 21, 2025"
+__date__ = "Mar 19, 2025"
 __version__ = "0.1.4"
 
 # Define the list of external software dependencies
 DEPENDENCIES = [
-    "howdesbt",  # This should be installed with the `Makefile_full` configuration
+    "busco",
+    "checkm2",
+    "checkv",
+    "howdesbt",  # This must be installed with the `Makefile_full` configuration
     "kitsune",
     "ntcard"
 ]
@@ -1361,7 +1365,7 @@ class Database(object):
         processed = set()
 
         # Process clusters based on their taxonomic level
-        # All the Species first, then genera, and so on up to the kingdom
+        # All the species first, then genera, and so on up to the kingdom
         # Note that clusters are fuly defined here, but could contain some level of unknownness
         for level in reversed(self.__class__.levels):
             pos = self.__class__.levels.index(level)
@@ -2169,6 +2173,883 @@ class Database(object):
         return profiles
 
     @classmethod
+    def qc(
+        cls,
+        genomes: Set[os.path.abspath], 
+        kingdom: str, 
+        nproc: int=os.cpu_count(), 
+        tmp: os.path.abspath=os.getcwd()
+    ) -> Dict[os.path.abspath, Dict[str, float]]:
+        """Perform a quality control based on the genomes' kingdom.
+        Genomes from different kingdoms are not allowed to be in the same set.
+
+        Warning: here we suppose that the quality control pipelines and their databases are
+                 all available and configured.
+
+        Parameters
+        ----------
+        genomes : set
+            Set with paths to the input genomes.
+            Compressed files are not allowed here.
+        kingdom : str
+            The genomes' kingdom.
+            All genomes in the input set of genomes must belong to the same kingdom.
+            Possible values: "Viruses", "Bacteria", "Archaea", "Fungi".
+        nproc : int, default os.cpu_count()
+            Maximum number of CPUs for multiprocessing.
+        tmp : os.path.abspath, default os.getcwd()
+            Path to the temporary folder.
+
+        Raises
+        ------
+        Exception
+            - If there are no genomes in `genomes`;
+            - If the input genomes have an unsupported format;
+            - In case of an unexpected error while running a quality control pipeline.
+        ValueError
+            If the provided `kingdom` is not among the accepted values.
+        FileNotFoundException
+            - If the path to the tmp folder does not exist;
+            - If the output quality summary table does not exist.
+
+        Returns
+        -------
+        dict
+            A series of dictionaries as values of another dictionary indexed by the paths
+            to the input genomes, with the quality control statistics of completeness and
+            contamination.
+        """
+
+        if not genomes:
+            raise Exception("There are no genomes to quality control!")
+
+        for genome in genomes:
+            # Iterate over the paths to the genome files and check whether their format is supported
+            if not cls._is_supported(genome):
+                raise Exception(f"Genome file format not supported {genome}")
+
+        if not os.path.isdir(tmp):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), tmp)
+
+        if nproc <= 0 or nproc > os.cpu_count():
+            # Use all the available CPUs in case of negative values
+            # Otherwise, downscale nproc to the maximum number of CPUs available
+            nproc = os.cpu_count()
+
+        # Keep track of the quality control statistics of completeness and contamination
+        # for each of the input genomes
+        quality = {genome: {"completeness": 0.0, "contamination": 0.0} for genome in genomes}
+
+        if kingdom == "Viruses":
+            tmp = os.path.join(tmp, "checkv")
+
+            # CheckV requires a single input file with all the viral sequences in it
+            # We should merge all the genomes into a single fna file first
+            merged_filepath = os.path.join(tmp, "merged.fna")
+
+            if os.path.isfile(merged_filepath):
+                # Get rid of the merged.fna file if it already exists
+                os.unlink(merged_filepath)
+
+            # We need to map the contid IDs to the genome files
+            contig_to_genomes = dict()
+
+            with open(merged_filepath, "w+") as merged_file:
+                for genome in genomes:
+                    with open(genome) as genome_file:
+                        lines = genome_file.readlines()
+
+                        # Assuming the first line is not empty
+                        # Extract the contig ID from the first line
+                        contig_id = lines[0].strip()[1:]
+
+                        contig_to_genomes[contig] = genome
+
+                        # Write the genome content into the merged file
+                        merged_file.write("".join(lines))
+
+            try:
+                # Define the command line to run CheckV
+                command_line = [
+                    "checkv",
+                    "end_to_end",
+                    merged_filepath,
+                    tmp,
+                    "-t",
+                    nproc
+                ]
+
+                # Execute the command lines
+                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            except subprocess.CalledProcessError as e:
+                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+
+            # The output quality summary table is in the tmp folder
+            output_filepath = os.path.join(tmp, "quality_summary.tsv")
+
+            if not os.path.isfile(output_filepath):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_filepath)
+
+            # There could be multiple contigs for each of the genomes
+            # The final completeness and contamination is the average on all contigs
+            contigs = {genome: {"completeness": list(), "contamination": list()} for genome in genomes}
+
+            with open(output_filepath) as output:
+                # Retrieve the header line
+                header = output_table.readline().strip().split("\t")
+
+                for line in output:
+                    line = line.strip()
+
+                    if line:
+                        line_split = line.split("\t")
+
+                        # Retrieve the contg ID
+                        contig = line_split[header.index("contig")]
+
+                        # Retrieve the genomes from the `contig_to_genome` dictionary
+                        genome = contig_to_genome[contig]
+
+                        # Retrieve the completeness
+                        completeness = line_split[header.index("completeness")]
+
+                        if completeness != "NA":
+                            # Completeness could be NA if CheckV is unable to determine it
+                            completeness = 0.0
+
+                        completeness = float(completeness)
+
+                        # Retrieve the contamination
+                        contamination = float(line_split[header.index("contamination")])
+
+                        # Keep track of the completeness and contamination stats for this contig
+                        contigs[genome]["completeness"].append(completeness)
+
+                        contigs[genome]["contamination"].append(contamination)
+
+            for genome in contigs:
+                # Compute the average completeness and contamination in case of multiple contigs
+                completeness = statistics.average(contigs[genome]["completeness"])
+
+                contamination = statistics.average(contigs[genome]["contamination"])
+
+                # These are the final completeness and contamination stats
+                quality[genome]["completeness"] = completeness
+
+                quality[genome]["contamination"] = contamination
+
+        elif kingdom == "Bacteria" or kingdom == "Archaea":
+            tmp = os.path.join(tmp, "checkm2")
+
+            # CheckM2 requires all input genomes to be stored in the same folder
+            # We could make a symbolic link for each of the genomes
+            genomes_dir = os.path.join(tmp, "genomes")
+
+            for genome in genomes:
+                # CheckM2 also requires that the input genomes must all have the same file extension
+                # We can force it to be fna
+                symlink_filepath = os.path.join(genomes_dir, f"{os.path.splitext(os.path.basename(genome))[0]}.fna")
+
+                if not os.path.isfile(symlink_filepath):
+                    os.symlink(genome, symlink_filepath)
+
+            # Also define the path to the output folder
+            output_dir = os.path.join(tmp, "output")
+
+            try:
+                # Define the command line to run CheckM2
+                command_line = [
+                    "checkm2",
+                    "predict",
+                    "--input",
+                    genomes_dir,
+                    "--output-directory",
+                    output_dir,
+                    "--specific",
+                    "--extension",
+                    "fna",
+                    "--tmpdir",
+                    tmp,
+                    "--threads",
+                    nproc,
+                    "--stdout"
+                    "--force"
+                ]
+
+                # Execute the command lines
+                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            except subprocess.CalledProcessError as e:
+                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+
+            # The output quality summary table is in the tmp folder
+            output_filepath = os.path.join(tmp, "quality_summary.tsv")
+
+            if not os.path.isfile(output_filepath):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_filepath)
+
+            with open(output_filepath) as output:
+                # Retrieve the header line
+                header = output_table.readline().strip().split("\t")
+
+                for line in output:
+                    line = line.strip()
+
+                    if line:
+                        line_split = line.split("\t")
+
+                        # TODO Check for the columns containing the genome name and
+                        #      the completeness and contamination stats
+                        # TODO CheckM2 reports the genome name, so we should recover the whole path
+                        genome = line_split[0]
+
+                        completeness = float(line_split[1])
+
+                        contamination = float(line_split[2])
+
+                        # Finally, keep track of the genome quality stats
+                        quality[genome]["completeness"] = completeness
+
+                        quality[genome]["contamination"] = contamination
+
+        elif kingdom == "Fungi":
+            tmp = os.path.join(tmp, "busco")
+
+            # Define the latest BUSCO database version for Fungi
+            # TODO This is hardcoded!
+            #      We should automatically point to the latest BUSCO database for Fungi
+            busco_db = "fungi_odb10"
+
+            # BUSCO runs over one genome at a time
+            for genome in genomes:
+                # Define the genome name
+                # This is used as the folder name with the busco results in the tmp directory
+                genome_name = os.path.splitext(os.path.basename(genome))[0]
+
+                try:
+                    # Define the command line to run BUSCO
+                    command_line = [
+                        "busco",
+                        "--in",
+                        genome,
+                        "--out_path",
+                        tmp,
+                        "--out",
+                        genome_name,
+                        "--mode",
+                        "genome",
+                        "--lineage_dataset",
+                        busco_db,
+                        "--cpu",
+                        nproc,
+                        "--force",
+                        "--metaeuk",
+                        "--skip_bbtools",
+                        "--opt-out-run-stats",
+                        "--quiet"
+                    ]
+
+                    # Execute the command lines
+                    subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                except subprocess.CalledProcessError as e:
+                    error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+
+                # Search for the BUSCO result as JSON file
+                busco_json_filepath = os.path.join(tmp, genome_name, f"short_summary.specific.{busco_db}.{genome_name}.json")
+
+                if not os.path.isfile(busco_json_filepath):
+                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), busco_json_filepath)
+
+                with open(busco_json_filepath) as busco_json:
+                    # Load the JSON file
+                    busco_results = json.load(busco_json)
+
+                # Compute the completeness and contamination
+                completeness = 100.0*(1.0-busco_results["results"]["Missing BUSCOs"]/busco_results["results"]["n_markers"])
+
+                contamination = 100.0*busco_results["results"]["Multi copy BUSCOs"]/busco_results["results"]["Complete BUSCOs"]
+
+                # Finally, keep track of the genome quality stats
+                quality[genome]["completeness"] = completeness
+
+                quality[genome]["contamination"] = contamination
+
+        else:
+            raise ValueError(f"Invalid kingdom {kingdom}!")
+
+        return quality
+
+    def dereplicate(
+        self, 
+        genomes: Set[os.path.abspath], 
+        threshold: float=0.01, 
+        compare_with: str="self"
+    ) -> List[os.path.abspath]:
+        """Dereplicate a set of genomes versus themselves or versus the genomes in the database.
+        The dereplication process is based on their ANI distance according to a specific threshold.
+
+        Parameters
+        ----------
+        genomes : set
+            Set with paths to the genome fasta files.
+        threshold : float, default 0.01
+            Dereplicate genomes according to this threshold.
+            The dereplication process is triggered if `threshold` is >0.0.
+        compare_with : str, default "self"
+            Dereplicate the input genomes versus themselves or versus the database, using "self" or "database" respectively.
+            Possible values: "self", "database".
+
+        Raises
+        ------
+        Exception
+            If there are no genomes in `genomes`.
+        ValueError
+            - If `threshold` is <0.0 or >=1.0;
+            - In case `compare_with` is difference than "self" and "database".
+
+        Returns
+        -------
+        set
+            A set with paths to the genomes that passed the dereplication processed.
+            All the other genomes are discarded.
+        """
+
+        if not genomes:
+            raise Exception("There are no genomes to dereplicate!")
+
+        if threshold < 0.0 or threshold >= 1.0:
+            # ANI distances are always between 0.0 and 1.0
+            # An ANI distance equals to 1.0 would discard all the input genomes
+            raise ValueError("The ANI threshold must be >0.0 and <1.0!")
+
+        if compare_with not in ["self", "database"]:
+            # This argument is used to select the genomes against with the dereplication process is performed
+            # It can be run against the input genomes themselves using "self", or against the genomes in the database with "database"
+            raise ValueError("The dereplication can be performed against the input itself or the genomes in the database!")
+
+        sketches = list()
+
+        # Map genome names to the input file paths
+        names = dict()
+
+        for genome_filepath in genomes:
+            # Define the input file name
+            filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+
+            names[filename] = genome_filepath
+
+            # Assume the input genomes are all in fasta format
+            genome_obj = Entry(self, filename, filename, "genome")
+
+            # Build their bloom filter sketch representation
+            genome_sketch_filepath = genome_obj.sketch(genome_filepath)
+
+            sketches.append(genome_sketch_filepath)
+    
+        # Rescale nproc
+        nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
+
+        # Keep track of replicas
+        # A genome is considered a replica if there exists another genome at a genetic distance < threshold
+        # key=replica, value={dereplicated: distance}
+        replicas = dict()
+
+        # Dereplicate the input genomes versus themselves
+        if compare_with == "self":
+            if nproc > 1:
+                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
+                    # Wrapper around the update function of tqdm
+                    def progress(*args):
+                        pbar.update()
+
+                    jobs = [
+                        pool.apply_async(
+                            self.__class__.dist, 
+                            args=(
+                                sketch_filepath, 
+                                sketches[pos+1:],
+                                self.metadata["kmer_size"],
+                                self.tmp,
+                                False,
+                            ),
+                            callback=progress
+                        ) for pos, sketch_filepath in enumerate(sketches)
+                    ]
+
+                    for job in jobs:
+                        sketch_filepath, sketch_dists = job.get()
+
+                        # Select sketch replicas
+                        sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target in sketch_dists if sketch_dist <= threshold}
+
+                        if sketch_clones:
+                            # Define the input file name
+                            sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
+
+                            # Keep track of replicas
+                            replicas[sketch_filename] = sketch_clones
+
+            else:
+                # Avoid using multiprocessing if `nproc` is 1
+                for pos, sketch_filepath in enumerate(sketches):
+                    _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
+
+                    # Select sketch replicas
+                    sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target in sketch_dists if sketch_dist <= threshold}
+
+                    if sketch_clones:
+                        # Define the input file name
+                        sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
+
+                        # Keep track of replicas
+                        replicas[sketch_filename] = sketch_clones
+
+        elif compare_with == "database":
+            if nproc > 1:
+                # Profile genomes in parallel
+                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
+                    def progress(*args):
+                        pbar.update()
+
+                    # TODO Uncertainty and pruning threshold shouldn't be hardcoded
+                    # The uncertainty can be very low here since we are searching for replicas
+                    jobs = [
+                        pool.apply_async(
+                            self.__class__._profile, 
+                            args=(
+                                self,
+                                genome_filepath,
+                                sketch_filepath, 
+                                1.0,  # uncertainty
+                                0.0,  # pruning threshold
+                            ),
+                            callback=progress
+                        ) for genome_filepath, sketch_filepath in zip(genomes, sketches)
+                    ]
+
+                    for job in jobs:
+                        genome_filepath, genome_profile = job.get()
+
+                        # The profile function report the first closest genome only
+                        # The name of the closest genome is reported under the t__ level
+                        closest_genome = list(genome_profile["genome"].keys())[0].split("|")[-1][3:]
+
+                        # Retrieve the ANI distance with the closest genome
+                        closest_genome_distance = genome_profile["genome"][closest_genome]
+
+                        if closest_genome_distance <= threshold:
+                            # Define the input file name
+                            genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+
+                            if closest_genome not in replicas:
+                                replicas[closest_genome] = dict()
+
+                            # Keep track of the replica in the database
+                            # It doesn't matter if `closest_genome` is a full path here
+                            replicas[closest_genome][genome_filename] = closest_genome_distance
+
+            else:
+                # Avoid using multiprocessing if `nproc` is 1
+                for genome_filepath, sketch_filepath in zip(genomes, sketches):
+                    # Again, the uncertainty can be very low here since we are searching for replicas
+                    _, genome_profile = self.__class__._profile(self, genome_filepath, sketch_filepath, 1.0, 0.0)
+
+                    # The profile function report the first closest genome only
+                    # The name of the closest genome is reported under the t__ level
+                    closest_genome = list(genome_profile["genome"].keys())[0].split("|")[-1][3:]
+
+                    # Retrieve the ANI distance with the closest genome
+                    closest_genome_distance = genome_profile["genome"][closest_genome]
+
+                    if closest_genome_distance <= threshold:
+                        # Define the input file name
+                        genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+
+                        if closest_genome not in replicas:
+                            replicas[closest_genome] = dict()
+
+                        # Keep track of the replica in the database
+                        # It doesn't matter if `closest_genome` is a full path here
+                        replicas[closest_genome][genome_filename] = closest_genome_distance
+
+        # Define the set of excluded genomes based on their ANI distance
+        excluded = set()
+
+        for replica in replicas:
+            # Retrieve the input path to the fasta file or the bloom filter file
+            # In case of input versus database, `sketch_filename` does not exist in the input set of genomes
+            input_filepath = names.get(replica, None)
+
+            if input_filepath not in excluded:
+                # Exclude all the replicas to the current genome
+                excluded = excluded.union({names[sketch_filename] for sketch_filename in replicas[input_filepath].keys()})
+
+        # Compute the difference between the input set of genomes and the excluded ones
+        return genomes.difference(excluded)
+
+    def merge(self, clusters: Set[str], into: str=None, update: bool=True) -> None:
+        """Merge two or more species clusters.
+
+        Parameters
+        ----------
+        clusters : Set
+            Set of MetaSBT cluster IDs.
+        into : str, default None
+            Merge clusters in `clusters` into the cluster specified under `into`.
+            Note that this MetaSBT cluster ID must be also present in `clusters`.
+            If None, clusters are going to be merged into the oldest cluster in `clusters`.
+        update : bool, default True
+            The merging of clusters leads to the removal of the merged ones.
+            By default, each call to this function will trigger the database update.
+            If False, remember to call the `update()` function manually once you are done merging clusters.
+
+        Raises
+        ------
+        Exception
+            - If one of the provided clusters is not in the database at the species level;
+            - If `into` is not in `clusters`.
+        """
+
+        for cluster in clusters:
+            if not (cluster in self.report and self.report[cluster]["level"] == "species"):
+                # Check whether the provided clusters are in the database at the species level
+                raise Exception(f"Cluster {cluster} is not a species!")
+
+        if not into:
+            # Select the oldest cluster in `clusters` if `into` is not specified
+            into = f"MSBT{min([int(cluster[4:]) for cluster in clusters])}"
+
+        if into not in clusters:
+            raise Exception(f"The {into} cluster is not in the list of clusters!")
+
+        # Retrieve the `into` cluster name
+        into_name = self.report[into]["taxonomy"].split("|")[-1]
+
+        # Retrieve the `into` species cluster object
+        into_obj = self.clusters["species"][into_name]
+
+        for cluster in clusters:
+            if cluster != into:
+                # Retrieve the cluster name
+                cluster_name = self.report[cluster]["taxonomy"].split("|")[-1]
+
+                # Define the cluster Entry object
+                cluster_obj = self.clusters["species"][cluster_name]
+
+                # Get cluster genomes
+                cluster_genomes = cluster_obj.get_children()
+
+                for genome in cluster_genomes:
+                    # Redirect the genome parent to the `into` cluster
+                    self.genomes[genome].parent = into_name
+
+                    # Add genomes to the `into` cluster
+                    into_obj.add_children(genome)
+
+                # Empty the set of children for the current cluster
+                cluster_obj.children = set()
+
+        # We are going to remove `into` from `cluster`
+        # Make a copy of `clusters` to avoid affecting the input set
+        clusters = copy.deepcopy(clusters)
+
+        # Exclude the `into` cluster from the list of clusters that must be removed
+        clusters.remove(into)
+
+        # Add the `into` full taxonomic label to the list of clusters that must be indexed
+        self.__clusters.append(into_obj.get_full_taxonomy())
+
+        # We could use the `remove()` function to get rid of the merged cluster excluding the `into` one
+        # This takes care of removing branches eventually, and indexing clusters
+        # Do not remove the sketch representation of genomes `keep_sketches=True`
+        # Genomes objects are not going to be removed because we redirected their parents to `into` earlier
+        self.remove(species=clusters, keep_sketches=True, update=update)
+
+    def remove(
+        self, 
+        genomes: Set[str]=None, 
+        species: Set[str]=None, 
+        keep_sketches: bool=False, 
+        update: bool=True
+    ) -> None:
+        """Remove genomes and clusters.
+
+        Parameters
+        ----------
+        genomes : set, default None
+            Set of genome names to be removed from the database.
+            Note that this could potentially lead to the removal of clusters if they remain empty.
+        species : Set, default None
+            Set of MetaSBT species cluster IDs to be removed from the database.
+            The genomes assigned to these clusters are also removed from the database.
+        keep_sketches : bool, default False
+            Keep the sketch representation of genomes.
+        update : bool, default True
+            By default, each call to this function will trigger the database update.
+            If False, remember to call the `update()` function manually once you are done merging clusters.
+
+        Raises
+        ------
+        Exception
+            If no genomes and no clusters are provided.
+        """
+
+        def remove_genomes(genomes: Set[str], keep_sketches: bool=False) -> Set[str]:
+            """Remove a set of genomes from the database and report the empty clusters if any.
+
+            Parameters
+            ----------
+            genomes : set
+                Set of genome names to be removed from the database.
+            keep_sketches : bool, default False
+                Keep the sketch representation of genomes.
+
+            Returns
+            -------
+            set
+                A set of MetaSBT species cluster IDs that become empty due to the removal of genomes.
+            """
+
+            # Keep track of the clusters that become empy due to the removal of genomes
+            empty_clusters = set()
+
+            if genomes:
+                # Keep track of clusters that must be indexed
+                index_clusters = set()
+
+                for genome in genomes:
+                    # Check whether these genomes are in the database
+                    if genome not in self.genomes:
+                        # Just skip a genome if it's not in the database
+                        # Move to the next genome
+                        continue
+
+                    # Retrieve the genome Entry object
+                    genome_obj = self.genomes[genome]
+
+                    if not keep_sketches:
+                        # Remove the sketch
+                        os.unlink(genome_obj.sketch_filepath)
+
+                    # Retrieve the species where the genome resides in the database
+                    species_obj = self.clusters["species"][genome_obj.parent]
+
+                    # Remove the genome from the set of children of its species
+                    species_obj.children.remove(genome)
+
+                    # We want to keep the genome object if we keep the sketch representation of the genome
+                    if not keep_sketches:
+                        # Remove the genome from the instance dictionary of genomes
+                        del self.genomes[genome]
+
+                    # Check whether the species has no more children
+                    if not species_obj.children:
+                        # This cluster should be removed
+                        empty_clusters.add(species_obj.identifier)
+
+                        if genome_obj.parent in index_clusters:
+                            index_clusters.remove(genome_obj.parent)
+
+                    else:
+                        # We should fix the SBT definition file of the species cluster
+                        # Index the species cluster
+                        index_clusters.add(genome_obj.parent)
+
+                if index_clusters:
+                    # Index clusters to fix the SBT definition file
+                    for sp in index_clusters:
+                        # Define the species cluster Entry object
+                        sp_obj = self.clusters["species"][sp]
+
+                        # Index the whole branch and the upper taxonomic levels
+                        self.__clusters.append(sp_obj.get_full_taxonomy())
+
+            return empty_clusters
+
+        def remove_clusters(clusters: Set[str], level: str="species", keep_sketches: bool=False) -> None:
+            """Remove a set of clusters under a specific taxonomic level and report
+            their parents if they become empty.
+
+            Parameters
+            ----------
+            clusters : set
+                Set of MetaSBT cluster IDs to be removed from the database.
+            level : str, default "species"
+                The taxonomic level.
+            keep_sketches : bool, default False
+                Keep the sketch representation of genomes.
+            """
+
+            if clusters:
+                # Keep track of clusters that must be indexed
+                # key=cluster, value=level
+                index_clusters = dict()
+
+                stack = [(cluster, level) for cluster in clusters]
+
+                while stack:
+                    cluster, level = stack.pop()
+
+                    # Check whether this cluster exists in the database
+                    if not (cluster in self.report and self.report[cluster]["level"] == level):
+                        # Just skip a cluster if it's not in the database
+                        # This cluster could actually be in the database but it's not under this level
+                        # Move to the next cluster
+                        continue
+
+                    # Retrieve the cluster name
+                    cluster_name = self.report[cluster]["taxonomy"].split("|")[-1]
+
+                    # Retrieve the cluster Entry object
+                    cluster_obj = self.clusters[level][cluster_name]
+
+                    # Retrieve the set of genomes assigned under this cluster
+                    genomes = cluster_obj.get_children()
+
+                    if genomes:
+                        # Remove the genomes under this cluster first
+                        # This is not necessarily a species cluster
+                        _ = remove_genomes(genomes, keep_sketches=keep_sketches)
+                    
+                    # What if this cluster was the only one assigned to its higher level cluster?
+                    # We should remove clusters all the way up to the kingdom level
+                    # Retrieve the parent taxonomic level first
+                    parent_level = self.levels[self.levels.index(level)-1] if level != "kingdom" else None
+
+                    if parent_level:
+                        # Also retrieve the parent object
+                        parent_obj = self.clusters[parent_level][cluster_obj.parent]
+
+                        # Remove the cluster from the set of its parent children
+                        parent_obj.children.remove(cluster_name)
+
+                        if not parent_obj.children:
+                            # If there are no other children
+                            # Remove the parent cluster
+                            stack.append((parent_obj.identifier, parent_level))
+
+                            if parent_obj.name in index_clusters:
+                                del index_clusters[parent_obj.name]
+
+                        else:
+                            # We should fix the parent SBT definition file
+                            # Index the parent cluster
+                            index_clusters[parent_obj.name] = parent_level
+
+                    # We should now remove the cluster folder
+                    # Retrieve the cluster batch id
+                    cluster_batch = self.__class__._get_cluster_batch(cluster_obj.identifier)
+
+                    # Define the path to the cluster folder
+                    cluster_dir = os.path.join(self.root, "clusters", cluster_batch, cluster_obj.identifier)
+
+                    # Remove the cluster folder
+                    shutil.rmtree(cluster_dir, ignore_errors=True)
+
+                    # It is safe to remove the cluster now
+                    del self.clusters[level][cluster_name]
+
+                    # Also remove the cluster from the report
+                    del self.report[cluster]
+
+                if index_clusters:
+                    # Index clusters to fix the SBT definition file
+                    for cluster in index_clusters:
+                        # Define the cluster Entry object
+                        cluster_obj = self.clusters[index_clusters[cluster]][cluster]
+
+                        # Retrieve the species cluster with the smaller number of genomes under `cluster` and use it to index the whole branch
+                        # Use the cluster with the smaller number of genomes to speed up the indexing
+                        # Retrieve the set of species under `cluster` first
+                        species = list(cluster_obj.get_children(up_to="species"))
+
+                        # Sort species according to their number of genomes
+                        species = sorted(species, key=lambda sp: len(self.clusters["species"][sp].children))
+
+                        # Remove clusters that appear in the input set of clusters
+                        species = [sp for sp in species if self.clusters["species"][sp].identifier not in clusters]
+
+                        # There must be at least one cluster in `species`
+                        # Retrieve the species cluster Entry object
+                        species_obj = self.clusters["species"][species[0]]
+
+                        # Retrieve the species full taxonomic label
+                        species_taxonomy = species_obj.get_full_taxonomy()
+
+                        # Index the species cluster and its whole branch
+                        self.__clusters.append(species_taxonomy)
+
+        if not genomes and not species:
+            raise Exception("Please provide at least one genome or one cluster!")
+
+        # The input parameter `species` is called that way to instruct users to using species clusters only
+        # However, the nested function `remove_clusters` is able to remove clusters at all the taxonomic levels
+        # Just rename `species` to `clusters`
+        clusters = species
+
+        # Remove genomes first
+        # This could return a set with MetaSBT species cluster IDs that become empty due to the removal of genomes
+        empty_clusters = remove_genomes(genomes, keep_sketches=keep_sketches)
+
+        if empty_clusters:
+            if not clusters:
+                # Initialize the set of species clusters if None
+                clusters = set()
+
+            # Add the empty species clusters to the set of clusters that must be removed
+            clusters = clusters.union(empty_clusters)
+
+        remove_clusters(clusters, level="species", keep_sketches=keep_sketches)
+
+        # Fix `self.__clusters`
+        # Taxonomies added in self._clusters during a specific iteration could be removed during the next iteration
+        # We should remove redundant partial branches
+        branches = set()
+
+        for taxonomy in self.__clusters:
+            # Split the taxonomy
+            taxonomy_split = taxonomy.split("|")
+
+            # Iterate over the taxonomic levels
+            for taxonomy_level, level_name in zip(taxonomy_split, self.levels):
+                # Check whether this level still exists in the database
+                # If not, we should cut it and build a new taxonomy up to an existing species (the smallest one under the partial taxonomy)
+                if taxonomy_level not in self.clusters[level_name]:
+                    # Retrieve the name of the previous cluster
+                    # This cluster exists in the database
+                    cluster_name = taxonomy_split[taxonomy_split.index(taxonomy_level)-1]
+
+                    # Consider the previous level and retrieve the cluster Entry object
+                    cluster_obj = self.clusters[self.levels[self.levels.index(level_name)-1]][cluster_name]
+
+                    # Retrieve all the species under `cluster_obj`
+                    species = list(cluster_obj.get_children(up_to="species"))
+
+                    # Sort species according to their number of genomes
+                    species = sorted(species, key=lambda sp: len(self.clusters["species"][sp].children))
+
+                    # There must be at least one cluster in `species`
+                    # Retrieve the species cluster Entry object
+                    species_obj = self.clusters["species"][species[0]]
+
+                    # Retrieve the species full taxonomic label
+                    taxonomy = species_obj.get_full_taxonomy()
+
+                    break
+
+            # Register the taxonomy
+            branches.add(taxonomy)
+
+        self.__clusters = list(branches)
+
+        if self.__clusters and update:
+            # The removal of genomes and/or clusters would trigger the update
+            # This will index the affected clusters again and rebuild the MetaSBT report files
+            self.update()
+
+    @classmethod
     def _is_defined(cls, taxonomy: str) -> bool:
         """Check whether the input taxonomic label is fully defined from the kingdom up to the species level.
 
@@ -2193,6 +3074,8 @@ class Database(object):
             raise ValueError("No taxonomy provided!")
 
         if taxonomy.count("|") != 6:
+            # Valid taxonomic labels must be defined at all the seven taxonomic levels
+            # From the kingdom down to the species level
             return False
 
         else:
@@ -2572,13 +3455,11 @@ class Entry(object):
             Children: {len(self.children)}
         """
 
-    def get_children(self, current_entry: "Entry"=None, up_to: str=None) -> Set[str]:
+    def get_children(self, up_to: str=None) -> Set[str]:
         """Get the set of genomes under a specific cluster or the set of clusters under a specific taxonomic level.
 
         Parameters
         ----------
-        current_entry : Entry, default None
-            Current entry object.
         up_to : str, default None
             Up to a specific taxonomic level.
 
@@ -2596,30 +3477,48 @@ class Entry(object):
 
         levels = self.database.__class__.levels + ["genome"]
 
-        if up_to:
+        if not up_to:
+            # Return genomes by default
+            up_to = "genome"
+
+        else:
             if up_to not in levels:
                 raise Exception(f"{up_to} is not a valid taxonomic level!")
 
             elif levels.index(up_to) <= levels.index(self.level):
                 raise Exception(f"There are no {up_to} levels under the {self.level} level!")
 
-        entry = current_entry if current_entry else self
-
-        if entry.level == "genome":
-            raise Exception("The current entry represents a genome!")
-
-        next_level = levels[levels.index(entry.level)+1]
-
-        if up_to and next_level == up_to:
-            return entry.children
-
-        if entry.level == "species":
-            return entry.children
-
+        # Keep track of children
         children = set()
 
-        for child in entry.children:
-            children.update(entry.get_children(current_entry=self.database.clusters[next_level][child], up_to=up_to))
+        stack = [self]
+
+        while stack:
+            current = stack.pop()
+
+            # Genomes do not have children
+            if current.level == "genome":
+                raise Exception("The current entry represents a genome!")
+
+            # If we reached the species level, return children
+            if current.level == "species":
+                children.update(current.children)
+
+                # We reached the end of the branch
+                continue
+
+            next_level = levels[levels.index(current.level)+1]
+
+            # If the next level is the desired level, return children directly
+            if up_to and next_level == up_to:
+                children.update(current.children)
+
+                # We reached the `up_to` stop condition
+                continue
+
+            for child in current.children:
+                # Keep processing new entries
+                stack.append(self.database.clusters[next_level][child])
 
         return children
 
