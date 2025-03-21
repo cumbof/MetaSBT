@@ -1178,6 +1178,7 @@ class MetaSBT(object):
             The list of arguments.
         """
 
+        # TODO Define references.tsv and mags.txt as test assets
         parser = argparse.ArgumentParser(
             prog="test",
             description="Check for software dependencies and run unit tests.",
@@ -1185,11 +1186,23 @@ class MetaSBT(object):
         )
 
         parser.add_argument(
-            "test",
+            "--feature",
             default="all",
             type=str,
             choices=["all", "db", "index", "kraken", "pack", "profile", "sketch", "summarize", "unpack", "update"],
-            help="The database name."
+            help="The feature name."
+        )
+        parser.add_argument(
+            "--references",
+            required=True,
+            type=os.path.abspath,
+            help="Path to the file with the list of paths to the reference genomes and their taxonomies."
+        )
+        parser.add_argument(
+            "--mags",
+            required=True,
+            type=os.path.abspath,
+            help="Path to the file with the list of paths to the metagenome-assembled genomes."
         )
 
         # Load arguments
@@ -1199,31 +1212,16 @@ class MetaSBT(object):
             """Unit tests.
             """
 
-            common_root = "k__MSBT1|p__MSBT2|c__MSBT3|o__MSBT4|f__MSBT5"
-
-            # Reference genomes and their taxonomic labels
-            references = {
-                "GCA_023531975.1_ASM2353197v1": f"{common_root}|g__MSBT6|s__Orf_virus",
-                "GCA_023536435.1_ASM2353643v1": f"{common_root}|g__MSBT6|s__Orf_virus",
-                "GCA_024425995.1_ASM2442599v1": f"{common_root}|g__MSBT6|s__Orf_virus",
-                "GCA_025133395.1_ASM2513339v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
-                "GCA_025133395.1_ASM2513339v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
-                "GCA_025627565.1_ASM2562756v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
-                "GCA_001745695.1_ViralProj344115": f"{common_root}|g__MSBT7|s__Skunkpox_virus",
-                "GCA_001744115.1_ViralProj344208": f"{common_root}|g__MSBT7|s__Skunkpox_virus",
-            }
-
-            # Metagenome-assembled genomes
-            mags = [
-                "GCA_023701625.1_ASM2370162v1",  # s__Monkeypox_virus
-                "GCA_007575705.1_ASM757570v1",  # s__Monkeypox_virus
-                "GCA_006451315.1_ASM645131v1",  # s__Lumpy_skin_disease_virus
-                "GCA_009651155.1_ASM965115v1",  # s__Orf_virus
-            ]
-
             @classmethod
-            def setUpClass(cls):
+            def setUpClass(cls, references_filepath: os.path.abspath, mags_filepath: os.path.abspath):
                 """ Set up the unit class by retrieving a bunch of genomes to use within all the unit tests.
+
+                Parameters
+                ----------
+                references_filepath : os.path.abspath
+                    Path to the file with the list of paths to the reference genomes and their taxonomies.
+                mags_filepath : os.path.abspath
+                    Path to the file with the list of paths to the metagenome-assembled genomes.
                 """
 
                 # Create the temporary working directory
@@ -1235,31 +1233,34 @@ class MetaSBT(object):
                 # Define the temporary folder
                 cls.tmp_dir = os.path.join(cls.working_dir.name, "tmp")
 
+                # Retrieve the set of reference genomes
+                cls.references = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(references_filepath).readlines() if line.strip()}
+
+                # Retrieve the set of MAGs
+                cls.mags = {line.strip() for line in open(mags_filepath).readlines() if line.strip()}
+
                 # Retrieve a bunch of genomes from NCBI GenBank to use during the tests
                 genomes = set(cls.mags)
 
                 genomes.update(set([genome for taxonomy in cls.references for genome in cls.references[taxonomy]]))
 
-                for genome in genomes:
-                    # Define the URL to the fna.gz file
-                    fna_gz_url = "https://ftp.ncbi.nlm.nih.gov/genomes/all/{0}/{1}/{2}/{3}/{4}/{4}_genomic.fna.gz".format(
-                        genome[0:3],
-                        genome[4:7],
-                        genome[7:10],
-                        genome[10:13],
-                        genome
-                    )
+                for genome_url in genomes:
+                    try:
+                        # Define the path to the local fna.gz file
+                        fna_gz_path = os.path.join(cls.working_dir.name, os.path.basename(genome_url))
 
-                    # Define the path to the local fna.gz file
-                    fna_gz_path = os.path.join(cls.working_dir.name, "{}_genomic.fna.gz".format(genome))
+                        # Download the genome into the temporary working directory
+                        urllib.request.urlretrieve(genome_url, fna_gz_path)
 
-                    # Download the genome into the temporary working directory
-                    urllib.request.urlretrieve(fna_gz_url, fna_gz_path)
+                        # Unzip the genome
+                        with gzip.open(fna_gz_path, "rb") as fna_gz_in:
+                            with open(os.path.splitext(fna_gz_path)[0], "wb") as fna_out:
+                                shutil.copyfileobj(fna_gz_in, fna_out)
 
-                    # Unzip the genome
-                    with gzip.open(fna_gz_path, "rb") as fna_gz_in:
-                        with open(os.path.splitext(fna_gz_path)[0], "wb") as fna_out:
-                            shutil.copyfileobj(fna_gz_in, fna_out)
+                    except urllib.error.HTTPError:
+                        error_message = f"Unable to retrieve {genome_url}\n\n"
+
+                        raise Exception(error_message).with_traceback(e.__traceback__)
 
             @classmethod
             def tearDownClass(cls):
@@ -1323,7 +1324,7 @@ class MetaSBT(object):
 
                 # TODO
 
-        def run_test(test_id: str="all") -> None:
+        def run_test(references: os.path.abspath, mags: os.path.abspath, test_id: str="all") -> None:
             """Run unit tests.
 
             Parameters
@@ -1333,7 +1334,9 @@ class MetaSBT(object):
             """
 
             # We should manually call the setUpClass
-            Test.setUpClass()
+            # This is going to retrieve the set of reference genomes and MAGs
+            # Warning: an active internet connection is required here!
+            Test.setUpClass(references, mags)
 
             if test_id == "all":
                 # Initialize the test loader in case of "all"
@@ -1357,7 +1360,7 @@ class MetaSBT(object):
             # Remove the test data
             Test.tearDownClass()
 
-        run_test(args.test)
+        run_test(args.references, args.mags, test_id=args.feature)
 
     def unpack(self, argv: List[Any]) -> None:
         """Unpack a local MetaSBT tarball database.
