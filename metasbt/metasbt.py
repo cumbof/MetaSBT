@@ -4,6 +4,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees.
 """
 
 import argparse
+import gzip
 import json
 import multiprocessing
 import os
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unittest
 import urllib.request
 
 from datetime import datetime
@@ -33,6 +35,12 @@ CODE_RELEASES_API_URL = "https://api.github.com/repos/cumbof/MetaSBT/releases/la
 
 # Define the path to the table with the list of public databases
 DB_LIST_URL = "https://raw.githubusercontent.com/cumbof/MetaSBT-DBs/main/databases.tsv"
+
+# Define the list external software dependencies
+DEPENDENCIES.extend([
+    "kraken2-build",  # Required by the kraken subroutine
+    "tar"  # Required by the pack and unpack subroutines
+])
 
 
 class MetaSBT(object):
@@ -1169,45 +1177,29 @@ class MetaSBT(object):
             "test",
             default="all",
             type=str,
-            choices=["all", "cluster", "db", "index", "kraken", "pack", "profile", "sketch", "summarize", "unpack", "update"],
+            choices=["all", "db", "index", "kraken", "pack", "profile", "sketch", "summarize", "unpack", "update"],
             help="The database name."
         )
 
         # Load arguments
         args = parser.parse_args(argv)
 
-        # Define the list of tests
-        tests = [f"Test.{args.test}"]
-
-        if args.test == "all":
-            # Test all the available commands
-            tests = [
-                "Test.cluster", 
-                "Test.db", 
-                "Test.index", 
-                "Test.kraken", 
-                "Test.pack", 
-                "Test.profile", 
-                "Test.sketch", 
-                "Test.summarize", 
-                "Test.unpack", 
-                "Test.update"
-            ]
-
         class Test(unittest.TestCase):
             """Unit tests.
             """
 
+            common_root = "k__MSBT1|p__MSBT2|c__MSBT3|o__MSBT4|f__MSBT5"
+
             # Reference genomes and their taxonomic labels
             references = {
-                "GCA_023531975.1_ASM2353197v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT1|s__Orf_virus",
-                "GCA_023536435.1_ASM2353643v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT1|s__Orf_virus",
-                "GCA_024425995.1_ASM2442599v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT1|s__Orf_virus",
-                "GCA_025133395.1_ASM2513339v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT7|s__Monkeypox_virus",
-                "GCA_025133395.1_ASM2513339v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT7|s__Monkeypox_virus",
-                "GCA_025627565.1_ASM2562756v1": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT7|s__Monkeypox_virus",
-                "GCA_001745695.1_ViralProj344115": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT7|s__Skunkpox_virus",
-                "GCA_001744115.1_ViralProj344208": "k__MSBT6|p__MSBT5|c__MSBT4|o__MSBT3|f__MSBT2|g__MSBT7|s__Skunkpox_virus",
+                "GCA_023531975.1_ASM2353197v1": f"{common_root}|g__MSBT6|s__Orf_virus",
+                "GCA_023536435.1_ASM2353643v1": f"{common_root}|g__MSBT6|s__Orf_virus",
+                "GCA_024425995.1_ASM2442599v1": f"{common_root}|g__MSBT6|s__Orf_virus",
+                "GCA_025133395.1_ASM2513339v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
+                "GCA_025133395.1_ASM2513339v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
+                "GCA_025627565.1_ASM2562756v1": f"{common_root}|g__MSBT7|s__Monkeypox_virus",
+                "GCA_001745695.1_ViralProj344115": f"{common_root}|g__MSBT7|s__Skunkpox_virus",
+                "GCA_001744115.1_ViralProj344208": f"{common_root}|g__MSBT7|s__Skunkpox_virus",
             }
 
             # Metagenome-assembled genomes
@@ -1264,14 +1256,7 @@ class MetaSBT(object):
                 """
 
                 # Delete the temporary working directory
-                # It may raise an exception in case of read-only files
                 shutil.rmtree(cls.__working_dir.name, ignore_errors=False)
-
-            def cluster(self):
-                """Test the `cluster()` function.
-                """
-
-                # TODO
 
             def db(self):
                 """Test the `db()` function.
@@ -1327,7 +1312,41 @@ class MetaSBT(object):
 
                 # TODO
 
-        unittest.main(failfast=True, verbosity=2)
+        def run_test(test_id: str="all") -> None:
+            """Run unit tests.
+
+            Parameters
+            ----------
+            test_id : str, default "all"
+                The name of the test or the wildcard "all" to run all the unit tests.
+            """
+
+            # We should manually call the setUpClass
+            Test.setUpClass()
+
+            if test_id == "all":
+                # Initialize the test loader in case of "all"
+                loader = unittest.TestLoader()
+
+                # Load all the defined tests in Test
+                suite = loader.loadTestsFromTestCase(Test)
+
+            else:
+                # Use a suite for all the other cases
+                suite = unittest.TestSuite()
+
+                # Load the specific test
+                suite.addTest(Test(test_id))
+
+            runner = unittest.TextTestRunner()
+
+            # Finally, run the unit tests
+            runner.run(suite)
+
+            # Remove the test data
+            Test.tearDownClass()
+
+        run_test(args.test)
 
     def unpack(self, argv: List[Any]) -> None:
         """Unpack a local MetaSBT tarball database.
@@ -1565,4 +1584,4 @@ class MetaSBT(object):
 
 
 if __name__ == "__main__":
-    MetaSBT()
+    _ = MetaSBT()
