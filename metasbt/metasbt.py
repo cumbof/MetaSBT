@@ -1140,7 +1140,7 @@ class MetaSBT(object):
                         # Increment the clusters counter based on the taxonomic level
                         clusters[line_split[header.index("level")]] += 1
 
-                        if bool(line_split[header.index("known")]):
+                        if eval(line_split[header.index("known")]):
                             # Increment the known clusters counter based on the taxonomic level
                             knowns[line_split[header.index("level")]] += 1 
 
