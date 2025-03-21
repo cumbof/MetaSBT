@@ -82,12 +82,6 @@ def read_params():
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
-        "--db-dir",
-        type=os.path.abspath,
-        dest="db_dir",
-        help="Path to the root folder of a MetaSBT database",
-    )
-    p.add_argument(
         "--download",
         action="store_true",
         default=False,
@@ -185,34 +179,6 @@ def read_params():
         help='Print the "{}" version and exit'.format(TOOL_ID),
     )
     return p.parse_args()
-
-
-def get_genomes_in_db(db_dir: os.path.abspath) -> List[str]:
-    """Retrieve the list of reference genomes and MAGs in the MetaSBT database.
-
-    Parameters
-    ----------
-    db_dir : os.path.abspath
-        Path to the root folder of the MetaSBT database.
-
-    Returns
-    -------
-    list
-        List with genome IDs in the database.
-    """
-
-    genomes = list()
-
-    for genome_type in ["references", "mags"]:
-        genome_files = Path(db_dir).glob("**/{}.txt".format(genome_type))
-
-        for filepath in genome_files:
-            genomes.extend(
-                [genome.strip() for genome in open(str(filepath)).readlines() \
-                    if genome.strip() and not genome.strip().startswith("#")]
-            )
-
-    return genomes
 
 
 def level_name(current_level: str, prev_level: str) -> str:
@@ -602,16 +568,6 @@ def main() -> None:
         taxa_level_id=args.taxa_level_id,
         taxa_level_name=args.taxa_level_name,
     )
-
-    if args.db_dir and os.path.isdir(args.db_dir):
-        # Get the list of genome IDs in the database
-        db_genomes = get_genomes_in_db(args.db_dir)
-
-        # Remove genomes already in the database
-        in_db = set(ncbi_genomes.keys()).intersection(db_genomes)
-
-        for genome in in_db:
-            del ncbi_genomes[genome]
 
     if ncbi_genomes:
         out_file_name = "genomes" if not args.type else "{}s".format(args.type)
