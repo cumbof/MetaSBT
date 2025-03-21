@@ -20,7 +20,7 @@ from pathlib import Path
 from tabulate import tabulate
 from typing import Any, List
 
-from core import __date__, __version__, DEPENDENCIES, Database, Entry
+from metasbt.core import __date__, __version__, DEPENDENCIES, Database, Entry
 
 # Define the URL to the code repository
 CODE_REPOSITORY_URL = "https://github.com/cumbof/MetaSBT"
@@ -1003,7 +1003,8 @@ class MetaSBT(object):
         parser.add_argument(
             "--nproc",
             required=False,
-            type=os.cpu_count(),
+            type=int,
+            default=os.cpu_count(),
             help="Process the input genomes in parallel."
         )
 
@@ -1461,7 +1462,8 @@ class MetaSBT(object):
         parser.add_argument(
             "--nproc",
             required=False,
-            type=os.cpu_count(),
+            type=int,
+            default=os.cpu_count(),
             help="Process the input genomes in parallel."
         )
         parser.add_argument(
@@ -1560,7 +1562,7 @@ class MetaSBT(object):
 
         # Print credits
         self.__print_credits()
-    
+
 
 if __name__ == "__main__":
     MetaSBT()
