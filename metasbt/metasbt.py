@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.request
 
@@ -78,6 +79,8 @@ class MetaSBT(object):
         unpack      Unpack a local MetaSBT tarball database;
         update      Update a MetaSBT database with new metagenome-assembled genomes.
         """
+
+        self.start_at = time.time()
 
         # Keep track of the Database object
         # This is required because `update` calls `profile` and both initialize a Database object
@@ -1108,17 +1111,14 @@ class MetaSBT(object):
             # Add metadata to the summary table
             table.extend([[key, metadata[key]] for key in metadata])
 
-        # Count the number of genomes in genomes.tsv
-        genomes = len([line for line in open(search_for[1]).readlines() if line.strip() and not line.startswith("#")])
-
-        # Add the number of genomes to the summary table
-        table.append(["genomes", genomes])
-
         # Count the number of clusters at all the seven taxonomic levels
         clusters = {"kingdom": 0, "phylum": 0, "class": 0, "order": 0, "family": 0, "genus": 0, "species": 0}
 
         # Also count the number of known clusters at all the seven taxonomic levels
         knowns = {level: 0 for level in clusters}
+
+        # Count the number of reference genomes and MAGs
+        genomes = {"references": 0, "mags": 0}
 
         # Keep track of the bloom filter density at the root
         density = 0.0
@@ -1147,6 +1147,17 @@ class MetaSBT(object):
                         if line_split[header.index("level")] == "kingdom":
                             # Update the bloom filter density
                             density = float(line_split[header.index("density")])
+
+                        if line_split[header.index("level")] == "species":
+                            # Increment the number of reference genomes and MAGs
+                            genomes["references"] += int(line_split[header.index("references_count")])
+
+                            genomes["mags"] += int(line_split[header.index("mags_count")])
+
+        # Add the number of genomes to the summary table
+        table.append(["references", genomes["references"]])
+
+        table.append(["mags", genomes["mags"]])
 
         # Finally, add stats to the summary table
         # Add the number of known clusters over the total number of clusters per taxonomic level
@@ -1584,4 +1595,8 @@ class MetaSBT(object):
 
 
 if __name__ == "__main__":
-    _ = MetaSBT()
+    # Initialize the MetaSBT object and run it
+    framework = MetaSBT()
+
+    # Print the running time and exit
+    print(f"Total elapsed time: {time.time-framework.start_at}s")
