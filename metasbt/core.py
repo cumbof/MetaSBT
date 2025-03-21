@@ -29,7 +29,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__date__ = "Mar 19, 2025"
+__date__ = "Mar 21, 2025"
 __version__ = "0.1.4"
 
 # Define the list of external software dependencies
@@ -1518,6 +1518,9 @@ class Database(object):
 
                     cluster_mags = list(cluster_obj.children.difference(cluster_references))
 
+                    # The bloom filter density must be compute every time
+                    cluster_density = cluster_obj.get_density()
+
                     processed = False
 
                     if cluster_obj.identifier in self.report:
@@ -1539,7 +1542,7 @@ class Database(object):
                             cluster_info = [
                                 cluster_obj.identifier,
                                 cluster_obj.level,
-                                str(self.report[cluster_obj.identifier]["density"]),
+                                str(cluster_density),
                                 str(len(cluster_references)),
                                 str(len(cluster_mags)),
                                 ",".join(cluster_references),
@@ -1555,9 +1558,6 @@ class Database(object):
                             processed = True
 
                     if not processed:
-                        # Retrieve the cluster density
-                        cluster_density = cluster_obj.get_density()
-
                         cluster_is_known = cluster_obj.is_known()
 
                         cluster_taxonomy = cluster_obj.get_full_taxonomy()
