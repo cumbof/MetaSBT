@@ -269,7 +269,7 @@ class MetaSBT(object):
                 raise Exception("The provided database does not exist!")
 
             # Retrieve versions of the same database
-            versions = [db_version["version"] for db_version in databases[args.database]]
+            versions = [db_version["version"] for db_version in databases[args.download]]
 
             # Select the latest version by default
             selected_version = str(sorted([int(v) for v in versions])[-1])
@@ -281,7 +281,7 @@ class MetaSBT(object):
                 selected_version = args.version
 
             # Retrieve the URL to the tarball
-            database_url = [db_version["tarball"] for db_version in databases[args.database]][0]
+            database_url = [db_version["tarball"] for db_version in databases[args.download]][0]
 
             try:
                 # Download the database tarball
