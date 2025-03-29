@@ -8,12 +8,14 @@ import gzip
 import json
 import multiprocessing
 import os
+import re
 import requests
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import tqdm
 import unittest
 import urllib.request
 
@@ -22,6 +24,9 @@ from packaging import version
 from pathlib import Path
 from tabulate import tabulate
 from typing import Any, List
+
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
 
 from metasbt.core import __date__, __version__, DEPENDENCIES, Database, Entry
 
@@ -40,6 +45,7 @@ DB_LIST_URL = "https://raw.githubusercontent.com/cumbof/MetaSBT-DBs/main/databas
 # Define the list external software dependencies
 DEPENDENCIES.extend([
     "kraken2-build",  # Required by the kraken subroutine
+    "sha256sum",  # Required by the pack subroutine
     "tar"  # Required by the pack and unpack subroutines
 ])
 
@@ -129,6 +135,10 @@ class MetaSBT(object):
             help="Show version and exit."
         )
 
+        if len(sys.argv) == 1:
+            # Print usage in case of no arguments
+            sys.argv.append("--help")
+
         # Read the first argument
         # This is the name of the command
         args = parser.parse_args([sys.argv[1]])
@@ -205,6 +215,7 @@ class MetaSBT(object):
         )
 
         # Load arguments
+        # TODO Add --sanity-check to compare sha256 hashes to finalize the download
         args = parser.parse_args(argv)
 
         databases = dict()
@@ -285,7 +296,7 @@ class MetaSBT(object):
 
             try:
                 # Download the database tarball
-                urllib.request.urlretrieve(database_url, os.path.join(args.folder, os.path.basename(database_url)))
+                urllib.request.urlretrieve(database_url, os.path.join(args.folder, f"MetaSBT-{args.download}-{args.version}.tar.gz"))
 
             except:
                 raise Exception(f"Unable to retrieve the database tarball from {database_url}")
@@ -521,7 +532,7 @@ class MetaSBT(object):
 
         if args.pack:
             # Pack the database into a compressed tarball
-            self.pack(["--workdir", args.workdir, "--database", args.database])
+            self.pack(argv, parse_known_args=True)
 
         # Print credits
         self.__print_credits()
@@ -587,6 +598,23 @@ class MetaSBT(object):
         # Load arguments
         args = parser.parse_args(argv)
 
+        # Define the ordered list of taxonomic levels
+        TAXONOMIC_RANKING = [
+            "superkingdom", 
+            "phylum", 
+            "class", 
+            "order", 
+            "family", 
+            "genus", 
+            "species"
+        ]
+
+        # Template for node entries
+        NODE_TEMPLATE = "taxid\t|\tparent\t|\trank\t|\t\t|\t0\t|\t0\t|\t11\t|\t0\t|\t0\t|\t0\t|\t0\t|\t0\t|\t\t|"
+
+        # Template for name entries
+        NAME_TEMPLATE = "taxid\t|\tvar\t|\t\t|\tscientific name\t|"
+
         # Load the list of paths to the genome files
         # This is a dict with the paths to the input genomes indexed by their file name
         # Assume the input files are not compressed
@@ -610,8 +638,8 @@ class MetaSBT(object):
                         ncbi_taxid = int(line_split[0].strip())
 
                         # NCBI Tax scientific name
-                        # TODO scientific names must be fixed in the same way that MetaSBT does
-                        ncbi_tax_scientific_name = line_split[1].strip()
+                        # Scientific names must be fixed in the same way that MetaSBT does
+                        ncbi_tax_scientific_name = re.sub(r"_+", "_", re.sub(r"\W+", "_", line_split[1].strip())).strip("_")
 
                         ncbi_names[ncbi_tax_scientific_name] = ncbi_taxid
 
@@ -687,7 +715,7 @@ class MetaSBT(object):
 
                                 metasbt_names[cluster_name] = latest_node_id
 
-                            if metasbt_names[cluster_name] not in metasbt_nodes:
+                            if cluster_name in metasbt_names and metasbt_names[cluster_name] not in metasbt_nodes:
                                 parent_id = None
 
                                 if parent_name in ncbi_names:
@@ -706,9 +734,12 @@ class MetaSBT(object):
 
         # Finally, write the MetaSBT names and nodes additions
         with open(args.ncbi_names, "a+") as ncbi_names_table:
-            for node_name, node_id in sorted(metasbt_names.items(), key=lambda node_name: metasbt_names[node_name]):
+            for node_name in sorted(metasbt_names.keys(), key=lambda node_name: metasbt_names[node_name]):
+                # Retrieve the node id
+                node_id = metasbt_names[node_name]
+
                 # Add the tax id
-                metasbt_node = NAME_TEMPLATE.replace("taxid", node_id)
+                metasbt_node = NAME_TEMPLATE.replace("taxid", str(node_id))
 
                 # Add the node name
                 metasbt_node = metasbt_node.replace("var", node_name)
@@ -718,10 +749,10 @@ class MetaSBT(object):
         with open(args.ncbi_nodes, "a+") as ncbi_nodes_table:
             for node_id, node_data in sorted(metasbt_nodes.items()):
                 # Add the tax id
-                metasbt_node = NODE_TEMPLATE.replace("taxid", node_id)
+                metasbt_node = NODE_TEMPLATE.replace("taxid", str(node_id))
 
                 # Add the parent node name
-                metasbt_node = metasbt_node.replace("parent", node_data["parent"])
+                metasbt_node = metasbt_node.replace("parent", str(node_data["parent"]))
 
                 # Add the rank
                 metasbt_node = metasbt_node.replace("rank", node_data["rank"])
@@ -729,6 +760,8 @@ class MetaSBT(object):
                 ncbi_nodes_table.write("{}\n".format(metasbt_node))
 
         for lineage in metasbt_lineages:
+            print(f"Processing {lineage}")
+
             # Intersect the list of genomes under this lineage with the input genomes
             selected_genomes = set(genomes.keys()).intersection(set(metasbt_lineages[lineage]))
 
@@ -744,7 +777,7 @@ class MetaSBT(object):
                 metasbt_cluster_id = metasbt_names[metasbt_cluster_name] if metasbt_cluster_name in metasbt_names else ncbi_names[metasbt_cluster_name]
 
                 for genome_file in genome_files:
-                    with tempfile.NamedTemporaryFile() as tmp_genome, open(genome_file) as genome:
+                    with tempfile.NamedTemporaryFile() as tmp_genome:
                         with open(tmp_genome.name, "wt"), open(genome_file) as genome:
                             for record in SeqIO.parse(genome, "fasta"):
                                 # Rebuild the record with the new ID
@@ -755,7 +788,7 @@ class MetaSBT(object):
                                     description=record.description
                                 )
 
-                                SeqIO.write(record, tmp_genome_file, "fasta")
+                                SeqIO.write(record, tmp_genome.name, "fasta")
 
                         # Run kraken2-build over the temporary genome file
                         # kraken2-build --add-to-library $file --db $DBNAME
@@ -775,13 +808,15 @@ class MetaSBT(object):
 
                             raise Exception(error_message).with_traceback(e.__traceback__)
 
-    def pack(self, argv: List[Any]) -> None:
+    def pack(self, argv: List[Any], parse_known_args=False) -> None:
         """Build a compressed tarball with a MetaSBT database and report its sha256.
 
         Parameters
         ----------
         argv : list
             The list of arguments.
+        parse_known_args : bool, default False
+            Parse known arguments only without raising any exceptions for unrecognized arguments.
 
         Raises
         ------
@@ -812,7 +847,11 @@ class MetaSBT(object):
         )
 
         # Load arguments
-        args = parser.parse_args(argv)
+        if parse_known_args:
+            args, _ = parser.parse_known_args(argv)
+
+        else:
+            args = parser.parse_args(argv)
 
         db_dir = os.path.join(args.workdir, args.database)
 
@@ -823,13 +862,20 @@ class MetaSBT(object):
         now = datetime.now()
 
         # Define a timestamp
-        timestamp = f"{now.year}{now.month}{now.day}"
+        timestamp = f"{now.year}{str(now.month).zfill(2)}{str(now.day).zfill(2)}"
 
         # Search for other tarballs under the same working directory
-        tarballs = Path(args.workdir).glob(f"MetaSBT-{args.database}-*.tar.gz")
+        tarballs = list(Path(args.workdir).glob(f"MetaSBT-{args.database}-{timestamp}*.tar.gz"))
+
+        # Define the output file name
+        output_filename = f"MetaSBT-{args.database}-{timestamp}"
+
+        if tarballs:
+            # Add an incremental number in case of multiple versions of the same database
+            output_filename += f"-{len(tarballs)+1}"
 
         # Define the path to the output tarball
-        output_filepath = os.path.join(args.workdir, f"MetaSBT-{args.database}-{timestamp}-{len(list(tarballs))+1}.tar.gz")
+        output_filepath = os.path.join(args.workdir, f"{output_filename}.tar.gz")
 
         # Build the compressed tarball
         command_line = [
@@ -852,12 +898,12 @@ class MetaSBT(object):
         # Compute the sha256 hash
         sha256 = subprocess.run(["sha256sum", output_filepath], capture_output=True, text=True)
 
-        if result.returncode == 0:
+        if sha256.returncode == 0:
             print(sha256.stdout)
 
         raise Exception(f"An error has occurred while computing the sha256 hash of {output_filepath}")
 
-    def profile(self, argv: List[Any]) -> None:
+    def profile(self, argv: List[Any], parse_known_args=False) -> None:
         """Profile a set of genomes against a specific MetaSBT database.
         Profile tables are stored under a dedicated folder in the workdir temporary directory.
 
@@ -865,6 +911,8 @@ class MetaSBT(object):
         ----------
         argv : list
             The list of arguments.
+        parse_known_args : bool, default False
+            Parse known arguments only without raising any exceptions for unrecognized arguments.
 
         Raises
         ------
@@ -915,7 +963,11 @@ class MetaSBT(object):
         )
 
         # Load arguments
-        args = parser.parse_args(argv)
+        if parse_known_args:
+            args, _ = parser.parse_known_args(argv)
+
+        else:
+            args = parser.parse_args(argv)
         
         # Define the path to the database folder
         db_dir = os.path.join(args.workdir, args.database)
@@ -937,7 +989,7 @@ class MetaSBT(object):
         # Genomes must be sketched first
         # Note that this function and `sketch()` have the same set of arguments
         # Sketches are stored under the dedicated folder in the database directory
-        sketches = self.sketch(argv)
+        sketches = self.sketch(argv, parse_known_args=True)
 
         # Profile genomes in parallel
         with multiprocessing.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as progress_bar:
@@ -962,13 +1014,15 @@ class MetaSBT(object):
             for job in jobs:
                 _, _ = job.get()
 
-    def sketch(self, argv: List[Any]) -> List[os.path.abspath]:
+    def sketch(self, argv: List[Any], parse_known_args=False) -> List[os.path.abspath]:
         """Sketch the input genomes.
 
         Parameters
         ----------
         argv : list
             The list of arguments.
+        parse_known_args : bool, default False
+            Parse known arguments only without raising any exceptions for unrecognized arguments.
 
         Raises
         ------
@@ -1020,8 +1074,12 @@ class MetaSBT(object):
         )
 
         # Load arguments
-        args = parser.parse_args(argv)
-        
+        if parse_known_args:
+            args, _ = parser.parse_known_args(argv)
+
+        else:
+            args = parser.parse_args(argv)
+
         # Define the path to the database folder
         db_dir = os.path.join(args.workdir, args.database)
 
@@ -1053,7 +1111,7 @@ class MetaSBT(object):
             sketch_filepath = genome_object.sketch(genome_filepath)
 
             # Keep track of the path to the sketch file
-            sketches.append(sketches)
+            sketches.append(sketch_filepath)
 
         return sketches
 
@@ -1547,7 +1605,7 @@ class MetaSBT(object):
         # This also produce the bloom filter representation of the input genomes
         # Note that this function and `profile()` have the same set of arguments
         # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
-        self.profile(argv)
+        self.profile(argv, parse_known_args=True)
 
         if args.dereplicate > 0.0:
             # Dereplicate the input genomes again versus the genomes in the database
@@ -1591,15 +1649,22 @@ class MetaSBT(object):
 
         if args.pack:
             # Pack the database into a compressed tarball
-            self.pack(["--workdir", args.workdir, "--database", args.database])
+            self.pack(argv, parse_known_args=True)
 
         # Print credits
         self.__print_credits()
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Run MetaSBT.
+    """
+
     # Initialize the MetaSBT object and run it
     framework = MetaSBT()
 
     # Print the running time and exit
     print(f"Total elapsed time: {time.time-framework.start_at}s")
+
+
+if __name__ == "__main__":
+    run()
