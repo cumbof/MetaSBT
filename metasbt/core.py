@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -29,7 +29,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__date__ = "Mar 21, 2025"
+__date__ = "Mar 29, 2025"
 __version__ = "0.1.4"
 
 # Define the list of external software dependencies
@@ -47,7 +47,7 @@ class Database(object):
     """Database object."""
 
     # Define the list of taxonomic levels
-    levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
+    LEVELS = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
     def __init__(
         self,
@@ -131,7 +131,7 @@ class Database(object):
         # Define a dictionary to keep track of the clusters in the database indexed by their id.
         # The hierarchical organization of clusters is maintained through clusters attributes `parent` and `children`
         # e.g.: {"kingdom": {"k__Viruses": <Entry>}, "phylum": {...}, ..., "species": {...}}
-        self.clusters: Dict[str, Dict[str, "Entry"]] = {level: dict() for level in self.__class__.levels}
+        self.clusters: Dict[str, Dict[str, "Entry"]] = {level: dict() for level in self.__class__.LEVELS}
 
         # Also define a dictionary to keep track of the genomes in the database indexed by their id.
         self.genomes: Dict[str, "Entry"] = dict()
@@ -348,7 +348,7 @@ class Database(object):
         if not self.__class__._is_defined(taxonomy):
             return False
 
-        for level, level_id in zip(self.__class__.levels, taxonomy.split("|")):
+        for level, level_id in zip(self.__class__.LEVELS, taxonomy.split("|")):
             if level not in self.clusters:
                 return False
 
@@ -367,7 +367,7 @@ class Database(object):
             A tuple with the number of clusters for each of the seven taxonomic levels.
         """
 
-        return tuple([len(self.clusters[level]) for level in self.__class__.levels])
+        return tuple([len(self.clusters[level]) for level in self.__class__.LEVELS])
 
     def set_configs(
         self,
@@ -534,13 +534,13 @@ class Database(object):
         # Store the global parameters into the metadata.json file under the database root folder
         self._dump_metadata()
 
-    def cluster(self, genomes: Dict[str, Set[str]], threshold: float=0.05) -> Dict[str, Set[str]]:
+    def cluster(self, genomes: Dict[str, str], threshold: float=0.05) -> Dict[str, str]:
         """Cluster group of genomes based on a specific threshold on the ANI distance.
 
         Parameters
         ----------
         genomes : dict
-            A dictionary with set of genomes indexed by their taxonomic label.
+            A dictionary with genomes and their taxonomic label.
             Genomes could be defined with paths to their fasta file or paths to their bloom filter sketch representation.
         threshold : float, default 0.05
             Threshold on the ANI distance used to cut the dendrogram and reshape clusters.
@@ -556,116 +556,156 @@ class Database(object):
         Returns
         -------
         dict
-            A new dictionary with the reshaped clusters as group of genomes indexed by their new label.
-            Note that the filepath to the genome files now point to their bloom filter sketch representations.
+            A new dictionary with genomes and their new taxonomic label.
         """
 
-        # Check whether the paths to the genome files or their sketches exist
-        for label in genomes:
-            for genome_filepath in genomes[label]:
-                if not os.path.isfile(genome_filepath):
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genome_filepath)
+        # Check whether the genomes exist
+        for genome_filepath in genomes:
+            if not os.path.isfile(genome_filepath):
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genome_filepath)
 
-                elif not self.__class__._is_supported(genome_filepath):
-                    raise ValueError(f"This file type is not supported: {genome_filepath}")
+            elif not self.__class__._is_supported(genome_filepath):
+                raise ValueError(f"This file type is not supported: {genome_filepath}")
 
         assignments = dict()
 
-        for label in genomes:
-            sketches = list()
+        sketches = list()
 
-            for genome_filepath in genomes[label]:
-                if os.path.splitext(genome_filepath)[1] == ".bf":
-                    sketches.append(genome_filepath)
+        for genome_filepath in genomes:
+            if os.path.splitext(genome_filepath)[1] == ".bf":
+                sketches.append(genome_filepath)
+
+            else:
+                # In case of fasta files
+                filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+
+                genome_obj = Entry(self, filename, filename, "genome")
+
+                # Build their bloom filter sketch representation
+                genome_sketch_filepath = genome_obj.sketch(genome_filepath)
+
+                sketches.append(genome_sketch_filepath)
+
+        # Build a condensed ANI distance matrix
+        condensed_distance_matrix = list()
+
+        # Rescale nproc
+        nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
+
+        if nproc > 1:
+            # Keep track of the ANI distances
+            dists = dict()
+
+            with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
+                # Wrapper around the update function of tqdm
+                def progress(*args):
+                    pbar.update()
+
+                jobs = [
+                    pool.apply_async(
+                        self.__class__.dist, 
+                        args=(
+                            sketch_filepath, 
+                            sketches[pos+1:],
+                            self.metadata["kmer_size"],
+                            self.tmp,
+                            False,
+                        ),
+                        callback=progress
+                    ) for pos, sketch_filepath in enumerate(sketches)
+                ]
+
+                for job in jobs:
+                    sketch_filepath, sketch_dists = job.get()
+
+                    # `sketch_dists` is an OrderedDict so it maintains the same order of elements in `sketches`
+                    dists[sketch_filepath] = list(sketch_dists.values())
+
+            for sketch_filepath in sketches:
+                condensed_distance_matrix.extend(dists[sketch_filepath])
+
+        else:
+            # Avoid using multiprocessing if `nproc` is 1
+            for pos, sketch_filepath in enumerate(sketches):
+                _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
+
+                condensed_distance_matrix.extend(list(sketch_dists.values()))
+
+        # Build a dendrogram based on the ANI distances between unknown genomes
+        # Method: average-linkage
+        dendro = fastcluster.linkage(condensed_distance_matrix, method="average")
+
+        # Finally, cut the dendrogram on the input threshold
+        if len(sketches) > 1:
+            # The dendrogram exists in case of >1 sketches
+            clusters = hier.fcluster(dendro, threshold, criterion="distance")
+
+        else:
+            # There is only one sketch here
+            clusters = [1]
+
+        if len(set(clusters)) == 1:
+            # Define the cluster label by majority voting
+            # Count the number of occurrences for each of the taxonomic labels first
+            counts = Counter(genomes.values())
+
+            # Get the most occurring one
+            max_count = max(counts.values())
+
+            most_frequent = [label for label, count in counts.items() if count == max_count]
+
+            # Get the first one in alphabetical order
+            # This is required in case of equally occurring taxonomic labels
+            label = sorted(most_frequent)[0]
+
+            # Apply the assignment
+            assignments[label] = set(genomes.keys())
+
+        else:
+            # Group genomes according to the new clustering
+            clusters_map = {cluster: set() for cluster in set(clusters)}
+
+            for genome_filepath, cluster in zip(genomes.keys(), clusters):
+                clusters_map[cluster].add(genome_filepath)
+
+            # Keep track of the label occurrences in different clusters
+            labels_count = dict()
+
+            for cluster in clusters_map:
+                # Assign a taxonomic label to the new clusters based on the majority voting
+                # Count the number of occurrences for each of the taxonomic labels first
+                counts = Counter([genomes[genome_filepath]] for genome_filepath in clusters_map[cluster])
+
+                # Get the most occurring one
+                max_count = max(counts.values())
+
+                most_frequent = [label for label, count in counts.items() if count == max_count]
+
+                # Get the first one in alphabetical order
+                # This is required in case of equally occurring taxonomic labels
+                label = sorted(most_frequent)[0]
+
+                # Check whether a cluster with this taxonomic label already exists
+                if label not in labels_count:
+                    labels_count[label] = 1
 
                 else:
-                    # In case of fasta files
-                    filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+                    if label in assignment:
+                        # There are more than 1 clusters with the same label
+                        # Rename the first one as clade 1
+                        clade_1 = f"{label}__clade_1"
 
-                    genome_obj = Entry(self, filename, filename, "genome")
+                        assignments[clade_1] = assignments.pop(label)
 
-                    # Build their bloom filter sketch representation
-                    genome_sketch_filepath = genome_obj.sketch(genome_filepath)
+                    labels_count[label] += 1
 
-                    sketches.append(genome_sketch_filepath)
+                    # Add an incremental number
+                    label += f"__clade_{labels_count[label]}"
 
-            # Build a condensed ANI distance matrix
-            condensed_distance_matrix = list()
+                # Apply the assignment
+                assignments[label] = clusters_map[cluster]
 
-            # Rescale nproc
-            nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
-
-            if nproc > 1:
-                # Keep track of the ANI distances
-                dists = dict()
-
-                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
-                    # Wrapper around the update function of tqdm
-                    def progress(*args):
-                        pbar.update()
-
-                    jobs = [
-                        pool.apply_async(
-                            self.__class__.dist, 
-                            args=(
-                                sketch_filepath, 
-                                sketches[pos+1:],
-                                self.metadata["kmer_size"],
-                                self.tmp,
-                                False,
-                            ),
-                            callback=progress
-                        ) for pos, sketch_filepath in enumerate(sketches)
-                    ]
-
-                    for job in jobs:
-                        sketch_filepath, sketch_dists = job.get()
-
-                        # `sketch_dists` is an OrderedDict so it maintains the same order of elements in `sketches`
-                        dists[sketch_filepath] = list(sketch_dists.values())
-
-                for sketch_filepath in sketches:
-                    condensed_distance_matrix.extend(dists[sketch_filepath])
-
-            else:
-                # Avoid using multiprocessing if `nproc` is 1
-                for pos, sketch_filepath in enumerate(sketches):
-                    _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                    condensed_distance_matrix.extend(list(sketch_dists.values()))
-
-            # Build a dendrogram based on the ANI distances between unknown genomes
-            # Method: average-linkage
-            dendro = fastcluster.linkage(condensed_distance_matrix, method="average")
-
-            # Finally, cut the dendrogram on the input threshold
-            if len(sketches) > 1:
-                # The dendrogram exists in case of >1 sketches
-                clusters = hier.fcluster(dendro, threshold, criterion="distance")
-
-            else:
-                # There is only one sketch here
-                clusters = [1]
-
-            if len(set(clusters)) == 1:
-                # We should keep the original assignment here
-                assignments[label] = set(sketches)
-
-            else:
-                # Define new labels based on how many clusters have been defined
-                # Clusters start from 1 in `fcluster`
-                clusters_map = {i: f"{label}__clade_{i}" for i in sorted(set(clusters))}
-
-                # Collect all the genomes that have been assigned to the same cluster id
-                for sketch_filepath, assigned_cluster in zip(sketches, clusters):
-                    new_label = clusters_map[assigned_cluster]
-
-                    if new_label not in assignments:
-                        assignments[new_label] = set()
-
-                    assignments[new_label].add(sketch_filepath)
-
-        return assignments
+        return {genome: label for label in assignments for genome in assignments[label]}
 
     @staticmethod
     def _is_known(instance: "Database", filepath: os.path.abspath) -> Tuple[os.path.abspath, Optional[str]]:
@@ -875,9 +915,9 @@ class Database(object):
             for taxonomic_position, taxonomic_level in reversed(list(enumerate(taxonomy_split))):
                 cluster_obj = None
 
-                if taxonomic_level in self.clusters[self.__class__.levels[taxonomic_position]]:
+                if taxonomic_level in self.clusters[self.__class__.LEVELS[taxonomic_position]]:
                     # Retrieve the cluster from the database
-                    cluster_obj = self.clusters[self.__class__.levels[taxonomic_position]][taxonomic_level]
+                    cluster_obj = self.clusters[self.__class__.LEVELS[taxonomic_position]][taxonomic_level]
 
                 else:
                     if re.search("^MSBT[0-9]*$", taxonomic_level[3:]):
@@ -905,11 +945,11 @@ class Database(object):
                     parent = None if taxonomic_position == 0 else taxonomy_split[taxonomic_position-1]
 
                     # Initialize the Entry object representing the cluster
-                    cluster_obj = Entry(self, cluster_id, taxonomic_level, self.__class__.levels[taxonomic_position], folder=cluster_folder, parent=parent)
+                    cluster_obj = Entry(self, cluster_id, taxonomic_level, self.__class__.LEVELS[taxonomic_position], folder=cluster_folder, parent=parent)
 
                     new_clusters = True
 
-                if self.__class__.levels[taxonomic_position] == "species":
+                if self.__class__.LEVELS[taxonomic_position] == "species":
                     # Set the parent species cluster
                     genome_obj.parent = taxonomic_level
 
@@ -926,7 +966,7 @@ class Database(object):
                 # Note: genomes cannot be indexed here!
                 #       once all the input genomes have been processed, the `self.update()` function should be run as the last step
                 #       in order to go through all the new and modified custers and build the Sequence Bloom Trees.
-                self.clusters[self.__class__.levels[taxonomic_position]][taxonomic_level] = cluster_obj
+                self.clusters[self.__class__.LEVELS[taxonomic_position]][taxonomic_level] = cluster_obj
 
             if new_clusters:
                 self._dump_metadata()
@@ -1033,7 +1073,7 @@ class Database(object):
 
         # Start processing from the genus level up to the kingdom
         # We can skip the species level here since we already went through it during `add()`
-        for level in reversed(self.__class__.levels[:-1]):
+        for level in reversed(self.__class__.LEVELS[:-1]):
             if len(processed) == len(self.__unknowns):
                 break
 
@@ -1133,7 +1173,7 @@ class Database(object):
         for sketch_name in assignments:
             taxonomy = assignments[sketch_name]
 
-            if (taxonomy.count("|") + 1) == len(self.__class__.levels):
+            if (taxonomy.count("|") + 1) == len(self.__class__.LEVELS):
                 # The assigned taxonomic label is defined at the species level
                 if taxonomy not in characterized:
                     characterized[taxonomy] = set()
@@ -1168,7 +1208,7 @@ class Database(object):
                 # We should now start from the kingdom level down to the species level to finish characterizing genomes
                 # If a genome has not been characterized, it means that it is not close enough to its closest cluster according to its boundaries
                 # We can now create new clusters and estimate their boundaries, then cut the dendrogram to see how many genomes fall in them
-                tmp_taxonomy = f"{taxonomy}|{self.__class__.levels[taxonomy.count('|')+1][0]}__tmp"
+                tmp_taxonomy = f"{taxonomy}|{self.__class__.LEVELS[taxonomy.count('|')+1][0]}__tmp"
 
                 # Estimate the boundaries for the temporary cluster
                 # This is a totally new cluster. There is no need to search for a centroid here
@@ -1202,7 +1242,7 @@ class Database(object):
                             new_clusters = True
 
                         # Define the assigned taxonomic label
-                        assigned_taxonomy = f"{taxonomy}|{self.__class__.levels[taxonomy.count('|')+1][0]}__MSBT{clusters_map[assigned_cluster]}"
+                        assigned_taxonomy = f"{taxonomy}|{self.__class__.LEVELS[taxonomy.count('|')+1][0]}__MSBT{clusters_map[assigned_cluster]}"
 
                         if self.__class__._is_defined(assigned_taxonomy):
                             # This is fully characterized now
@@ -1278,7 +1318,7 @@ class Database(object):
         if not taxonomy:
             raise ValueError("Taxonomy is not provided!")
 
-        cluster_level = self.__class__.levels[taxonomy.count("|")]
+        cluster_level = self.__class__.LEVELS[taxonomy.count("|")]
 
         if cluster_level == "species":
             # Force the radius of species clusters to 5% of genetic distance
@@ -1312,7 +1352,7 @@ class Database(object):
         current_cluster_parent = current_cluster_parent_taxonomy.split("|")[-1]
 
         while not min_bounds and not max_bounds:
-            parent_level = self.__class__.levels[self.__class__.levels.index(current_cluster_level)-1]
+            parent_level = self.__class__.LEVELS[self.__class__.LEVELS.index(current_cluster_level)-1]
 
             if current_cluster_parent in self.clusters[parent_level]:
                 parent_obj = self.clusters[parent_level][current_cluster_parent]
@@ -1367,8 +1407,8 @@ class Database(object):
         # Process clusters based on their taxonomic level
         # All the species first, then genera, and so on up to the kingdom
         # Note that clusters are fuly defined here, but could contain some level of unknownness
-        for level in reversed(self.__class__.levels):
-            pos = self.__class__.levels.index(level)
+        for level in reversed(self.__class__.LEVELS):
+            pos = self.__class__.LEVELS.index(level)
 
             for taxonomy in self.__clusters:
                 # Keep levels up to `level` and trim out lower taxonomic levels
@@ -1504,7 +1544,7 @@ class Database(object):
 
             # Dump information about clusters at all the seven taxonomic levels
             # starting from the species all the way up to the kingdom
-            for level in reversed(self.__class__.levels):
+            for level in reversed(self.__class__.LEVELS):
                 for cluster_name in self.clusters[level]:
                     # Retrieve the cluster object
                     cluster_obj = self.clusters[level][cluster_name]
@@ -1514,7 +1554,7 @@ class Database(object):
                         cluster_references = sorted([genome for genome in cluster_obj.children if self.genomes[genome].is_known()])
 
                     else:
-                        cluster_references = sorted([cluster for cluster in cluster_obj.children if self.clusters[self.__class__.levels[self.__class__.levels.index(level)+1]][cluster].is_known()])
+                        cluster_references = sorted([cluster for cluster in cluster_obj.children if self.clusters[self.__class__.LEVELS[self.__class__.LEVELS.index(level)+1]][cluster].is_known()])
 
                     cluster_mags = list(cluster_obj.children.difference(cluster_references))
 
@@ -1870,7 +1910,7 @@ class Database(object):
         # Define the list of taxonomic levels
         # Prepend the db level with the index of all the kingdoms in the database
         # Also append the genome level as a break point
-        levels = ["db"] + self.__class__.levels + ["genome"]
+        levels = ["db"] + self.__class__.LEVELS + ["genome"]
 
         # Keep track of the profiles
         # Mapping between the closest cluster and its distance indexexd by the taxonomic level
@@ -2162,7 +2202,7 @@ class Database(object):
         with open(query_result_filepath, "w+") as profiles_table:
             profiles_table.write("# level\tclosest\tani\n")
 
-            for level in self.__class__.levels + ["genome"]:
+            for level in self.__class__.LEVELS + ["genome"]:
                 for match in profiles[level]:
                     profiles_table.write(f"{level}\t{match}\t{profiles[level][match]}\n")
 
@@ -2916,7 +2956,7 @@ class Database(object):
                     # What if this cluster was the only one assigned to its higher level cluster?
                     # We should remove clusters all the way up to the kingdom level
                     # Retrieve the parent taxonomic level first
-                    parent_level = self.levels[self.levels.index(level)-1] if level != "kingdom" else None
+                    parent_level = self.LEVELS[self.LEVELS.index(level)-1] if level != "kingdom" else None
 
                     if parent_level:
                         # Also retrieve the parent object
@@ -3013,7 +3053,7 @@ class Database(object):
             taxonomy_split = taxonomy.split("|")
 
             # Iterate over the taxonomic levels
-            for taxonomy_level, level_name in zip(taxonomy_split, self.levels):
+            for taxonomy_level, level_name in zip(taxonomy_split, self.LEVELS):
                 # Check whether this level still exists in the database
                 # If not, we should cut it and build a new taxonomy up to an existing species (the smallest one under the partial taxonomy)
                 if taxonomy_level not in self.clusters[level_name]:
@@ -3022,7 +3062,7 @@ class Database(object):
                     cluster_name = taxonomy_split[taxonomy_split.index(taxonomy_level)-1]
 
                     # Consider the previous level and retrieve the cluster Entry object
-                    cluster_obj = self.clusters[self.levels[self.levels.index(level_name)-1]][cluster_name]
+                    cluster_obj = self.clusters[self.LEVELS[self.LEVELS.index(level_name)-1]][cluster_name]
 
                     # Retrieve all the species under `cluster_obj`
                     species = list(cluster_obj.get_children(up_to="species"))
@@ -3079,7 +3119,7 @@ class Database(object):
             return False
 
         else:
-            for level, level_id in zip(cls.levels, taxonomy.split("|")):
+            for level, level_id in zip(cls.LEVELS, taxonomy.split("|")):
                 if len(level_id) <= 3 or level_id[:3] != f"{level[0]}__":
                     return False
 
@@ -3143,10 +3183,10 @@ class Database(object):
 
             return f"{level_prefix}{level_suffix}"
 
-        taxonomic_levels = {cls.levels[pos]: taxonomic_level[3:] for pos, taxonomic_level in enumerate(taxonomy.split("|"))}
+        taxonomic_levels = {cls.LEVELS[pos]: taxonomic_level[3:] for pos, taxonomic_level in enumerate(taxonomy.split("|"))}
 
         # Build the new taxonomic label
-        taxonomy = "|".join([f"{level[0]}__{taxonomic_levels[level]}" for level in cls.levels])
+        taxonomy = "|".join([f"{level[0]}__{taxonomic_levels[level]}" for level in cls.LEVELS])
 
         return taxonomy
 
@@ -3364,7 +3404,7 @@ class Entry(object):
             # It could be MSBT0
             pass
 
-        elif level not in self.database.__class__.levels + ["genome"]:
+        elif level not in self.database.__class__.LEVELS + ["genome"]:
             raise ValueError("Invalid taxonomic level!")
 
         if level == "genome" and children:
@@ -3375,7 +3415,7 @@ class Entry(object):
         if self.level == "genome" and not self.identifier == self.name:
             raise ValueError("A genome entry ID should match with the entry name!")
 
-        elif self.level in self.database.__class__.levels and not re.search("^MSBT[0-9]*$", self.identifier):
+        elif self.level in self.database.__class__.LEVELS and not re.search("^MSBT[0-9]*$", self.identifier):
             raise ValueError("A cluster entry ID should match with the following regular expression: ^MSBT[0-9]*$")
 
         if not folder:
@@ -3384,7 +3424,7 @@ class Entry(object):
 
         self.folder = folder
 
-        if not self.level or self.level in self.database.__class__.levels:
+        if not self.level or self.level in self.database.__class__.LEVELS:
             # Do not create a folder in case of genomes.
             os.makedirs(os.path.join(self.folder, "tree"), exist_ok=True)
 
@@ -3414,7 +3454,7 @@ class Entry(object):
 
         self.sketch_filepath = None
 
-        if not self.level or self.level in self.database.__class__.levels:
+        if not self.level or self.level in self.database.__class__.LEVELS:
             sketch_filepath = os.path.join(self.database.root, "clusters", self.database.__class__._get_cluster_batch(self.identifier), self.identifier, f"{self.name}.bf")
 
         else:
@@ -3475,7 +3515,7 @@ class Entry(object):
             otherwis the set of clusters under a specific taxonomic level.
         """
 
-        levels = self.database.__class__.levels + ["genome"]
+        levels = self.database.__class__.LEVELS + ["genome"]
 
         if not up_to:
             # Return genomes by default
@@ -3593,7 +3633,7 @@ class Entry(object):
             # Stop the recursion
             return taxonomy
 
-        levels = self.database.__class__.levels + ["genome"]
+        levels = self.database.__class__.LEVELS + ["genome"]
 
         parent_level = levels[levels.index(entry.level)-1]
 
@@ -3644,7 +3684,7 @@ class Entry(object):
         entries = self.children
 
         if self.level != "species":
-            for level in self.database.__class__.levels[self.database.__class__.levels.index(self.level)+1:]:
+            for level in self.database.__class__.LEVELS[self.database.__class__.LEVELS.index(self.level)+1:]:
                 next_entries = set()
 
                 for entry in entries:
@@ -3703,7 +3743,7 @@ class Entry(object):
 
         else:
             # Children are located at the next higher taxonomic level
-            next_level = "kingdom" if not self.level else self.database.__class__.levels[self.database.__class__.levels.index(self.level)+1]
+            next_level = "kingdom" if not self.level else self.database.__class__.LEVELS[self.database.__class__.LEVELS.index(self.level)+1]
 
             # This entry represent a taxonomic level, different than a species
             # Thus, children are Entry objects
@@ -3851,7 +3891,7 @@ class Entry(object):
         if not self.database.__class__._validate_metadata(self.database.metadata):
             raise Exception("No database metadata found!")
 
-        if self.level in self.database.__class__.levels:
+        if self.level in self.database.__class__.LEVELS:
             # The list of taxonomic levels in `database` do not contain "genome"
             raise Exception("This function can be used in case of genome entries only!")
 
