@@ -32,7 +32,7 @@ setuptools.setup(
         "metagenome-assembled genomes with sequence bloom trees"
     ),
     download_url="https://pypi.org/project/MetaSBT/",
-    entry_points={"console_scripts": ["metasbt=metasbt.metasbt:MetaSBT"]},
+    entry_points={"console_scripts": ["metasbt=metasbt.metasbt:run"]},
     install_requires=[
         "biopython>=1.83",
         "fastcluster>=1.2.6",
