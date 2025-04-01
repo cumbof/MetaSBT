@@ -581,18 +581,10 @@ class MetaSBT(object):
             ),
         )
         parser.add_argument(
-            "--ncbi-names",
-            type=os.path.abspath,
-            required=True,
-            dest="ncbi_names",
-            help="Path to the NCBI names.dmp file.",
-        )
-        parser.add_argument(
-            "--ncbi-nodes",
-            type=os.path.abspath,
-            required=True,
-            dest="ncbi_nodes",
-            help="Path to the NCBI nodes.dmp file.",
+            "--threads",
+            type=int,
+            default=1,
+            help="Number of threads for kraken2-build.",
         )
 
         # Load arguments
@@ -600,12 +592,12 @@ class MetaSBT(object):
 
         # Define the ordered list of taxonomic levels
         TAXONOMIC_RANKING = [
-            "superkingdom", 
-            "phylum", 
-            "class", 
-            "order", 
-            "family", 
-            "genus", 
+            "superkingdom",
+            "phylum",
+            "class",
+            "order",
+            "family",
+            "genus",
             "species"
         ]
 
@@ -620,36 +612,70 @@ class MetaSBT(object):
         # Assume the input files are not compressed
         genomes = {os.path.splitext(os.path.basename(line.strip()))[0]: line.strip() for line in open(args.genomes).readlines() if line.strip()}
 
+        # Keep track of the current working directory
+        curr_workdir = os.getcwd()
+
+        # Set --workdir as the current working directory
+        os.chdir(args.workdir)
+
+        # Initialize the kraken2 database
+        # This is going to download the NCBI taxonomy into a `taxonomy` folder under the `args.database` directory
+        command_line = [
+            "kraken2-build",
+            "--download-taxonomy",
+            "--skip-maps",
+            "--db",
+            args.database
+        ]
+
+        try:
+            subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        except subprocess.CalledProcessError as e:
+            # Set the current working directory back to the original one
+            os.chdir(curr_workdir)
+
+            error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+
+            raise Exception(error_message).with_traceback(e.__traceback__)
+
+        # Define the path to the names.dmp and nodes.dmp files
+        ncbi_names_filepath = os.path.join(args.workdir, args.database, "taxonomy", "names.dmp")
+
+        ncbi_nodes_filepath = os.path.join(args.workdir, args.database, "taxonomy", "nodes.dmp")
+
+        # Keep track of NCBI names
         ncbi_names = dict()
 
         # Keep track of the highgest NCBI TaxID
         latest_node_id = 0
 
         # Load NCBI names
-        with open(args.ncbi_names) as ncbi_names_table:
+        with open(ncbi_names_filepath) as ncbi_names_table:
             for line in ncbi_names_table:
                 line = line.strip()
 
                 if line:
                     line_split = line.split("|")
 
-                    if line_split[3].strip() == "scientific name":
+                    if line_split[3].strip().lower() in ["scientific name", "equivalent name", "synonym"]:
                         # NCBI TaxID
                         ncbi_taxid = int(line_split[0].strip())
 
-                        # NCBI Tax scientific name
-                        # Scientific names must be fixed in the same way that MetaSBT does
-                        ncbi_tax_scientific_name = re.sub(r"_+", "_", re.sub(r"\W+", "_", line_split[1].strip())).strip("_")
+                        # NCBI Tax scientific names, equivalent names, and synonyms
+                        # Names must be fixed in the same way that MetaSBT does
+                        ncbi_tax_name = re.sub(r"_+", "_", re.sub(r"\W+", "_", line_split[1].strip())).strip("_")
 
-                        ncbi_names[ncbi_tax_scientific_name] = ncbi_taxid
+                        ncbi_names[ncbi_tax_name] = ncbi_taxid
 
                         if ncbi_taxid > latest_node_id:
                             latest_node_id = ncbi_taxid
 
+        # Keep track of NCBI node IDs
         ncbi_nodes = dict()
 
         # Load NCBI tax relationships
-        with open(args.ncbi_nodes) as ncbi_nodes_table:
+        with open(ncbi_nodes_filepath) as ncbi_nodes_table:
             for line in ncbi_nodes_table:
                 line = line.strip()
 
@@ -671,7 +697,7 @@ class MetaSBT(object):
                     }
 
         # Define the path to the clusters.tsv file
-        metasbt_report_filepath = os.path.join(args.workdir, args.database, "clusters.tsv")
+        metasbt_clusters_filepath = os.path.join(args.workdir, args.database, "clusters.tsv")
 
         metasbt_names = dict()
 
@@ -681,7 +707,7 @@ class MetaSBT(object):
         metasbt_lineages = dict()
 
         # Load MetaSBT clusters
-        with open(metasbt_report_filepath) as metasbt_report:
+        with open(metasbt_clusters_filepath) as metasbt_report:
             header = list()
 
             for line in metasbt_report:
@@ -725,6 +751,9 @@ class MetaSBT(object):
                                     parent_id = metasbt_names[parent_name]
 
                                 else:
+                                    # Set the current working directory back to the original one
+                                    os.chdir(curr_workdir)
+
                                     raise ValueError('Node "{}" is missing!'.format(parent_name))
 
                                 metasbt_nodes[metasbt_names[cluster_name]] = {
@@ -733,7 +762,7 @@ class MetaSBT(object):
                                 }
 
         # Finally, write the MetaSBT names and nodes additions
-        with open(args.ncbi_names, "a+") as ncbi_names_table:
+        with open(ncbi_names_filepath, "a+") as ncbi_names_table:
             for node_name in sorted(metasbt_names.keys(), key=lambda node_name: metasbt_names[node_name]):
                 # Retrieve the node id
                 node_id = metasbt_names[node_name]
@@ -746,7 +775,7 @@ class MetaSBT(object):
 
                 ncbi_names_table.write("{}\n".format(metasbt_node))
 
-        with open(args.ncbi_nodes, "a+") as ncbi_nodes_table:
+        with open(ncbi_nodes_filepath, "a+") as ncbi_nodes_table:
             for node_id, node_data in sorted(metasbt_nodes.items()):
                 # Add the tax id
                 metasbt_node = NODE_TEMPLATE.replace("taxid", str(node_id))
@@ -774,7 +803,23 @@ class MetaSBT(object):
 
                 metasbt_cluster_name = lineage[-1][3:]
 
-                metasbt_cluster_id = metasbt_names[metasbt_cluster_name] if metasbt_cluster_name in metasbt_names else ncbi_names[metasbt_cluster_name]
+                if re.fullmatch(r".*__clade_[0-9]*$", metasbt_cluster_name):
+                    # In case of reference genomes clustered from scratch
+                    # Taxonomies are assigned based on a majority voting mechanism
+                    # A suffix with an incremental number is added to clusters with the same taxonomy
+                    # We have to get rid of the incremental suffix in order to match with NCBI scientific names
+                    metasbt_cluster_name = "__".join(metasbt_cluster_name.split("__")[:-1])
+
+                if metasbt_cluster_name in metasbt_names:
+                    metasbt_cluster_id = metasbt_names[metasbt_cluster_name]
+
+                elif metasbt_cluster_name in ncbi_names:
+                    metasbt_cluster_id = ncbi_names[metasbt_cluster_name]
+
+                else:
+                    # TODO This could happen in case of deprecated taxonomic labels in NCBI
+                    #      We should treat these taxonomies as new, the same way we do with MSBT clusters
+                    continue
 
                 for genome_file in genome_files:
                     with tempfile.NamedTemporaryFile() as tmp_genome:
@@ -790,23 +835,53 @@ class MetaSBT(object):
 
                                 SeqIO.write(record, tmp_genome.name, "fasta")
 
-                        # Run kraken2-build over the temporary genome file
-                        # kraken2-build --add-to-library $file --db $DBNAME
+                        # Add the temporary genome file to the library
                         command_line = [
                             "kraken2-build",
                             "--add-to-library",
                             tmp_genome.name,
                             "--db",
-                            args.database
+                            args.database,
+                            "--threads",
+                            str(args.threads)
                         ]
 
                         try:
                             subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                         except subprocess.CalledProcessError as e:
+                            # Set the current working directory back to the original one
+                            os.chdir(curr_workdir)
+
                             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
                             raise Exception(error_message).with_traceback(e.__traceback__)
+
+        # Finally, build the database
+        # TODO What about --kmer-len, --minimizer-len, and --minimizer-spaces?
+        command_line = [
+            "kraken2-build",
+            "--build",
+            "--db",
+            args.database,
+            "--clean",
+            "--threads",
+            str(args.threads)
+        ]
+
+        try:
+            subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        except subprocess.CalledProcessError as e:
+            # Set the current working directory back to the original one
+            os.chdir(curr_workdir)
+
+            error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+
+            raise Exception(error_message).with_traceback(e.__traceback__)
+
+        # Set the current working directory back to the original one
+        os.chdir(curr_workdir)
 
     def pack(self, argv: List[Any], parse_known_args=False) -> None:
         """Build a compressed tarball with a MetaSBT database and report its sha256.
