@@ -588,6 +588,7 @@ class MetaSBT(object):
         )
 
         # Load arguments
+        # TODO Use k2 instead of kraken2-build
         args = parser.parse_args(argv)
 
         # Define the ordered list of taxonomic levels
@@ -976,7 +977,8 @@ class MetaSBT(object):
         if sha256.returncode == 0:
             print(sha256.stdout)
 
-        raise Exception(f"An error has occurred while computing the sha256 hash of {output_filepath}")
+        else:
+            raise Exception(f"An error has occurred while computing the sha256 hash of {output_filepath}")
 
     def profile(self, argv: List[Any], parse_known_args=False) -> None:
         """Profile a set of genomes against a specific MetaSBT database.
@@ -1327,15 +1329,21 @@ class MetaSBT(object):
         )
         parser.add_argument(
             "--references",
-            required=True,
+            required="all" in argv or "index" in argv or "kraken" in argv or "sketch" in argv,
             type=os.path.abspath,
-            help="Path to the file with the list of paths to the reference genomes and their taxonomies."
+            help=(
+                "Path to the file with the list of paths to the reference genomes and their taxonomies. "
+                "Required in case of --feature {all, index, kraken, sketch}"
+            )
         )
         parser.add_argument(
             "--mags",
-            required=True,
+            required="all" in argv or "index" in argv or "kraken" in argv or "profile" in argv or "update" in argv,
             type=os.path.abspath,
-            help="Path to the file with the list of paths to the metagenome-assembled genomes."
+            help=(
+                "Path to the file with the list of paths to the metagenome-assembled genomes. "
+                "Required in case of --features {all, index, kraken, profile, update}"
+            )
         )
 
         # Load arguments
@@ -1345,37 +1353,46 @@ class MetaSBT(object):
             """Unit tests.
             """
 
-            @classmethod
-            def setUpClass(cls, references_filepath: os.path.abspath, mags_filepath: os.path.abspath):
-                """ Set up the unit class by retrieving a bunch of genomes to use within all the unit tests.
+            # These are used in the setUpClass function in order to load the set of reference genomes and MAGs
+            references_filepath = None
 
-                Parameters
-                ----------
-                references_filepath : os.path.abspath
-                    Path to the file with the list of paths to the reference genomes and their taxonomies.
-                mags_filepath : os.path.abspath
-                    Path to the file with the list of paths to the metagenome-assembled genomes.
+            mags_filepath = None
+
+            @classmethod
+            def setUpClass(cls):
+                """Set up the unit class by retrieving a bunch of genomes to use within all the unit tests.
                 """
 
                 # Create the temporary working directory
                 cls.working_dir = tempfile.TemporaryDirectory()
 
                 # Define the database folder
-                cls.db_dir = os.path.join(cls.working_dir.name, "MetaSBT")
+                cls.db_dir = os.path.join(cls.working_dir.name, "Test")
 
                 # Define the temporary folder
                 cls.tmp_dir = os.path.join(cls.working_dir.name, "tmp")
 
-                # Retrieve the set of reference genomes
-                cls.references = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(references_filepath).readlines() if line.strip()}
+                os.makedirs(cls.tmp_dir)
 
-                # Retrieve the set of MAGs
-                cls.mags = {line.strip() for line in open(mags_filepath).readlines() if line.strip()}
+                # Define the path to the folder with genomes
+                cls.genomes_dir = os.path.join(cls.working_dir.name, "genomes")
 
-                # Retrieve a bunch of genomes from NCBI GenBank to use during the tests
-                genomes = set(cls.mags)
+                os.makedirs(cls.genomes_dir)
 
-                genomes.update(set([genome for taxonomy in cls.references for genome in cls.references[taxonomy]]))
+                genomes = set()
+
+                if cls.references_filepath:
+                    # Retrieve the set of reference genomes
+                    # key=genome, value=taxonomy
+                    cls.references = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(cls.references_filepath).readlines() if line.strip()}
+
+                    genomes.update(set(cls.references.keys()))
+
+                if cls.mags_filepath:
+                    # Retrieve the set of MAGs
+                    cls.mags = {line.strip() for line in open(cls.mags_filepath).readlines() if line.strip()}
+
+                    genomes.update(cls.mags)
 
                 for genome_url in genomes:
                     try:
@@ -1401,58 +1418,175 @@ class MetaSBT(object):
                 """
 
                 # Delete the temporary working directory
-                shutil.rmtree(cls.__working_dir.name, ignore_errors=False)
+                shutil.rmtree(cls.working_dir.name, ignore_errors=False)
 
             def db(self):
-                """Test the `db()` function.
+                """Test the `db` command.
                 """
 
-                # TODO
+                # Define the db command line to print the list of public databases
+                sys.argv = ["metasbt", "db", "--list"]
+
+                # Redirect the stdout to a temporary file
+                stdout_filepath = os.path.join(self.__class__.working_dir.name, "stdout")
+
+                stdout = open(stdout_filepath, "w+")
+
+                sys.stdout = stdout
+
+                # Also redirect the stderr to a temporary file
+                stderr_filepath = os.path.join(self.__class__.working_dir.name, "stderr")
+
+                stderr = open(stderr_filepath, "w+")
+
+                sys.stderr = stderr
+
+                # This is going to run the command line defined in sys.argv
+                MetaSBT()
+
+                # Restore sys.stdout and sys.stderr
+                sys.stdout = sys.__stdout__
+
+                sys.stderr = sys.__stderr__
+
+                # Close the stdout and stderr files
+                stdout.close()
+
+                stderr.close()
+
+                with self.subTest():
+                    # The stderr file should be empty
+                    self.assertEqual(os.path.getsize(stderr_filepath), 0)
+
+                with self.subTest():
+                    # There must be at least one database listed in stdout
+                    stdout_lines = open(stdout_filepath).readlines()
+
+                    # The "Info" column always report a link to a webpage with the database description
+                    # Counting the number of links equals to counting the number of public databases
+                    public_entries = [entry for line in stdout_lines for entry in line.strip().split(" ") if entry.startswith("http")]
+
+                    self.assertTrue(len(public_entries) > 0)
+
+                # Select the oldest database in the list of public entries
+                # The oldest is in general the smallest one
+                # We can retrieve the name of the database and its version from the info link
+                entry_split = public_entries[0].split("/")
+
+                db_name = entry_split[-2]
+
+                db_version = entry_split[-1]
+
+                # Define the db command line to download a database
+                sys.argv = ["metasbt", "db", "--download", db_name, "--version", db_version, "--folder", self.__class__.working_dir.name]
+
+                # Run the command line and download the database
+                MetaSBT()
+
+                with self.subTest():
+                    # The compressed tarball should exist now
+                    self.assertTrue(os.path.isfile(os.path.join(self.__class__.working_dir.name, f"MetaSBT-{db_name}-{db_version}.tar.gz")))
 
             def index(self):
-                """Test the `index()` function.
+                """Test the `index` command.
                 """
 
                 # TODO
 
             def kraken(self):
-                """Test the `kraken()` function.
+                """Test the `kraken` command.
                 """
 
                 # TODO
 
             def pack(self):
-                """Test the `pack()` function.
+                """Test the `pack` command.
                 """
 
                 # TODO
 
             def profile(self):
-                """Test the `profile()` function.
+                """Test the `profile` command.
                 """
 
                 # TODO
 
             def sketch(self):
-                """Test the `sketch()` function.
+                """Test the `sketch` command.
                 """
 
                 # TODO
 
             def summarize(self):
-                """Test the `summarize()` function.
+                """Test the `summarize` command.
                 """
 
                 # TODO
 
             def unpack(self):
-                """Test the `unpack()` function.
+                """Test the `unpack` command.
                 """
 
-                # TODO
+                # Check whether a database already exists into workdir
+                # A database is considered complete if it contains cluesters.tsv and genomes.tsv
+                if os.path.isfile(os.path.join(self.__class__.db_dir, "clusters.tsv")) and os.path.isfile(os.path.join(self.__class__.db_dir, "genomes.tsv")):
+                    # Get the current time
+                    now = datetime.now()
+
+                    # Define a timestamp
+                    timestamp = f"{now.year}{str(now.month).zfill(2)}{str(now.day).zfill(2)}"
+
+                    # We have to pack the database first
+                    sys.argv = ["metasbt", "pack", "--workdir", self.__class__.working_dir.name, "--database", "Test"]
+
+                    # Run the pack command
+                    MetaSBT()
+
+                    # Define the path to the packed database
+                    tarball_filepath = os.path.join(self.__class__.working_dir.name, f"MetaSBT-Test-{timestamp}.tar.gz")
+
+                else:
+                    # Retrieve a public database
+                    # Use the first version of the Viruses database
+                    sys.argv = ["metasbt", "db", "--download", "Viruses", "--version", "20250115", "--folder", cls.working_dir.name]
+
+                    # Run the db command to retrieve the database
+                    MetaSBT()
+
+                    # Define the path to the packed database
+                    tarball_filepath = os.path.join(self.__class__.working_dir.name, f"MetaSBT-Viruses-20250115.tar.gz")
+
+                with self.subTest():
+                    # The compressed tarball should exist
+                    self.assertTrue(os.path.isfile(tarball_filepath))
+
+                # We can try to unpack the tarball now
+                sys.argv = ["metasbt", "unpack", "--workdir", self.__class__.working_dir.name, "--tarball", tarball_filepath]
+
+                # Run the unpack command
+                MetaSBT()
+
+                # Retrieve the database name from the tarball file name
+                _, db_name, _ = os.path.splitext(os.path.basename(tarball_filepath))[0].split("-")
+
+                # Define the path to the database folder
+                db_folder_path = os.path.join(self.__class__.working_dir.name, db_name)
+
+                with self.subTest():
+                    # Check whether the database folder exists
+                    self.assertTrue(os.path.isdir(db_folder_path))
+
+                with self.subTest():
+                    # Define the path to the clusters.tsv and genomes.tsv files
+                    clusters_filepath = os.path.join(db_folder_path, "clusters.tsv")
+
+                    genomes_filepath = os.path.join(db_folder_path, "clusters.tsv")
+
+                    # Database clusters.tsv and genomes.tsv must exist as well
+                    self.assertTrue(os.path.isfile(clusters_filepath) and os.path.isfile(genomes_filepath))
 
             def update(self):
-                """Test the `update()` function.
+                """Test the `update` command.
                 """
 
                 # TODO
@@ -1466,10 +1600,11 @@ class MetaSBT(object):
                 The name of the test or the wildcard "all" to run all the unit tests.
             """
 
-            # We should manually call the setUpClass
-            # This is going to retrieve the set of reference genomes and MAGs
-            # Warning: an active internet connection is required here!
-            Test.setUpClass(references, mags)
+            # Manually set the path to the files with the list of reference genomes and MAGs 
+            # Warning: an active internet connection is required to retrieve genomes
+            Test.references_filepath = references
+
+            Test.mags_filepath = mags
 
             if test_id == "all":
                 # Initialize the test loader in case of "all"
@@ -1485,13 +1620,11 @@ class MetaSBT(object):
                 # Load the specific test
                 suite.addTest(Test(test_id))
 
-            runner = unittest.TextTestRunner()
+            # Increment the verbosity level and stop running tests if a test fails
+            runner = unittest.TextTestRunner(verbosity=2, failfast=True)
 
             # Finally, run the unit tests
             runner.run(suite)
-
-            # Remove the test data
-            Test.tearDownClass()
 
         run_test(args.references, args.mags, test_id=args.feature)
 
@@ -1738,7 +1871,7 @@ def run() -> None:
     framework = MetaSBT()
 
     # Print the running time and exit
-    print(f"Total elapsed time: {time.time-framework.start_at}s")
+    print(f"Total elapsed time: {time.time()-framework.start_at}s")
 
 
 if __name__ == "__main__":
