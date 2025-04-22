@@ -581,6 +581,27 @@ class MetaSBT(object):
             ),
         )
         parser.add_argument(
+            "--kmer-size",
+            type=int,
+            default=27,
+            dest="kmer_size",
+            help="The kmer size in bp."
+        )
+        parser.add_argument(
+            "--minimizer-length",
+            type=int,
+            default=21,
+            dest="minimizer_length",
+            help="The minimizer length in bp."
+        )
+        parser.add_argument(
+            "--minimizer-spaces",
+            type=int,
+            default=6,
+            dest="minimizer_spaces",
+            help="Number of characters in minimizer that are ignored in comparisons."
+        )
+        parser.add_argument(
             "--threads",
             type=int,
             default=1,
@@ -588,7 +609,6 @@ class MetaSBT(object):
         )
 
         # Load arguments
-        # TODO Use k2 instead of kraken2-build
         args = parser.parse_args(argv)
 
         # Define the ordered list of taxonomic levels
@@ -737,7 +757,11 @@ class MetaSBT(object):
                             if rank_position > 0:
                                 parent_name = lineage[rank_position-1][3:]
 
-                            if cluster_name.startswith("MSBT"):
+                            if cluster_name.startswith("MSBT") or re.fullmatch(r".*__clade_[0-9]*$", cluster_name):
+                                # These are new clsuters defined in MetaSBT
+                                # In case of reference genomes clustered from scratch, taxonomies are assigned based on a majority voting mechanism
+                                # A suffix with an incremental number is added to clusters with the same taxonomy
+                                # We consider these clusters as new species as well
                                 latest_node_id += 1
 
                                 metasbt_names[cluster_name] = latest_node_id
@@ -804,13 +828,6 @@ class MetaSBT(object):
 
                 metasbt_cluster_name = lineage[-1][3:]
 
-                if re.fullmatch(r".*__clade_[0-9]*$", metasbt_cluster_name):
-                    # In case of reference genomes clustered from scratch
-                    # Taxonomies are assigned based on a majority voting mechanism
-                    # A suffix with an incremental number is added to clusters with the same taxonomy
-                    # We have to get rid of the incremental suffix in order to match with NCBI scientific names
-                    metasbt_cluster_name = "__".join(metasbt_cluster_name.split("__")[:-1])
-
                 if metasbt_cluster_name in metasbt_names:
                     metasbt_cluster_id = metasbt_names[metasbt_cluster_name]
 
@@ -843,6 +860,7 @@ class MetaSBT(object):
                             tmp_genome.name,
                             "--db",
                             args.database,
+                            "--no-masking",
                             "--threads",
                             str(args.threads)
                         ]
@@ -859,13 +877,17 @@ class MetaSBT(object):
                             raise Exception(error_message).with_traceback(e.__traceback__)
 
         # Finally, build the database
-        # TODO What about --kmer-len, --minimizer-len, and --minimizer-spaces?
         command_line = [
             "kraken2-build",
             "--build",
             "--db",
             args.database,
-            "--clean",
+            "--kmer-len",
+            str(args.kmer_size),
+            "--minimizer-len",
+            str(args.minimizer_length),
+            "--minimizer-spaces",
+            str(args.minimizer_spaces),
             "--threads",
             str(args.threads)
         ]
