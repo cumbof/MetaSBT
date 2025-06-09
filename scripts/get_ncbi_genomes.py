@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.1"
-__date__ = "Jun 26, 2024"
+__version__ = "0.1.2"
+__date__ = "Jun 9, 2025"
 
 import argparse as ap
 import datetime
@@ -310,9 +310,9 @@ def ncbitax2lin(
     taxa_map = dict()
 
     with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
-        # Load the first line as header and search for "superkingdom" and "kingdom" columns
+        # Load the first line as header and search for "domain" and "kingdom" columns
         header = ncbi_table.readline().split(",")
-        superkingdom_pos = header.index("superkingdom")  # Archaea, Bacteria, Eukaryota, Viruses
+        superkingdom_pos = header.index("domain")  # Archaea, Bacteria, Eukaryota, Viruses
         kingdom_pos = header.index("kingdom")
 
         for line in ncbi_table:
