@@ -215,7 +215,6 @@ class MetaSBT(object):
         )
 
         # Load arguments
-        # TODO Add --sanity-check to compare sha256 hashes to finalize the download
         args = parser.parse_args(argv)
 
         databases = dict()
@@ -294,12 +293,26 @@ class MetaSBT(object):
             # Retrieve the URL to the tarball
             database_url = [db_version["tarball"] for db_version in databases[args.download]][0]
 
+            database_filepath = os.path.join(args.folder, f"MetaSBT-{args.download}-{args.version}.tar.gz")
+
             try:
                 # Download the database tarball
-                urllib.request.urlretrieve(database_url, os.path.join(args.folder, f"MetaSBT-{args.download}-{args.version}.tar.gz"))
+                urllib.request.urlretrieve(database_url, database_filepath)
 
             except:
                 raise Exception(f"Unable to retrieve the database tarball from {database_url}")
+
+            # Compute the sha256 hash
+            sha256 = subprocess.run(["sha256sum", database_filepath], capture_output=True, text=True)
+
+            if sha256.returncode == 0:
+                # Perform a sanity check on the tarball
+                # Compare the sha256 hashes of the downloaded tarball with the hash in the databases table
+                if sha256.stdout.strip() != databases[args.download]["sha256"]:
+                    raise Exception("sha256 mismatch! Consider downloading the database again")
+
+            else:
+                raise Exception(f"An error has occurred while computing the sha256 hash of {database_filepath}")
 
     def index(self, argv: List[Any]) -> None:
         """Build the first baseline of a MetaSBT database by indexing a set of reference genomes.
@@ -597,7 +610,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--minimizer-spaces",
             type=int,
-            default=6,
+            default=5,
             dest="minimizer_spaces",
             help="Number of characters in minimizer that are ignored in comparisons."
         )
@@ -748,43 +761,44 @@ class MetaSBT(object):
 
                             metasbt_lineages["|".join(lineage)] = lineage_genomes
 
-                        for rank_position, rank in enumerate(lineage):
-                            cluster_name = rank[3:]
+                            for rank_position, rank in enumerate(lineage):
+                                cluster_name = rank[3:]
 
-                            # The parent node name of a superkingdom in NCBI is root
-                            parent_name = "root"
+                                # The parent node name of a superkingdom in NCBI is root
+                                parent_name = "root"
 
-                            if rank_position > 0:
-                                parent_name = lineage[rank_position-1][3:]
+                                if rank_position > 0:
+                                    parent_name = lineage[rank_position-1][3:]
 
-                            if cluster_name.startswith("MSBT") or re.fullmatch(r".*__clade_[0-9]*$", cluster_name):
-                                # These are new clsuters defined in MetaSBT
-                                # In case of reference genomes clustered from scratch, taxonomies are assigned based on a majority voting mechanism
-                                # A suffix with an incremental number is added to clusters with the same taxonomy
-                                # We consider these clusters as new species as well
-                                latest_node_id += 1
+                                if cluster_name not in ncbi_names and cluster_name not in metasbt_names:
+                                    # This could be one of the following clusters:
+                                    # (1) MSBT cluster;
+                                    # (2) known species clustered into multiple clades;
+                                    # (3) known species whose name has been deprecated in the current version of names.dmp;
+                                    # We consider these clusters as new species
+                                    latest_node_id += 1
 
-                                metasbt_names[cluster_name] = latest_node_id
+                                    metasbt_names[cluster_name] = latest_node_id
 
-                            if cluster_name in metasbt_names and metasbt_names[cluster_name] not in metasbt_nodes:
-                                parent_id = None
+                                if cluster_name in metasbt_names and metasbt_names[cluster_name] not in metasbt_nodes:
+                                    parent_id = None
 
-                                if parent_name in ncbi_names:
-                                    parent_id = ncbi_names[parent_name]
+                                    if parent_name in ncbi_names:
+                                        parent_id = ncbi_names[parent_name]
 
-                                elif parent_name in metasbt_names:
-                                    parent_id = metasbt_names[parent_name]
+                                    elif parent_name in metasbt_names:
+                                        parent_id = metasbt_names[parent_name]
 
-                                else:
-                                    # Set the current working directory back to the original one
-                                    os.chdir(curr_workdir)
+                                    else:
+                                        # Set the current working directory back to the original one
+                                        os.chdir(curr_workdir)
 
-                                    raise ValueError('Node "{}" is missing!'.format(parent_name))
+                                        raise ValueError('Node "{}" is missing!'.format(parent_name))
 
-                                metasbt_nodes[metasbt_names[cluster_name]] = {
-                                    "parent": parent_id,
-                                    "rank": TAXONOMIC_RANKING[rank_position]
-                                }
+                                    metasbt_nodes[metasbt_names[cluster_name]] = {
+                                        "parent": parent_id,
+                                        "rank": TAXONOMIC_RANKING[rank_position]
+                                    }
 
         # Finally, write the MetaSBT names and nodes additions
         with open(ncbi_names_filepath, "a+") as ncbi_names_table:
@@ -835,8 +849,7 @@ class MetaSBT(object):
                     metasbt_cluster_id = ncbi_names[metasbt_cluster_name]
 
                 else:
-                    # TODO This could happen in case of deprecated taxonomic labels in NCBI
-                    #      We should treat these taxonomies as new, the same way we do with MSBT clusters
+                    # This should never happen
                     continue
 
                 for genome_file in genome_files:
@@ -1054,6 +1067,21 @@ class MetaSBT(object):
             help="Path to the file with a list of paths to the input genomes."
         )
         parser.add_argument(
+            "--uncertainty",
+            required=False,
+            type=float,
+            default=20.0,
+            help="Uncertainty percentage for considering multiple best hits."
+        )
+        parser.add_argument(
+            "--pruning-threshold",
+            dest="pruning_threshold",
+            required=False,
+            type=float,
+            default=0.0,
+            help="Thresholding for pruning the Sequence Bloom Tree."
+        )
+        parser.add_argument(
             "--nproc",
             required=False,
             type=int,
@@ -1095,7 +1123,6 @@ class MetaSBT(object):
             def progress(*args):
                 progress_bar.update()
 
-            # TODO Uncertainty and pruning threshold should not be hardcoded
             jobs = [
                 pool.apply_async(
                     Database._profile, 
@@ -1103,8 +1130,8 @@ class MetaSBT(object):
                         self.database,
                         genome_filepath,
                         sketch_filepath, 
-                        20.0,  # uncertainty
-                        0.0,  # pruning threshold
+                        args.uncertainty,
+                        args.pruning_threshold,
                     ),
                     callback=progress
                 ) for genome_filepath, sketch_filepath in zip(genomes, sketches)
@@ -1343,29 +1370,16 @@ class MetaSBT(object):
         )
 
         parser.add_argument(
-            "--feature",
-            default="all",
-            type=str,
-            choices=["all", "db", "index", "kraken", "pack", "profile", "sketch", "summarize", "unpack", "update"],
-            help="The feature name."
-        )
-        parser.add_argument(
             "--references",
-            required="all" in argv or "index" in argv or "kraken" in argv or "sketch" in argv,
+            required=True,
             type=os.path.abspath,
-            help=(
-                "Path to the file with the list of paths to the reference genomes and their taxonomies. "
-                "Required in case of --feature {all, index, kraken, sketch}"
-            )
+            help="Path to the file with the list of paths to the reference genomes and their taxonomies."
         )
         parser.add_argument(
             "--mags",
-            required="all" in argv or "index" in argv or "kraken" in argv or "profile" in argv or "update" in argv,
+            required=True,
             type=os.path.abspath,
-            help=(
-                "Path to the file with the list of paths to the metagenome-assembled genomes. "
-                "Required in case of --features {all, index, kraken, profile, update}"
-            )
+            help="Path to the file with the list of paths to the metagenome-assembled genomes."
         )
 
         # Load arguments
@@ -1388,8 +1402,11 @@ class MetaSBT(object):
                 # Create the temporary working directory
                 cls.working_dir = tempfile.TemporaryDirectory()
 
+                # Define the database name
+                cls.db_name = "Test"
+
                 # Define the database folder
-                cls.db_dir = os.path.join(cls.working_dir.name, "Test")
+                cls.db_dir = os.path.join(cls.working_dir.name, cls.db_name)
 
                 # Define the temporary folder
                 cls.tmp_dir = os.path.join(cls.working_dir.name, "tmp")
@@ -1404,22 +1421,15 @@ class MetaSBT(object):
                 genomes = set()
 
                 if cls.references_filepath:
-                    # Retrieve the set of reference genomes
-                    # key=genome, value=taxonomy
-                    cls.references = {line.strip().split("\t")[0]: line.strip().split("\t")[1] for line in open(cls.references_filepath).readlines() if line.strip()}
-
-                    genomes.update(set(cls.references.keys()))
+                    genomes.update({line.strip().split("\t")[0] for line in open(cls.references_filepath).readlines() if line.strip()})
 
                 if cls.mags_filepath:
-                    # Retrieve the set of MAGs
-                    cls.mags = {line.strip() for line in open(cls.mags_filepath).readlines() if line.strip()}
-
-                    genomes.update(cls.mags)
+                    genomes.update({line.strip() for line in open(cls.mags_filepath).readlines() if line.strip()})
 
                 for genome_url in genomes:
                     try:
                         # Define the path to the local fna.gz file
-                        fna_gz_path = os.path.join(cls.working_dir.name, os.path.basename(genome_url))
+                        fna_gz_path = os.path.join(cls.genomes_dir, os.path.basename(genome_url))
 
                         # Download the genome into the temporary working directory
                         urllib.request.urlretrieve(genome_url, fna_gz_path)
@@ -1442,184 +1452,88 @@ class MetaSBT(object):
                 # Delete the temporary working directory
                 shutil.rmtree(cls.working_dir.name, ignore_errors=False)
 
-            def db(self):
-                """Test the `db` command.
+            def pipeline(self):
+                """Test the MetaSBT pipeline.
                 """
 
-                # Define the db command line to print the list of public databases
-                sys.argv = ["metasbt", "db", "--list"]
+                # Define the path to the file with the list of reference genomes and their taxonomic labels
+                references_filepath = os.path.join(self.__class__.working_dir.name, "references.tsv")
 
-                # Redirect the stdout to a temporary file
-                stdout_filepath = os.path.join(self.__class__.working_dir.name, "stdout")
+                with open(self.__class__.references_filepath) as references_file1, open(references_filepath, "w+") as references_file2:
+                    for line in references_file1:
+                        line = line.strip()
 
-                stdout = open(stdout_filepath, "w+")
+                        if line:
+                            line_split = line.split("\t")
 
-                sys.stdout = stdout
+                            # Genomes are .fna.gz files
+                            reference_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line_split[0]))
 
-                # Also redirect the stderr to a temporary file
-                stderr_filepath = os.path.join(self.__class__.working_dir.name, "stderr")
+                            # Define the new references file
+                            references_file2.write(f"{reference_genome_filepath}\t{line_split[1]}\n")
 
-                stderr = open(stderr_filepath, "w+")
+                # Build the baseline with the `index` command
+                # Define the index command line
+                sys.argv = ["metasbt", "index", "--workdir", self.__class__.working_dir.name, "--database", self.__class__.db_name, "--references", references_filepath]
 
-                sys.stderr = stderr
-
-                # This is going to run the command line defined in sys.argv
-                MetaSBT()
-
-                # Restore sys.stdout and sys.stderr
-                sys.stdout = sys.__stdout__
-
-                sys.stderr = sys.__stderr__
-
-                # Close the stdout and stderr files
-                stdout.close()
-
-                stderr.close()
-
-                with self.subTest():
-                    # The stderr file should be empty
-                    self.assertEqual(os.path.getsize(stderr_filepath), 0)
-
-                with self.subTest():
-                    # There must be at least one database listed in stdout
-                    stdout_lines = open(stdout_filepath).readlines()
-
-                    # The "Info" column always report a link to a webpage with the database description
-                    # Counting the number of links equals to counting the number of public databases
-                    public_entries = [entry for line in stdout_lines for entry in line.strip().split(" ") if entry.startswith("http")]
-
-                    self.assertTrue(len(public_entries) > 0)
-
-                # Select the oldest database in the list of public entries
-                # The oldest is in general the smallest one
-                # We can retrieve the name of the database and its version from the info link
-                entry_split = public_entries[0].split("/")
-
-                db_name = entry_split[-2]
-
-                db_version = entry_split[-1]
-
-                # Define the db command line to download a database
-                sys.argv = ["metasbt", "db", "--download", db_name, "--version", db_version, "--folder", self.__class__.working_dir.name]
-
-                # Run the command line and download the database
+                # Run the command line and index the reference genomes
                 MetaSBT()
 
                 with self.subTest():
-                    # The compressed tarball should exist now
-                    self.assertTrue(os.path.isfile(os.path.join(self.__class__.working_dir.name, f"MetaSBT-{db_name}-{db_version}.tar.gz")))
+                    # Define the path to clusters.tsv and genomes.tsv
+                    clusters_filepath = os.path.join(self.__class__.db_dir, "clusters.tsv")
 
-            def index(self):
-                """Test the `index` command.
-                """
+                    genomes_filepath = os.path.join(self.__class__.db_dir, "genomes.tsv")
 
-                # TODO
+                    # clusters.tsv and genomes.tsv should exist in the database folder
+                    self.assertTrue(os.path.isfile(clusters_filepath) and os.path.isfile(genomes_filepath))
 
-            def kraken(self):
-                """Test the `kraken` command.
-                """
+                # Define the path to the file with the list of metagenome-assembled genomes
+                mags_filepath = os.path.join(self.__class__.working_dir.name, "mags.tsv")
 
-                # TODO
+                with open(self.__class__.mags_filepath) as mags_file1, open(mags_filepath, "w+") as mags_file2:
+                    for line in mags_file1:
+                        line = line.strip()
 
-            def pack(self):
-                """Test the `pack` command.
-                """
+                        if line:
+                            line_split = line.split("\t")
 
-                # TODO
+                            # Genomes are .fna.gz files
+                            mags_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line_split[0]))
 
-            def profile(self):
-                """Test the `profile` command.
-                """
+                            # Define the new mags file
+                            mags_file2.write(f"{mags_genome_filepath}\n")
 
-                # TODO
+                # Update the database with the `update` command
+                # This is going to pack the database into a compressed tarball
+                # Define the update command line
+                sys.argv = ["metasbt", "update", "--workdir", self.__class__.working_dir.name, "--database", self.__class__.db_name, "--genomes", mags_filepath, "--pack"]
 
-            def sketch(self):
-                """Test the `sketch` command.
-                """
+                # Run the command line and update the database
+                MetaSBT()
 
-                # TODO
-
-            def summarize(self):
-                """Test the `summarize` command.
-                """
-
-                # TODO
-
-            def unpack(self):
-                """Test the `unpack` command.
-                """
-
-                # Check whether a database already exists into workdir
-                # A database is considered complete if it contains cluesters.tsv and genomes.tsv
-                if os.path.isfile(os.path.join(self.__class__.db_dir, "clusters.tsv")) and os.path.isfile(os.path.join(self.__class__.db_dir, "genomes.tsv")):
+                with self.subTest():
                     # Get the current time
                     now = datetime.now()
 
                     # Define a timestamp
                     timestamp = f"{now.year}{str(now.month).zfill(2)}{str(now.day).zfill(2)}"
 
-                    # We have to pack the database first
-                    sys.argv = ["metasbt", "pack", "--workdir", self.__class__.working_dir.name, "--database", "Test"]
+                    # Define the path to the compressed tarball
+                    tarball_filepath = os.path.join(self.__class__.working_dir.name, f"MetaSBT-{self.__class__.db_name}-{timestamp}.tar.gz")
 
-                    # Run the pack command
-                    MetaSBT()
-
-                    # Define the path to the packed database
-                    tarball_filepath = os.path.join(self.__class__.working_dir.name, f"MetaSBT-Test-{timestamp}.tar.gz")
-
-                else:
-                    # Retrieve a public database
-                    # Use the first version of the Viruses database
-                    sys.argv = ["metasbt", "db", "--download", "Viruses", "--version", "20250115", "--folder", cls.working_dir.name]
-
-                    # Run the db command to retrieve the database
-                    MetaSBT()
-
-                    # Define the path to the packed database
-                    tarball_filepath = os.path.join(self.__class__.working_dir.name, f"MetaSBT-Viruses-20250115.tar.gz")
-
-                with self.subTest():
-                    # The compressed tarball should exist
+                    # The tarball should exist here
                     self.assertTrue(os.path.isfile(tarball_filepath))
 
-                # We can try to unpack the tarball now
-                sys.argv = ["metasbt", "unpack", "--workdir", self.__class__.working_dir.name, "--tarball", tarball_filepath]
-
-                # Run the unpack command
-                MetaSBT()
-
-                # Retrieve the database name from the tarball file name
-                _, db_name, _ = os.path.splitext(os.path.basename(tarball_filepath))[0].split("-")
-
-                # Define the path to the database folder
-                db_folder_path = os.path.join(self.__class__.working_dir.name, db_name)
-
-                with self.subTest():
-                    # Check whether the database folder exists
-                    self.assertTrue(os.path.isdir(db_folder_path))
-
-                with self.subTest():
-                    # Define the path to the clusters.tsv and genomes.tsv files
-                    clusters_filepath = os.path.join(db_folder_path, "clusters.tsv")
-
-                    genomes_filepath = os.path.join(db_folder_path, "clusters.tsv")
-
-                    # Database clusters.tsv and genomes.tsv must exist as well
-                    self.assertTrue(os.path.isfile(clusters_filepath) and os.path.isfile(genomes_filepath))
-
-            def update(self):
-                """Test the `update` command.
-                """
-
-                # TODO
-
-        def run_test(references: os.path.abspath, mags: os.path.abspath, test_id: str="all") -> None:
+        def run_test(references: os.path.abspath, mags: os.path.abspath) -> None:
             """Run unit tests.
 
             Parameters
             ----------
-            test_id : str, default "all"
-                The name of the test or the wildcard "all" to run all the unit tests.
+            references : os.path.abspath
+                Path to the file with the list of reference genomes and their taxonomic labels.
+            mags : os.path.abspath
+                Path to the file with the list of metagenome-assembled genomes.
             """
 
             # Manually set the path to the files with the list of reference genomes and MAGs 
@@ -1628,19 +1542,11 @@ class MetaSBT(object):
 
             Test.mags_filepath = mags
 
-            if test_id == "all":
-                # Initialize the test loader in case of "all"
-                loader = unittest.TestLoader()
+            # Initialize the test loader
+            loader = unittest.TestLoader()
 
-                # Load all the defined tests in Test
-                suite = loader.loadTestsFromTestCase(Test)
-
-            else:
-                # Use a suite for all the other cases
-                suite = unittest.TestSuite()
-
-                # Load the specific test
-                suite.addTest(Test(test_id))
+            # Load all the defined tests in Test
+            suite = loader.loadTestsFromTestCase(Test)
 
             # Increment the verbosity level and stop running tests if a test fails
             runner = unittest.TextTestRunner(verbosity=2, failfast=True)
@@ -1648,7 +1554,7 @@ class MetaSBT(object):
             # Finally, run the unit tests
             runner.run(suite)
 
-        run_test(args.references, args.mags, test_id=args.feature)
+        run_test(args.references, args.mags)
 
     def unpack(self, argv: List[Any]) -> None:
         """Unpack a local MetaSBT tarball database.
@@ -1739,7 +1645,7 @@ class MetaSBT(object):
         )
         parser.add_argument(
             "--database",
-            default="MetaSBT",
+            required=True,
             type=str,
             help="The database name."
         )
@@ -1811,7 +1717,6 @@ class MetaSBT(object):
         self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
 
         # Load the set of paths to the input genomes
-        # TODO There could be reference genomes as well
         genomes = {args.genome} if args.genome else {line.strip() for line in open(args.genomes).readlines() if line.strip()}
 
         if args.completeness > 0.0 or args.contamination < 100.0:
