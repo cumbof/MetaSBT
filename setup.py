@@ -29,7 +29,7 @@ setuptools.setup(
     ],
     description=(
         "A scalable framework for automatically indexing microbial genomes and accurately characterizing "
-        "metagenome-assembled genomes with sequence bloom trees"
+        "metagenome-assembled genomes with Sequence Bloom Trees"
     ),
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:run"]},
@@ -38,6 +38,7 @@ setuptools.setup(
         "fastcluster>=1.2.6",
         "packaging>=23.2",
         "requests>=2.28.0",
+        "scipy>=1.8.0",
         "tabulate>=0.9.0",
         "tqdm>=4.38.0",
     ],
