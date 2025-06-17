@@ -29,13 +29,13 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__date__ = "Mar 29, 2025"
+__date__ = "Jun 16, 2025"
 __version__ = "0.1.4"
 
 # Define the list of external software dependencies
 DEPENDENCIES = [
     "busco",
-    "checkm2",
+    "checkm",
     "checkv",
     "howdesbt",  # This must be installed with the `Makefile_full` configuration
     "kitsune",
@@ -2283,6 +2283,8 @@ class Database(object):
         if kingdom == "Viruses":
             tmp = os.path.join(tmp, "checkv")
 
+            os.makedirs(tmp, exist_ok=True)
+
             # CheckV requires a single input file with all the viral sequences in it
             # We should merge all the genomes into a single fna file first
             merged_filepath = os.path.join(tmp, "merged.fna")
@@ -2316,7 +2318,7 @@ class Database(object):
                     merged_filepath,
                     tmp,
                     "-t",
-                    nproc
+                    str(nproc)
                 ]
 
                 # Execute the command lines
@@ -2380,14 +2382,15 @@ class Database(object):
                 quality[genome]["contamination"] = contamination
 
         elif kingdom == "Bacteria" or kingdom == "Archaea":
-            tmp = os.path.join(tmp, "checkm2")
+            tmp = os.path.join(tmp, "checkm")
 
-            # CheckM2 requires all input genomes to be stored in the same folder
-            # We could make a symbolic link for each of the genomes
+            # CheckM requires all input genomes to be in a single directory
             genomes_dir = os.path.join(tmp, "genomes")
 
+            os.makedirs(genomes_dir, exist_ok=True)
+
             for genome in genomes:
-                # CheckM2 also requires that the input genomes must all have the same file extension
+                # CheckM requires that the input genomes must all have the same file extension
                 # We can force it to be fna
                 symlink_filepath = os.path.join(genomes_dir, f"{os.path.splitext(os.path.basename(genome))[0]}.fna")
 
@@ -2397,24 +2400,19 @@ class Database(object):
             # Also define the path to the output folder
             output_dir = os.path.join(tmp, "output")
 
+            os.makedirs(output_dir, exist_ok=True)
+
             try:
-                # Define the command line to run CheckM2
+                # Run CheckM lineage workflow
                 command_line = [
-                    "checkm2",
-                    "predict",
-                    "--input",
-                    genomes_dir,
-                    "--output-directory",
-                    output_dir,
-                    "--specific",
-                    "--extension",
+                    "checkm",
+                    "lineage_wf",
+                    "-x",
                     "fna",
-                    "--tmpdir",
-                    tmp,
-                    "--threads",
-                    nproc,
-                    "--stdout"
-                    "--force"
+                    "-t",
+                    str(nproc),
+                    genomes_dir,
+                    output_dir
                 ]
 
                 # Execute the command lines
@@ -2423,35 +2421,50 @@ class Database(object):
             except subprocess.CalledProcessError as e:
                 error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-            # The output quality summary table is in the tmp folder
-            output_filepath = os.path.join(tmp, "quality_summary.tsv")
+            # The quality summary file is generated in output_dir
+            output_filepath = os.path.join(output_dir, "qa_summary.tsv")
 
             if not os.path.isfile(output_filepath):
                 raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), output_filepath)
 
             with open(output_filepath) as output:
                 # Retrieve the header line
-                header = output_table.readline().strip().split("\t")
+                header = output.readline().strip().split("\t")
+
+                # Retrieve the column index for bin id, completeness, and contamination
+                genome_col = header.index("Bin Id")
+
+                completeness_col = header.index("Completeness")
+
+                contamination_col = header.index("Contamination")
 
                 for line in output:
                     line = line.strip()
 
                     if line:
-                        line_split = line.split("\t")
+                        parts = line.split("\t")
 
-                        # TODO Check for the columns containing the genome name and
-                        #      the completeness and contamination stats
-                        # TODO CheckM2 reports the genome name, so we should recover the whole path
-                        genome = line_split[0]
+                        # CheckM reports the genome name, so we should recover the whole path
+                        bin_id = parts[genome_col]
 
-                        completeness = float(line_split[1])
+                        completeness = float(parts[completeness_col])
 
-                        contamination = float(line_split[2])
+                        contamination = float(parts[contamination_col])
 
-                        # Finally, keep track of the genome quality stats
-                        quality[genome]["completeness"] = completeness
+                        # Reconstruct full path from symlink name
+                        original_genome = None
 
-                        quality[genome]["contamination"] = contamination
+                        for genome in genomes:
+                            if os.path.splitext(os.path.basename(genome))[0] == bin_id:
+                                original_genome = genome
+
+                                break
+
+                        if original_genome:
+                            # Finally, keep track of the genome quality stats
+                            quality[original_genome]["completeness"] = completeness
+
+                            quality[original_genome]["contamination"] = contamination
 
         elif kingdom == "Fungi":
             tmp = os.path.join(tmp, "busco")
@@ -2482,7 +2495,7 @@ class Database(object):
                         "--lineage_dataset",
                         busco_db,
                         "--cpu",
-                        nproc,
+                        str(nproc),
                         "--force",
                         "--metaeuk",
                         "--skip_bbtools",
