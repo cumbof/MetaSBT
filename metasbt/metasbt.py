@@ -1421,10 +1421,10 @@ class MetaSBT(object):
                 genomes = set()
 
                 if cls.references_filepath:
-                    genomes.update({line.strip().split("\t")[0] for line in open(cls.references_filepath).readlines() if line.strip()})
+                    genomes.update({line.strip().split("\t")[0] for line in open(cls.references_filepath).readlines() if line.strip() and not line.startswith("#")})
 
                 if cls.mags_filepath:
-                    genomes.update({line.strip() for line in open(cls.mags_filepath).readlines() if line.strip()})
+                    genomes.update({line.strip() for line in open(cls.mags_filepath).readlines() if line.strip() and not line.startswith("#")})
 
                 for genome_url in genomes:
                     try:
@@ -1443,6 +1443,42 @@ class MetaSBT(object):
                         error_message = f"Unable to retrieve {genome_url}\n\n"
 
                         raise Exception(error_message).with_traceback(e.__traceback__)
+
+                with open(join(cls.working_dir.name, "references.tsv"), "w+") as references_file:
+                    with open(cls.references_filepath) as references_w_urls:
+                        for line in references_w_urls:
+                            line = line.strip()
+
+                            if line:
+                                if not line.startswith("#"):
+                                    line_split = line.split("\t")
+
+                                    # Retrieve the genome file name
+                                    # Trim the gz extension out
+                                    genome_name = os.path.splitext(os.path.basename(line_split[0]))[0]
+
+                                    # Define the path to the unzipped genome (fna)
+                                    genome_filepath = os.path.join(cls.genomes_dir, genome_name)
+
+                                    # Path to the fna genome file -> taxonomic label
+                                    references_file.write(f"{genome_filepath}\t{line_split[1]}\n")
+
+                with open(join(cls.working_dir.name, "mags.txt"), "w+") as references_file:
+                    with open(cls.references_filepath) as references_w_urls:
+                        for line in references_w_urls:
+                            line = line.strip()
+
+                            if line:
+                                if not line.startswith("#"):
+                                    # Retrieve the genome file name
+                                    # Trim the gz extension out
+                                    genome_name = os.path.splitext(os.path.basename(line))[0]
+
+                                    # Define the path to the unzipped genome (fna)
+                                    genome_filepath = os.path.join(cls.genomes_dir, genome_name)
+
+                                    # Path to the fna genome file
+                                    references_file.write(f"{genome_filepath}\n")
 
             @classmethod
             def tearDownClass(cls):
@@ -1489,17 +1525,15 @@ class MetaSBT(object):
                     self.assertTrue(os.path.isfile(clusters_filepath) and os.path.isfile(genomes_filepath))
 
                 # Define the path to the file with the list of metagenome-assembled genomes
-                mags_filepath = os.path.join(self.__class__.working_dir.name, "mags.tsv")
+                mags_filepath = os.path.join(self.__class__.working_dir.name, "mags.txt")
 
                 with open(self.__class__.mags_filepath) as mags_file1, open(mags_filepath, "w+") as mags_file2:
                     for line in mags_file1:
                         line = line.strip()
 
                         if line:
-                            line_split = line.split("\t")
-
                             # Genomes are .fna.gz files
-                            mags_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line_split[0]))
+                            mags_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line))
 
                             # Define the new mags file
                             mags_file2.write(f"{mags_genome_filepath}\n")
