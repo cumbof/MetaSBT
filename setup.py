@@ -8,9 +8,9 @@ from metasbt.core import __version__
 if platform.system() not in ["Darwin", "Linux"]:
     sys.exit("MetaSBT does not work on {} platforms".format(platform.system()))
 
-if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
+if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 9):
     sys.exit(
-        "MetaSBT requires Python 3.8 or higher. Your current Python version is {}.{}.{}\n".format(
+        "MetaSBT requires Python 3.9 or higher. Your current Python version is {}.{}.{}\n".format(
             sys.version_info[0], sys.version_info[1], sys.version_info[2]
         )
     )
@@ -34,13 +34,13 @@ setuptools.setup(
     download_url="https://pypi.org/project/MetaSBT/",
     entry_points={"console_scripts": ["metasbt=metasbt.metasbt:run"]},
     install_requires=[
-        "biopython>=1.83",
-        "fastcluster>=1.2.6",
-        "packaging>=23.2",
-        "requests>=2.28.0",
-        "scipy>=1.8.0",
+        "biopython>=1.85",
+        "fastcluster>=1.3.0",
+        "packaging>=25.0",
+        "requests>=2.32.4",
+        "scipy>=1.13.1",
         "tabulate>=0.9.0",
-        "tqdm>=4.38.0",
+        "tqdm>=4.67.1",
     ],
     keywords=[
         "bioinformatics",
