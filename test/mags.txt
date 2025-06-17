@@ -1,0 +1,8 @@
+# Just a bunch of random viral metagenome-assembled genomes from NCBI GenBank
+# url
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/011/395/005/GCA_011395005.1_ASM1139500v1/GCA_011395005.1_ASM1139500v1_genomic.fna.gz
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/006/451/115/GCA_006451115.1_ASM645111v1/GCA_006451115.1_ASM645111v1_genomic.fna.gz
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/023/701/625/GCA_023701625.1_ASM2370162v1/GCA_023701625.1_ASM2370162v1_genomic.fna.gz
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/014/621/555/GCA_014621555.1_ASM1462155v1/GCA_014621555.1_ASM1462155v1_genomic.fna.gz
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/002/987/775/GCA_002987775.1_ASM298777v1/GCA_002987775.1_ASM298777v1_genomic.fna.gz
+https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/002/817/435/GCA_002817435.1_ASM281743v1/GCA_002817435.1_ASM281743v1_genomic.fna.gz
