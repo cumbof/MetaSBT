@@ -1,8 +1,8 @@
 # Changelog
 
-## Version 0.1.4
+## Version 0.1.4.post1
 
-[@cumbof/metasbt@0.1.4](https://github.com/cumbof/MetaSBT/releases/tag/0.1.4)
+[@cumbof/metasbt@0.1.4.post1](https://github.com/cumbof/MetaSBT/releases/tag/0.1.4.post1)
 
 New object-oriented implementation of MetaSBT.
 Clusters are consistent with the definition of Average Nucleotide Identity (ANI).
