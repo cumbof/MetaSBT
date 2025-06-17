@@ -1,0 +1,2 @@
+include test/references.tsv
+include test/mags.txt

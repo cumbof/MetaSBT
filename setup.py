@@ -71,6 +71,7 @@ setuptools.setup(
     scripts=[
         "scripts/get_ncbi_genomes.py",
     ],
+    include_package_data=True,
     url="http://github.com/cumbof/MetaSBT",
     version=__version__,
     zip_safe=False,
