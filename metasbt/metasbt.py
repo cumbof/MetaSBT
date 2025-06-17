@@ -1362,7 +1362,6 @@ class MetaSBT(object):
             The list of arguments.
         """
 
-        # TODO Define references.tsv and mags.txt as test assets
         parser = argparse.ArgumentParser(
             prog="test",
             description="Check for software dependencies and run unit tests.",
@@ -1439,46 +1438,10 @@ class MetaSBT(object):
                             with open(os.path.splitext(fna_gz_path)[0], "wb") as fna_out:
                                 shutil.copyfileobj(fna_gz_in, fna_out)
 
-                    except urllib.error.HTTPError:
+                    except urllib.error.HTTPError as e:
                         error_message = f"Unable to retrieve {genome_url}\n\n"
 
                         raise Exception(error_message).with_traceback(e.__traceback__)
-
-                with open(join(cls.working_dir.name, "references.tsv"), "w+") as references_file:
-                    with open(cls.references_filepath) as references_w_urls:
-                        for line in references_w_urls:
-                            line = line.strip()
-
-                            if line:
-                                if not line.startswith("#"):
-                                    line_split = line.split("\t")
-
-                                    # Retrieve the genome file name
-                                    # Trim the gz extension out
-                                    genome_name = os.path.splitext(os.path.basename(line_split[0]))[0]
-
-                                    # Define the path to the unzipped genome (fna)
-                                    genome_filepath = os.path.join(cls.genomes_dir, genome_name)
-
-                                    # Path to the fna genome file -> taxonomic label
-                                    references_file.write(f"{genome_filepath}\t{line_split[1]}\n")
-
-                with open(join(cls.working_dir.name, "mags.txt"), "w+") as references_file:
-                    with open(cls.references_filepath) as references_w_urls:
-                        for line in references_w_urls:
-                            line = line.strip()
-
-                            if line:
-                                if not line.startswith("#"):
-                                    # Retrieve the genome file name
-                                    # Trim the gz extension out
-                                    genome_name = os.path.splitext(os.path.basename(line))[0]
-
-                                    # Define the path to the unzipped genome (fna)
-                                    genome_filepath = os.path.join(cls.genomes_dir, genome_name)
-
-                                    # Path to the fna genome file
-                                    references_file.write(f"{genome_filepath}\n")
 
             @classmethod
             def tearDownClass(cls):
@@ -1488,7 +1451,7 @@ class MetaSBT(object):
                 # Delete the temporary working directory
                 shutil.rmtree(cls.working_dir.name, ignore_errors=False)
 
-            def pipeline(self):
+            def test_pipeline(self):
                 """Test the MetaSBT pipeline.
                 """
 
@@ -1500,17 +1463,32 @@ class MetaSBT(object):
                         line = line.strip()
 
                         if line:
-                            line_split = line.split("\t")
+                            if not line.startswith("#"):
+                                line_split = line.split("\t")
 
-                            # Genomes are .fna.gz files
-                            reference_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line_split[0]))
+                                # Genomes are .fna files
+                                reference_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.splitext(os.path.basename(line_split[0]))[0])
 
-                            # Define the new references file
-                            references_file2.write(f"{reference_genome_filepath}\t{line_split[1]}\n")
+                                # Define the new references file
+                                references_file2.write(f"{reference_genome_filepath}\t{line_split[1]}\n")
 
                 # Build the baseline with the `index` command
                 # Define the index command line
-                sys.argv = ["metasbt", "index", "--workdir", self.__class__.working_dir.name, "--database", self.__class__.db_name, "--references", references_filepath]
+                # Test genomes are viruses, so we can set --kmer-size and --min-kmer-occurrrences a priori here
+                sys.argv = [
+                    "metasbt", 
+                    "index", 
+                    "--workdir", 
+                    self.__class__.working_dir.name, 
+                    "--database", 
+                    self.__class__.db_name, 
+                    "--references", 
+                    references_filepath,
+                    "--kmer-size",
+                    "9",
+                    "--min-kmer-occurrences",
+                    "1"
+                ]
 
                 # Run the command line and index the reference genomes
                 MetaSBT()
@@ -1532,16 +1510,27 @@ class MetaSBT(object):
                         line = line.strip()
 
                         if line:
-                            # Genomes are .fna.gz files
-                            mags_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.basename(line))
+                            if not line.startswith("#"):
+                                # Genomes are .fna files
+                                mags_genome_filepath = os.path.join(self.__class__.genomes_dir, os.path.splitext(os.path.basename(line))[0])
 
-                            # Define the new mags file
-                            mags_file2.write(f"{mags_genome_filepath}\n")
+                                # Define the new mags file
+                                mags_file2.write(f"{mags_genome_filepath}\n")
 
                 # Update the database with the `update` command
                 # This is going to pack the database into a compressed tarball
                 # Define the update command line
-                sys.argv = ["metasbt", "update", "--workdir", self.__class__.working_dir.name, "--database", self.__class__.db_name, "--genomes", mags_filepath, "--pack"]
+                sys.argv = [
+                    "metasbt", 
+                    "update", 
+                    "--workdir", 
+                    self.__class__.working_dir.name, 
+                    "--database", 
+                    self.__class__.db_name, 
+                    "--genomes", 
+                    mags_filepath, 
+                    "--pack"
+                ]
 
                 # Run the command line and update the database
                 MetaSBT()
