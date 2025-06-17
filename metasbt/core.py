@@ -28,9 +28,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
-__author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__date__ = "Jun 16, 2025"
-__version__ = "0.1.4"
+from metasbt import __date__, __version__
 
 # Define the list of external software dependencies
 DEPENDENCIES = [

@@ -28,7 +28,8 @@ from typing import Any, List
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 
-from metasbt.core import __date__, __version__, DEPENDENCIES, Database, Entry
+from metasbt import __date__, __version__
+from metasbt.core import DEPENDENCIES, Database, Entry
 
 # Define the URL to the code repository
 CODE_REPOSITORY_URL = "https://github.com/cumbof/MetaSBT"
