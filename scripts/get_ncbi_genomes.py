@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.2"
-__date__ = "Jun 9, 2025"
+__version__ = "0.1.3"
+__date__ = "Jul 7, 2025"
 
 import argparse as ap
 import datetime
@@ -312,8 +312,11 @@ def ncbitax2lin(
     with gzip.open(ncbitax2lin_table, "rt") as ncbi_table:
         # Load the first line as header and search for "domain" and "kingdom" columns
         header = ncbi_table.readline().split(",")
-        superkingdom_pos = header.index("domain")  # Archaea, Bacteria, Eukaryota, Viruses
         kingdom_pos = header.index("kingdom")
+
+        # domain: Archaea, Bacteria, Eukaryota
+        # acellular root: Viruses
+        superkingdom_pos = header.index("acellular root") if superkingdom == "Viruses" else header.index("domain")
 
         for line in ncbi_table:
             line = line.strip()
