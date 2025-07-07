@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 0.1.5
+
+[@cumbof/metasbt@0.1.4.post1](https://github.com/cumbof/MetaSBT/releases/tag/0.1.5)
+
+### New features
+
+- `unpack` can automatically rename an unpacked database with the specified `--database` input argument;
+- `update` exposes two new arguments `--uncertainty` and `--pruning-threshold` to tune the profiling performances.
+
+### Fixes
+
+- `db` correctly downloads the selected database version now;
+- `unpack` is now trimming the whole database structure out up to the database folder so that `unpack` would eventually work as expected;
+- `unpack` automatically fixes the paths to the bloom filter sketches onced a database is unpacked to a new location, usually different from the one where the database was located at the time of packing it;
+- `update` correctly generates a new database also in case of no new unknown genomes;
+
 ## Version 0.1.4.post1
 
 [@cumbof/metasbt@0.1.4.post1](https://github.com/cumbof/MetaSBT/releases/tag/0.1.4.post1)

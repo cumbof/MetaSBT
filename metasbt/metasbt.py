@@ -4,6 +4,7 @@ characterizing metagenome-assembled genomes with Sequence Bloom Trees.
 """
 
 import argparse
+import errno
 import gzip
 import json
 import multiprocessing
@@ -292,7 +293,7 @@ class MetaSBT(object):
                 selected_version = args.version
 
             # Retrieve the URL to the tarball
-            database_url = [db_version["tarball"] for db_version in databases[args.download]][0]
+            database_url = [db_version["tarball"] for db_version in databases[args.download] if db_version["version"] == selected_version][0]
 
             database_filepath = os.path.join(args.folder, f"MetaSBT-{args.download}-{args.version}.tar.gz")
 
@@ -309,7 +310,7 @@ class MetaSBT(object):
             if sha256.returncode == 0:
                 # Perform a sanity check on the tarball
                 # Compare the sha256 hashes of the downloaded tarball with the hash in the databases table
-                if sha256.stdout.strip() != databases[args.download]["sha256"]:
+                if sha256.stdout.strip().split()[0] != [db_version["sha256"] for db_version in databases[args.download] if db_version["version"] == selected_version][0]:
                     raise Exception("sha256 mismatch! Consider downloading the database again")
 
             else:
@@ -1488,6 +1489,8 @@ class MetaSBT(object):
                     "--kmer-size",
                     "9",
                     "--min-kmer-occurrences",
+                    "1",
+                    "--nproc",
                     "1"
                 ]
 
@@ -1530,7 +1533,9 @@ class MetaSBT(object):
                     self.__class__.db_name, 
                     "--genomes", 
                     mags_filepath, 
-                    "--pack"
+                    "--pack",
+                    "--nproc",
+                    "1"
                 ]
 
                 # Run the command line and update the database
@@ -1591,8 +1596,11 @@ class MetaSBT(object):
         Raises
         ------
         Exception
+            - If it is unable to retrieve the database name from the tarball;
             - If a database with the same of the tarball one already exists;
             - In case of an error occurred while unpacking the tarball.
+        FileNotFoundError
+            If the input tarball does not exist.
         """
 
         parser = argparse.ArgumentParser(
@@ -1608,6 +1616,12 @@ class MetaSBT(object):
             help="Path to the working directory."
         )
         parser.add_argument(
+            "--database",
+            default="MetaSBT",
+            type=str,
+            help="The database name."
+        )
+        parser.add_argument(
             "--tarball",
             type=os.path.abspath,
             help="Path to the MetaSBT tarball database."
@@ -1616,13 +1630,37 @@ class MetaSBT(object):
         # Load arguments
         args = parser.parse_args(argv)
 
-        # Retrieve the database name from the tarball file name
-        database = os.path.basename(args.tarball).split("-")[1]
+        # Create the working directory if it does not exist
+        os.makedirs(args.workdir, exist_ok=True)
 
-        db_dir = os.path.join(args.workdir, database)
+        if args.database:
+            # --database is an optional argument
+            db_dir = os.path.join(args.workdir, args.database)
 
-        if os.path.isdir(db_dir):
-            raise Exception(f"A database with the same name already exists: {database}")
+            if os.path.isdir(db_dir):
+                raise Exception(f"A database with the same name already exists: {args.database}")
+
+        if not os.path.isfile(args.tarball):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args.tarball)
+
+        # This reads the first entry
+        # The first entry in a MetaSBT database tarball is always the database root folder
+        db_dir_path_in_tarball = subprocess.check_output(f"tar -tzf {args.tarball} | head -1", shell=True).decode().strip()
+
+        if db_dir_path_in_tarball.endswith(os.sep):
+            # Trim the last char out
+            db_dir_path_in_tarball = db_dir_path_in_tarball[:-1]
+
+        # Keeps track of the root folder (the original database name)
+        tarball_database = db_dir_path_in_tarball.split(os.sep)[-1]
+
+        if not tarball_database.strip():
+            raise Exception(f"Unable to retrieve the database name from the tarball")
+
+        tarball_db_dir = os.path.join(args.workdir, tarball_database)
+
+        if os.path.isdir(tarball_db_dir):
+            raise Exception(f"Cannot extract the database in {args.workdir}. A database with the same name already exists: {tarball_database}")
 
         # Build the compressed tarball
         command_line = [
@@ -1633,6 +1671,14 @@ class MetaSBT(object):
             args.workdir
         ]
 
+        # Count how many folder levels are before the database folder in the tarball
+        dir_levels = len(db_dir_path_in_tarball.split(os.sep))-1
+
+        if dir_levels > 0:
+            # Add --strip-components to the command line
+            # This must be specified before -C
+            command_line.insert(3, f"--strip-components={dir_levels}")
+
         try:
             subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -1640,6 +1686,46 @@ class MetaSBT(object):
             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
             raise Exception(error_message).with_traceback(e.__traceback__)
+
+        if args.database:
+            # Rename the extracted database folder to args.database
+            os.rename(tarball_db_dir, db_dir)
+
+            tarball_db_dir = db_dir
+
+        # Fix absolute paths to sketches
+        # Search for all the txt files under the clusters folder
+        # txt files contain the list of paths to the genome sketches that are used to build the SBTs
+        sketch_lists = Path(os.path.join(db_dir, "clusters")).glob("**/*.txt")
+
+        for sketch_list_filepath in sketch_lists:
+            sketch_filepaths = [line.strip() for line in open(sketch_list_filepath).readlines() if line.strip()]
+
+            # Retrieve the partial path to the sketches starting from the clusters or sketches folder
+            # Search for the last occurrence of "clusters" or "sketches" if it appears in multiple positions
+            sketches_or_clusters_dir_index = max([pos for pos, v in enumerate(sketch_filepaths[0].split(os.sep)) if v == "clusters" or v == "sketches"])
+
+            # Rebase the sketch filepaths to the new path on the local filesystem
+            rebased_sketch_filepaths = [os.path.join(db_dir, os.sep.join(line.strip().split(os.sep)[sketches_or_clusters_dir_index:])) for line in sketch_filepaths]
+
+            with open(sketch_list_filepath, "w+") as sketch_list_file:
+                for sketch_filepath in rebased_sketch_filepaths:
+                    sketch_list_file.write(f"{sketch_filepath}\n")
+
+            # Under the same folder where the `sketch_list_filepath` is located, there is a tree folder
+            # This is supposed to contain the tree definition file with the list of sketches that compose the nodes of the SBTs
+            # The paths to these sketches must be fixed as well
+            index_detbrief_sbt_filepath = os.path.join(os.path.dirname(sketch_list_filepath), "tree", "index.detbrief.sbt")
+
+            sketch_filepaths = [line.strip() for line in open(index_detbrief_sbt_filepath).readlines() if line.strip()]
+
+            # Rebase the sketch filepaths to the new path on the local filesystem
+            # Keep track of the number os "*" characters in front of the paths. It is used to encode the position of the sketch in the tree
+            rebased_sketch_filepaths = [os.path.join("*"*line.count("*")+db_dir, os.sep.join(line.strip().split(os.sep)[sketches_or_clusters_dir_index:])) for line in sketch_filepaths]
+
+            with open(index_detbrief_sbt_filepath, "w+") as sbt_file:
+                for sketch_filepath in rebased_sketch_filepaths:
+                    sbt_file.write(f"{sketch_filepath}\n")
 
     def update(self, argv: List[Any]) -> None:
         """Update a specific MetaSBT database with new metagenome-assembled genomes.
@@ -1723,6 +1809,21 @@ class MetaSBT(object):
             default=False,
             help="Pack the database into a compressed tarball.",
         )
+        parser.add_argument(
+            "--uncertainty",
+            required=False,
+            type=float,
+            default=20.0,
+            help="Uncertainty percentage for considering multiple best hits while profiling input genomes."
+        )
+        parser.add_argument(
+            "--pruning-threshold",
+            dest="pruning_threshold",
+            required=False,
+            type=float,
+            default=0.0,
+            help="Thresholding for pruning the Sequence Bloom Tree while profiling input genomes."
+        )
 
         # Load arguments
         args = parser.parse_args(argv)
@@ -1800,8 +1901,13 @@ class MetaSBT(object):
             # Immediately add genomes to their species assignment
             self.database.add(genome_filepath, reference=False, taxonomy=species_assignments[genome_filepath])
 
-        # Cluster all the unassigned genomes together and define new clusters at different taxonomic levels
-        characterized, unassigned = self.database.characterize()
+        try:
+            # Cluster all the unassigned genomes together and define new clusters at different taxonomic levels
+            characterized, unassigned = self.database.characterize()
+
+        except Exception:
+            # `self.database.characterize()` fails if there are no uncharacterized genomes
+            pass
 
         # Finally, index the new genomes
         self.database.update()
