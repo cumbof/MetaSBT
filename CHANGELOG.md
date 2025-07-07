@@ -2,7 +2,7 @@
 
 ## Version 0.1.5
 
-[@cumbof/metasbt@0.1.4.post1](https://github.com/cumbof/MetaSBT/releases/tag/0.1.5)
+[@cumbof/metasbt@0.1.5](https://github.com/cumbof/MetaSBT/releases/tag/0.1.5)
 
 ### New features
 
