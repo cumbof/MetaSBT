@@ -1081,7 +1081,7 @@ class MetaSBT(object):
             required=False,
             type=float,
             default=0.0,
-            help="Thresholding for pruning the Sequence Bloom Tree."
+            help="Threshold for pruning the Sequence Bloom Tree."
         )
         parser.add_argument(
             "--nproc",
@@ -1822,7 +1822,7 @@ class MetaSBT(object):
             required=False,
             type=float,
             default=0.0,
-            help="Thresholding for pruning the Sequence Bloom Tree while profiling input genomes."
+            help="Threshold for pruning the Sequence Bloom Tree while profiling input genomes."
         )
 
         # Load arguments
