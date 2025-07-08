@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.3"
-__date__ = "Jul 7, 2025"
+__version__ = "0.1.4"
+__date__ = "Jul 8, 2025"
 
 import argparse as ap
 import datetime
@@ -120,10 +120,13 @@ def read_params():
     )
     p.add_argument(
         "--superkingdom",
-        type=str,
+        type=lambda s: [x.strip() for x in s.split(",")],
         required=True,
         choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
-        help="Consider genomes whose lineage belongs to a specific superkingdom",
+        help=(
+            "Consider genomes whose lineage belongs to a specific superkingdom. "
+            "Multiple superkingdoms are supported (e.g., \"Bacteria,Archaea\")"
+        ),
     )
     p.add_argument(
         "--taxa-level-id",
@@ -564,13 +567,18 @@ def main() -> None:
     os.makedirs(tmp_dir, exist_ok=True)
 
     # Retrieve genomes from NCBI
-    ncbi_genomes, target_cluster = get_genomes_in_ncbi(
-        args.superkingdom,
-        tmp_dir,
-        kingdom=args.kingdom,
-        taxa_level_id=args.taxa_level_id,
-        taxa_level_name=args.taxa_level_name,
-    )
+    ncbi_genomes = dict()
+
+    for superkingdom in args.superkingdom:
+        superkingdom_genomes, target_cluster = get_genomes_in_ncbi(
+            superkingdom,
+            tmp_dir,
+            kingdom=args.kingdom,
+            taxa_level_id=args.taxa_level_id,
+            taxa_level_name=args.taxa_level_name,
+        )
+
+        ncbi_genomes.update(superkingdom_genomes)
 
     if ncbi_genomes:
         out_file_name = "genomes" if not args.type else "{}s".format(args.type)
@@ -642,7 +650,7 @@ def main() -> None:
         print(
             "{} genomes (Superkingdom \"{}\"; Kingdom \"{}\"; Cluster \"{}\"; Type \"{}\")".format(
                 len(genomes),
-                args.superkingdom,
+                ",".join(args.superkingdom),
                 args.kingdom,
                 target_cluster,
                 args.type
