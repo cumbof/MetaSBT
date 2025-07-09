@@ -120,13 +120,10 @@ def read_params():
     )
     p.add_argument(
         "--superkingdom",
-        type=lambda s: [x.strip() for x in s.split(",")],
+        action="append",
         required=True,
         choices=["Archaea", "Bacteria", "Eukaryota", "Viruses"],
-        help=(
-            "Consider genomes whose lineage belongs to a specific superkingdom. "
-            "Multiple superkingdoms are supported (e.g., \"Bacteria,Archaea\")"
-        ),
+        help="Specify one or more superkingdoms (repeatable).",
     )
     p.add_argument(
         "--taxa-level-id",
