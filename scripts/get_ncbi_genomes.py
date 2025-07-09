@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.4"
-__date__ = "Jul 8, 2025"
+__version__ = "0.1.5"
+__date__ = "Jul 9, 2025"
 
 import argparse as ap
 import datetime
@@ -654,8 +654,6 @@ def main() -> None:
             )
         )
 
-        downloaded = list()
-
         if args.download:
             with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as pbar:
                 # Wrapper around the update function of tqdm
@@ -680,17 +678,22 @@ def main() -> None:
                     filepath, exists = job.get()
 
                     if exists:
-                        downloaded.append(filepath)
+                        genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
 
-        if downloaded or genomes:
+                        with open(out_file_path, "a+") as genomes_table:
+                            genomes_table.write(
+                                "{}\t{}\t{}\t{}\t{}\n".format(
+                                    genome,
+                                    ncbi_genomes[genome]["type"],
+                                    ncbi_genomes[genome]["taxonomy"],
+                                    ncbi_genomes[genome]["excluded_from_refseq"],
+                                    ncbi_genomes[genome]["url"]
+                                )
+                            )
+
+        elif genomes:
             with open(out_file_path, "a+") as genomes_table:
-                selection = downloaded if downloaded else genomes
-
-                for entry in selection:
-                    # entry is a filepath if selection is downloaded
-                    # otherwise, it is a genome name
-                    genome = os.path.splitext(os.path.splitext(os.path.basename(entry))[0])[0] if downloaded else entry
-
+                for genome in genomes:
                     genomes_table.write(
                         "{}\t{}\t{}\t{}\t{}\n".format(
                             genome,
