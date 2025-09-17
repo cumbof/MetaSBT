@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.5"
-__date__ = "Jul 9, 2025"
+__version__ = "0.1.6"
+__date__ = "Sep 17, 2025"
 
 import argparse as ap
 import datetime
@@ -170,6 +170,21 @@ def read_params():
             "Retrieve genomes marked as \"representative genome\" under the \"refseq_category\" column in the "
             "NCBI GenBank Assembly Suppary Report table. Can be used if --type is not provided"
         )
+    )
+    p.add_argument(
+        "--full-only",
+        action="store_true",
+        default=False,
+        dest="full_only",
+        help="Retrieve full genomes only"
+    )
+    p.add_argument(
+        "--assembly-level",
+        type=str,
+        default="Complete Genome",
+        choices=["Complete Genome", "Chromosome", "Scaffold", "Contig"],
+        dest="assembly_level",
+        help="Quality level of the assembly"
     )
     p.add_argument(
         "-v",
@@ -353,7 +368,12 @@ def ncbitax2lin(
     return taxa_map
 
 
-def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> Dict[str, List[Dict[str, str]]]:
+def get_assembly_summary(
+    assembly_summary_url: str,
+    tmpdir: os.path.abspath,
+    full_only: bool=False,
+    assembly_level: Optional[str]=None
+) -> Dict[str, List[Dict[str, str]]]:
     """Download and load the last available NCBI GenBank Assembly Report table.
 
     Parameters
@@ -362,6 +382,10 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> 
         URL to the NCBI GenBank Assembly Report table.
     tmpdir : os.path.abspath
         Path to the tmp folder.
+    full_only : bool, default False
+        Retrieve full genomes only.
+    assembly_level : str, optional
+        Quality level of the assembly.
 
     Returns
     -------
@@ -394,13 +418,20 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> 
                 genome_url = os.path.join(ftp_path, "{}_genomic.fna.gz".format(os.path.basename(ftp_path)))
 
                 if species_taxid:
-                    if species_taxid not in assembly_summary:
-                        assembly_summary[species_taxid] = list()
-
                     species_info = dict()
 
                     for h in header:
                         species_info[h] = line_split[header.index(h)].strip()
+
+                    if full_only and species_info["genome_rep"] == "Partial":
+                        # genome_rep could be Full or Partial only
+                        # Skip the current iteration in case of non-Full genomes (if full_only=True)
+                        continue
+
+                    if assembly_level and species_info["assembly_level"] != assembly_level:
+                        # assembly_level report the quality and completeness of a genome
+                        # Complete Genome, Chromosome, Scaffold, and Contig
+                        continue
 
                     genome_type = "na"
 
@@ -425,6 +456,9 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> 
 
                     species_info["genome_type"] = genome_type
 
+                    if species_taxid not in assembly_summary:
+                        assembly_summary[species_taxid] = list()
+
                     assembly_summary[species_taxid].append(species_info)
 
     return assembly_summary
@@ -433,6 +467,8 @@ def get_assembly_summary(assembly_summary_url: str, tmpdir: os.path.abspath) -> 
 def get_genomes_in_ncbi(
     superkingdom: str,
     tmpdir: os.path.abspath,
+    full_only: bool=False,
+    assembly_level: Optional[str]=None,
     kingdom: Optional[str]=None,
     taxa_level_id: Optional[str]=None,
     taxa_level_name: Optional[str]=None,
@@ -445,11 +481,15 @@ def get_genomes_in_ncbi(
         Archaea, Bacteria, Eukaryota, or Viruses.
     tmpdir : os.path.abspath
         Path to the temporary folder.
-    kingdom : str
+    full_only : bool, default False
+        Retrieve full genomes only.
+    assembly_level : str, optional
+        Quality level of the assembly.
+    kingdom : str, optional
         A specific kingdom related to the superkingdom. Optional.
-    taxa_level_id : str
+    taxa_level_id : str, optional
         Taxonomic level identifier (phylum, class, order, family, genus, or species).
-    taxa_level_name : str
+    taxa_level_name : str, optional
         Name of the taxonomic level as appear in NCBI.
 
     Returns
@@ -475,7 +515,7 @@ def get_genomes_in_ncbi(
     taxa_map = ncbitax2lin(tmpdir, nodes_dmp, names_dmp, superkingdom=superkingdom, kingdom=kingdom)
 
     # Download and load the most recent NCBI GenBank Assembly Report table
-    assembly_summary = get_assembly_summary(ASSEMBLY_SUMMARY_URL, tmpdir)
+    assembly_summary = get_assembly_summary(ASSEMBLY_SUMMARY_URL, tmpdir, full_only=full_only, assembly_level=assembly_level)
 
     ncbi_genomes = dict()
 
@@ -517,8 +557,9 @@ def urlretrieve_wrapper(url: str, filepath: os.path.abspath, retry: int=5) -> Tu
 
     while retry > 0 and not exists_and_passed_integrity:
         try:
-            urlretrieve(url, filepath)
-            
+            if not os.path.isfile(filepath):
+                urlretrieve(url, filepath)
+
             # Check file integrity
             subprocess.check_call(
                 [
@@ -570,6 +611,8 @@ def main() -> None:
         superkingdom_genomes, target_cluster = get_genomes_in_ncbi(
             superkingdom,
             tmp_dir,
+            full_only=args.full_only,
+            assembly_level=args.assembly_level,
             kingdom=args.kingdom,
             taxa_level_id=args.taxa_level_id,
             taxa_level_name=args.taxa_level_name,
