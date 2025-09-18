@@ -179,14 +179,6 @@ def read_params():
         help="Retrieve full genomes only"
     )
     p.add_argument(
-        "--assembly-level",
-        type=str,
-        default="Complete Genome",
-        choices=["Complete Genome", "Chromosome", "Scaffold", "Contig"],
-        dest="assembly_level",
-        help="Quality level of the assembly"
-    )
-    p.add_argument(
         "-v",
         "--version",
         action="version",
@@ -371,8 +363,7 @@ def ncbitax2lin(
 def get_assembly_summary(
     assembly_summary_url: str,
     tmpdir: os.path.abspath,
-    full_only: bool=False,
-    assembly_level: Optional[str]=None
+    full_only: bool=False
 ) -> Dict[str, List[Dict[str, str]]]:
     """Download and load the last available NCBI GenBank Assembly Report table.
 
@@ -384,8 +375,6 @@ def get_assembly_summary(
         Path to the tmp folder.
     full_only : bool, default False
         Retrieve full genomes only.
-    assembly_level : str, optional
-        Quality level of the assembly.
 
     Returns
     -------
@@ -428,11 +417,6 @@ def get_assembly_summary(
                         # Skip the current iteration in case of non-Full genomes (if full_only=True)
                         continue
 
-                    if assembly_level and species_info["assembly_level"] != assembly_level:
-                        # assembly_level report the quality and completeness of a genome
-                        # Complete Genome, Chromosome, Scaffold, and Contig
-                        continue
-
                     genome_type = "na"
 
                     if not species_info["excluded_from_refseq"].strip() or species_info["excluded_from_refseq"].strip() == "na" or \
@@ -468,7 +452,6 @@ def get_genomes_in_ncbi(
     superkingdom: str,
     tmpdir: os.path.abspath,
     full_only: bool=False,
-    assembly_level: Optional[str]=None,
     kingdom: Optional[str]=None,
     taxa_level_id: Optional[str]=None,
     taxa_level_name: Optional[str]=None,
@@ -483,8 +466,6 @@ def get_genomes_in_ncbi(
         Path to the temporary folder.
     full_only : bool, default False
         Retrieve full genomes only.
-    assembly_level : str, optional
-        Quality level of the assembly.
     kingdom : str, optional
         A specific kingdom related to the superkingdom. Optional.
     taxa_level_id : str, optional
@@ -515,7 +496,7 @@ def get_genomes_in_ncbi(
     taxa_map = ncbitax2lin(tmpdir, nodes_dmp, names_dmp, superkingdom=superkingdom, kingdom=kingdom)
 
     # Download and load the most recent NCBI GenBank Assembly Report table
-    assembly_summary = get_assembly_summary(ASSEMBLY_SUMMARY_URL, tmpdir, full_only=full_only, assembly_level=assembly_level)
+    assembly_summary = get_assembly_summary(ASSEMBLY_SUMMARY_URL, tmpdir, full_only=full_only)
 
     ncbi_genomes = dict()
 
@@ -531,7 +512,8 @@ def get_genomes_in_ncbi(
                         "refseq_category": species_info["refseq_category"],
                         "taxonomy": taxonomy,
                         "excluded_from_refseq": species_info["excluded_from_refseq"] if species_info["excluded_from_refseq"].strip() else "na",
-                        "url": species_info["ftp_filepath"]
+                        "url": species_info["ftp_filepath"],
+                        "assembly_level": species_info["assembly_level"]
                     }
 
     return ncbi_genomes, target_cluster
@@ -612,7 +594,6 @@ def main() -> None:
             superkingdom,
             tmp_dir,
             full_only=args.full_only,
-            assembly_level=args.assembly_level,
             kingdom=args.kingdom,
             taxa_level_id=args.taxa_level_id,
             taxa_level_name=args.taxa_level_name,
@@ -630,7 +611,7 @@ def main() -> None:
             with open(out_file_path, "w+") as genomes_table:
                 genomes_table.write("# {} v{} ({})\n".format(TOOL_ID, __version__, __date__))
                 genomes_table.write("# timestamp {}\n".format(datetime.datetime.utcnow()))
-                genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\turl\n")
+                genomes_table.write("# id\ttype\ttaxonomy\texcluded_from_refseq\tassembly_level\turl\n")
 
         else:
             exclude_genomes = [
@@ -672,15 +653,45 @@ def main() -> None:
         if args.max_genomes_per_species > 0:
             # Limit the number of genomes per species
             for sp in species:
-                if len(species[sp]) > args.max_genomes_per_species:
+                # Define the priority order for assembly levels
+                priority_order = ["Complete Genome", "Chromosome", "Scaffold", "Contig"]
+
+                # Group the initial genome IDs by their assembly level
+                grouped_by_level = {level: list() for level in priority_order}
+
+                for gid in species[sp]:
+                    level = ncbi_genomes[gid].get("assembly_level")
+
+                    if level in grouped_by_level:
+                        grouped_by_level[level].append(gid)
+
+                # Subsampling genomes (with priorities)
+                selected_genomes = list()
+
+                # Iterate through the levels in order of priority
+                for level in priority_order:
+                    # Determine how many more genomes we still need
+                    needed = args.max_genomes_per_species - len(selected_genomes)
+
+                    if needed <= 0:
+                        break  # Stop if we have already selected enough genomes
+
+                    # Get the available genomes at the current priority level
+                    available_at_level = grouped_by_level.get(level, list())
+
                     # Always use the same seed for reproducibility
                     rng = np.random.default_rng(0)
 
-                    sp_genomes = species[sp]
+                    # Shuffle for random selection if we don't take all of them
+                    rng.shuffle(available_at_level)
 
-                    # Subsampling genomes
-                    rng.shuffle(sp_genomes)
-                    species[sp] = sp_genomes[:args.max_genomes_per_species]
+                    # Decide how many genomes to take from this group
+                    num_to_take = min(needed, len(available_at_level))
+
+                    # Add the selected genomes to our final list
+                    selected_genomes.extend(available_at_level[:num_to_take])
+
+                species[sp] = selected_genomes
 
         genomes = list()
 
@@ -725,11 +736,12 @@ def main() -> None:
 
                         with open(out_file_path, "a+") as genomes_table:
                             genomes_table.write(
-                                "{}\t{}\t{}\t{}\t{}\n".format(
+                                "{}\t{}\t{}\t{}\t{}\t{}\n".format(
                                     genome,
                                     ncbi_genomes[genome]["type"],
                                     ncbi_genomes[genome]["taxonomy"],
                                     ncbi_genomes[genome]["excluded_from_refseq"],
+                                    ncbi_genomes[genome]["assembly_level"],
                                     ncbi_genomes[genome]["url"]
                                 )
                             )
@@ -738,11 +750,12 @@ def main() -> None:
             with open(out_file_path, "a+") as genomes_table:
                 for genome in genomes:
                     genomes_table.write(
-                        "{}\t{}\t{}\t{}\t{}\n".format(
+                        "{}\t{}\t{}\t{}\t{}\t{}\n".format(
                             genome,
                             ncbi_genomes[genome]["type"],
                             ncbi_genomes[genome]["taxonomy"],
                             ncbi_genomes[genome]["excluded_from_refseq"],
+                            ncbi_genomes[genome]["assembly_level"],
                             ncbi_genomes[genome]["url"]
                         )
                     )
