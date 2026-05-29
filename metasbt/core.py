@@ -510,7 +510,7 @@ class Database(object):
                         elif line_split[0] == "F0":
                             F0 = int(line_split[-1])
 
-                        elif isinstance(line_split[0], int) and int(line_split[0]) < min_kmer_occurrence:
+                        elif line_split[0].isdigit() and int(line_split[0]) < min_kmer_occurrence:
                             fs.append(int(line_split[-1]))
 
                         else:
