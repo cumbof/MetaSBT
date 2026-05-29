@@ -2292,7 +2292,7 @@ class Database(object):
                 os.unlink(merged_filepath)
 
             # We need to map the contid IDs to the genome files
-            contig_to_genomes = dict()
+            contig_to_genome = dict()
 
             with open(merged_filepath, "w+") as merged_file:
                 for genome in genomes:
@@ -2303,7 +2303,7 @@ class Database(object):
                         # Extract the contig ID from the first line
                         contig_id = lines[0].strip()[1:]
 
-                        contig_to_genomes[contig] = genome
+                        contig_to_genome[contig_id] = genome
 
                         # Write the genome content into the merged file
                         merged_file.write("".join(lines))
