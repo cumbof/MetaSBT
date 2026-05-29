@@ -369,7 +369,7 @@ class Database(object):
 
     def set_configs(
         self,
-        filepaths: List[os.path.abspath],
+        filepaths: Set[os.path.abspath],
         min_kmer_occurrence: int=None,
         kmer_size: int=None,
         kmer_max: int=None,
@@ -381,8 +381,8 @@ class Database(object):
 
         Parameters
         ----------
-        filepaths : list
-            List of paths to the input uncompressed genome files.
+        filepaths : set
+            Set of paths to the input uncompressed genome files.
         min_kmer_occurrence : int, default None
             Minimum number of kmer occurrences for establishing a proper bloom filter size.
         kmer_size : int, default None
