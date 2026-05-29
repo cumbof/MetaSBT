@@ -295,7 +295,7 @@ class MetaSBT(object):
             # Retrieve the URL to the tarball
             database_url = [db_version["tarball"] for db_version in databases[args.download] if db_version["version"] == selected_version][0]
 
-            database_filepath = os.path.join(args.folder, f"MetaSBT-{args.download}-{args.version}.tar.gz")
+            database_filepath = os.path.join(args.folder, f"MetaSBT-{args.download}-{selected_version}.tar.gz")
 
             try:
                 # Download the database tarball
