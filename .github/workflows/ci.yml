@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint dependencies
+        run: pip install flake8 flake8-bugbear flake8-sfs black isort mypy types-requests
+
+      - name: Run flake8
+        run: flake8 .
+
+      - name: Run black
+        run: black --check --diff --line-length 120 .
+
+      - name: Run isort
+        run: isort --check --diff --line-length 120 .
+
+      - name: Run mypy
+        run: mypy metasbt/
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          channels: conda-forge,bioconda,defaults
+          channel-priority: strict
+          auto-activate-base: true
+          activate-environment: ""
+
+      - name: Install external tools via conda
+        run: |
+          conda install -y mamba -n base -c conda-forge
+          mamba install -y -c bioconda -c conda-forge \
+            howdesbt \
+            ntcard \
+            kitsune \
+            checkm-genome \
+            checkv \
+            busco \
+            kraken2
+
+      - name: Cache CheckV database
+        id: cache-checkv-db
+        uses: actions/cache@v4
+        with:
+          path: ~/checkv_db
+          key: checkv-db-${{ runner.os }}-v1
+
+      - name: Download CheckV database
+        if: steps.cache-checkv-db.outputs.cache-hit != 'true'
+        run: checkv download_database ~/checkv_db
+
+      - name: Install MetaSBT
+        run: pip install -e .
+
+      - name: Run tests
+        run: metasbt test --references test/references.tsv --mags test/mags.txt
+        env:
+          CHECKVDB: ~/checkv_db

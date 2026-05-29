@@ -2,6 +2,7 @@
 
 ![Conda](https://img.shields.io/conda/dn/bioconda/metasbt?label=metasbt%20on%20Conda)
 [![DOI](https://img.shields.io/badge/bioRxiv-10.1101/2025.08.25.672238-blue.svg)](https://doi.org/10.1101/2025.08.25.672238)
+[![CI](https://github.com/cumbof/MetaSBT/actions/workflows/ci.yml/badge.svg)](https://github.com/cumbof/MetaSBT/actions/workflows/ci.yml)
 
 MetaSBT is a scalable framework designed to automatically index microbial genomes and accurately characterize metagenome-assembled genomes using Sequence Bloom Trees.
 
