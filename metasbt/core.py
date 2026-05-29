@@ -3504,7 +3504,7 @@ class Entry(object):
 
         return f"""
             Class:    metasbt.objects.Entry
-            Version:  {database.version}
+            Version:  {self.database.version}
             Name:     {self.name}
             Level:    {self.level}
             Known:    {self.is_known()}
