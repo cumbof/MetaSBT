@@ -2639,7 +2639,7 @@ class Database(object):
                         sketch_filepath, sketch_dists = job.get()
 
                         # Select sketch replicas
-                        sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target in sketch_dists if sketch_dist <= threshold}
+                        sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
 
                         if sketch_clones:
                             # Define the input file name
@@ -2741,7 +2741,10 @@ class Database(object):
 
             if input_filepath not in excluded:
                 # Exclude all the replicas to the current genome
-                excluded = excluded.union({names[sketch_filename] for sketch_filename in replicas[input_filepath].keys()})
+                for replica in replicas:
+                    for clone in replicas[replica]:
+                        if clone in names:
+                            excluded.add(names[clone])
 
         # Compute the difference between the input set of genomes and the excluded ones
         return genomes.difference(excluded)
