@@ -672,7 +672,7 @@ class Database(object):
             for cluster in clusters_map:
                 # Assign a taxonomic label to the new clusters based on the majority voting
                 # Count the number of occurrences for each of the taxonomic labels first
-                counts = Counter([genomes[genome_filepath]] for genome_filepath in clusters_map[cluster])
+                counts = Counter(genomes[genome_filepath] for genome_filepath in clusters_map[cluster])
 
                 # Get the most occurring one
                 max_count = max(counts.values())
