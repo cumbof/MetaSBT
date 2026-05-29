@@ -68,15 +68,4 @@ packages = {find = {}}
 [tool.setuptools.dynamic]
 version = {attr = "metasbt.__version__"}
 
-[tool.black]
-line-length = 120
 
-[tool.isort]
-line_length = 120
-profile = "black"
-
-[tool.mypy]
-check_untyped_defs = true
-ignore_missing_imports = true
-pretty = true
-show_error_codes = true

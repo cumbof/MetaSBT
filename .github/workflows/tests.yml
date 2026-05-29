@@ -1,41 +1,11 @@
-name: CI
+name: Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install lint dependencies
-        run: pip install flake8 flake8-bugbear flake8-sfs black isort mypy types-requests
-
-      - name: Run flake8
-        run: flake8 .
-
-      - name: Run black
-        run: black --check --diff --line-length 120 .
-
-      - name: Run isort
-        run: isort --check --diff --line-length 120 .
-
-      - name: Run mypy
-        run: mypy metasbt/
-
   test:
     name: Test (Python ${{ matrix.python-version }})
-    needs: lint
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

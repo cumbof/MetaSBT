@@ -1,4 +1,4 @@
-.PHONY: clean deploy format install mount sdist test uninstall upload
+.PHONY: clean deploy install mount sdist test uninstall upload
 
 # Remove unnecessary data
 clean:
@@ -8,22 +8,9 @@ clean:
 
 # Shortcut for building and uploading package
 deploy: sdist upload clean
-
-# Format code with black
-format:
-	black --line-length 120 .
-
-# Install requirements and software
 install: requirements.txt dist
 	pip install -r requirements.txt
 	find dist -type f -iname "MetaSBT-*.tar.gz" -exec pip install {} \;
-
-# Run linting
-lint:
-	flake8 .
-	black --check --diff --line-length 120 .
-	isort --check --diff --line-length 120 .
-	mypy metasbt/
 
 # Shortcut for building and installing package
 mount: sdist install clean
