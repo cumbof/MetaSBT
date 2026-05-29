@@ -3798,13 +3798,6 @@ class Entry(object):
                 file.write(f"{single_sketch_filepath}\n")
 
         if not self.database.flat:
-            # Keep track of the original working directory
-            current_working_directory = os.getcwd()
-
-            # Move to the index folder
-            # This will force howdesbt to build the compressed nodes into the index folder
-            os.chdir(os.path.join(self.folder, "tree"))
-
             if len(sketches) > 1:
                 command_line = [
                     "howdesbt",
@@ -3817,13 +3810,10 @@ class Entry(object):
                 ]
 
                 try:
-                    subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.join(self.folder, "tree"))
 
                 except subprocess.CalledProcessError as e:
                     error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                    # Move back to the original working directory
-                    os.chdir(current_working_directory)
 
                     raise Exception(error_message).with_traceback(e.__traceback__)
 
@@ -3837,18 +3827,12 @@ class Entry(object):
             ]
 
             try:
-                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.join(self.folder, "tree"))
 
             except subprocess.CalledProcessError as e:
                 error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                # Move back to the original working directory
-                os.chdir(current_working_directory)
-
                 raise Exception(error_message).with_traceback(e.__traceback__)
-
-            # Move back to the original working directory
-            os.chdir(current_working_directory)
 
         if os.path.isfile(union_tree_filepath):
             # Get rid of the union.sbt file
