@@ -18,16 +18,19 @@ install: requirements.txt dist
 	pip install -r requirements.txt
 	find dist -type f -iname "MetaSBT-*.tar.gz" -exec pip install {} \;
 
-# Run linting with tox
-lint: tox.ini
-	tox -e lint
+# Run linting
+lint:
+	flake8 .
+	black --check --diff --line-length 120 .
+	isort --check --diff --line-length 120 .
+	mypy metasbt/
 
 # Shortcut for building and installing package
 mount: sdist install clean
 
 # Create the new distribution
-sdist: setup.py
-	python setup.py sdist
+sdist: pyproject.toml
+	python -m build --sdist
 
 # Run all unit tests
 test:

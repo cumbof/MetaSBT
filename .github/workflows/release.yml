@@ -21,7 +21,7 @@ jobs:
         run: pip install build twine
 
       - name: Build source distribution
-        run: python setup.py sdist
+        run: python -m build --sdist
 
       - name: Check distribution
         run: twine check dist/*
