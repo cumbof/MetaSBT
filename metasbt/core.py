@@ -2356,7 +2356,7 @@ class Database(object):
                         # Retrieve the completeness
                         completeness = line_split[header.index("completeness")]
 
-                        if completeness != "NA":
+                        if completeness == "NA":
                             # Completeness could be NA if CheckV is unable to determine it
                             completeness = 0.0
 
