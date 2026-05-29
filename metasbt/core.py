@@ -2370,9 +2370,9 @@ class Database(object):
 
             for genome in contigs:
                 # Compute the average completeness and contamination in case of multiple contigs
-                completeness = statistics.average(contigs[genome]["completeness"])
+                completeness = statistics.mean(contigs[genome]["completeness"])
 
-                contamination = statistics.average(contigs[genome]["contamination"])
+                contamination = statistics.mean(contigs[genome]["contamination"])
 
                 # These are the final completeness and contamination stats
                 quality[genome]["completeness"] = completeness
