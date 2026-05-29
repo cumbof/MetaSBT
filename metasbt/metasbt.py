@@ -1292,7 +1292,7 @@ class MetaSBT(object):
 
         # Load metadata.json
         with open(search_for[0]) as metadata_json_file:
-            metadata = json.loads("".join(metadata_json_file.readlines()))
+            metadata = json.load(metadata_json_file)
 
             # Add metadata to the summary table
             table.extend([[key, metadata[key]] for key in metadata])

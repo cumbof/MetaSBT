@@ -179,7 +179,7 @@ class Database(object):
 
             # Load metadata
             with open(metadata_json_filepath) as metadata_json_file:
-                self.metadata = json.loads("".join(metadata_json_file.readlines()))
+                self.metadata = json.load(metadata_json_file)
 
             if not self.__class__._validate_metadata(self.metadata):
                 raise Exception("Database metadata did not pass the validation!")
