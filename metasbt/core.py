@@ -688,7 +688,7 @@ class Database(object):
                     labels_count[label] = 1
 
                 else:
-                    if label in assignment:
+                    if label in assignments:
                         # There are more than 1 clusters with the same label
                         # Rename the first one as clade 1
                         clade_1 = f"{label}__clade_1"
