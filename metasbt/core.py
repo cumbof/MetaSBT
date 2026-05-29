@@ -1718,7 +1718,7 @@ class Database(object):
         # Testing whether all the sketches in `sketches` exist could be expensive
         # Check whether `sketch_filepath` exists only, and assume all the sketches in `sketches` exist
         if not os.path.isfile(sketch_filepath):
-            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), sketch1_filepath)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), sketch_filepath)
 
         # Keep track of the ANI distances between sketches
         # The order of keys must be the same of the elements in `scketches`
