@@ -1645,7 +1645,8 @@ class MetaSBT(object):
 
         # This reads the first entry
         # The first entry in a MetaSBT database tarball is always the database root folder
-        db_dir_path_in_tarball = subprocess.check_output(f"tar -tzf {args.tarball} | head -1", shell=True).decode().strip()
+        proc = subprocess.run(["tar", "-tzf", args.tarball], capture_output=True, text=True, check=True)
+        db_dir_path_in_tarball = proc.stdout.strip().split("\n")[0]
 
         if db_dir_path_in_tarball.endswith(os.sep):
             # Trim the last char out
