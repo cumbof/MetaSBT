@@ -2337,7 +2337,7 @@ class Database(object):
 
             with open(output_filepath) as output:
                 # Retrieve the header line
-                header = output_table.readline().strip().split("\t")
+                header = output.readline().strip().split("\t")
 
                 for line in output:
                     line = line.strip()
