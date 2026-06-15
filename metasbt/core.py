@@ -929,9 +929,9 @@ class Database(object):
                     ]
                     
                     deltatree.update_delta_tree(
-                        new_sketch=genome_sketch_filepath,
-                        species_node_path=species_obj.sketch_filepath,
-                        sibling_sketches=sibling_sketches
+                        genome_sketch_filepath,
+                        species_obj.sketch_filepath,
+                        sibling_sketches
                     )
                 except Exception as e:
                     print(f"Warning: Dynamic Delta-SBT update failed. Will rebuild branch on update(). Error: {e}")
@@ -1808,9 +1808,9 @@ class Database(object):
             # deltatree.containment_ani returns a dict of {target_sketch: estimated_ani}
             # using the formula ANI ≈ 1 + (1/k) * ln(Containment Index)
             ani_results = deltatree.containment_ani(
-                focus=sketch_filepath, 
-                targets=sketches, 
-                kmer_size=kmer_size
+                sketch_filepath, 
+                sketches, 
+                kmer_size
             )
         except Exception as e:
             raise Exception(f"An error occurred while computing FracMinHash ANI distances: {e}")
@@ -1963,12 +1963,12 @@ class Database(object):
             # It inherently understands the distributive property of the disjoint deltas.
             # Output format: { level_name: { taxonomic_label: ani_distance } }
             profiles = deltatree.accumulator_search(
-                query_sketch=sketch_filepath,
-                tree_root=tree_root_filepath,
-                tree_topology=tree_topology,
-                kmer_size=self.metadata["kmer_size"],
-                theta=pruning_threshold,
-                uncertainty=uncertainty
+                sketch_filepath,
+                tree_root_filepath,
+                tree_topology,
+                self.metadata["kmer_size"],
+                pruning_threshold,
+                uncertainty
             )
         except Exception as e:
             raise Exception(f"Accumulator search failed: {e}")
@@ -3545,9 +3545,9 @@ class Entry(object):
         # This replaces howdesbt's union generation and is handled entirely by the Rust core.
         try:
             deltatree.build_delta_tree(
-                sketches_list=sketches_list_filepath,
-                out_tree=tree_filepath,
-                is_flat=self.database.flat
+                sketches_list_filepath,
+                tree_filepath,
+                self.database.flat
             )
         except Exception as e:
             raise Exception(f"Failed to build Delta-SBT for {self.name}: {e}")
@@ -3600,11 +3600,11 @@ class Entry(object):
         # we generate a FracMinHash sketch compressed into a Roaring Bitmap.
         try:
             deltatree.sketch(
-                filepath=filepath,
-                out_filepath=sketch_filepath,
-                kmer_size=self.database.metadata['kmer_size'],
-                scaled=self.database.metadata.get('scaled_factor', 1000),
-                threads=self.database.nproc
+                filepath,
+                sketch_filepath,
+                self.database.metadata['kmer_size'],
+                self.database.metadata.get('scaled_factor', 1000),
+                self.database.nproc
             )
         except Exception as e:
             raise Exception(f"Failed to generate FracMinHash sketch for {self.name}: {e}")
