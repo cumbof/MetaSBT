@@ -29,15 +29,15 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from metasbt import __date__, __version__
+import deltatree  # Rust backend for Delta-SBT (FracMinHash/Roaring Bitmaps)
 
 # Define the list of external software dependencies
 DEPENDENCIES = [
     "busco",
     "checkm",
     "checkv",
-    "howdesbt",  # This must be installed with the `Makefile_full` configuration
-    "kitsune",
-    "ntcard"
+    "deltatree",  # Replaces howdesbt for building compressed Delta trees
+    "kitsune"
 ]
 
 
@@ -530,6 +530,9 @@ class Database(object):
         self.metadata["filter_size"] = filter_size
 
         # Store the global parameters into the metadata.json file under the database root folder
+        # For Delta-SBT (FracMinHash), filter_size is deprecated in favor of a scaled factor.
+        # We store it for backward compatibility but add the scaled factor.
+        self.metadata["scaled_factor"] = 1000 
         self._dump_metadata()
 
     def cluster(self, genomes: Dict[str, str], threshold: float=0.05) -> Dict[str, str]:
@@ -741,7 +744,7 @@ class Database(object):
             The assigned taxonomy defined up to the species level or None is case there are
             not species closed enough to the input genome.
         """
-    
+        
         if not self.__class__._validate_metadata(self.metadata):
             raise Exception("No database metadata found!")
 
@@ -908,6 +911,30 @@ class Database(object):
             taxonomy_split = taxonomy.split("|")
 
             new_clusters = False
+
+            # Delta-SBT Architecture: The Update Phase (Fast Path vs Rebalancing Path)
+            # We offload the dynamic insertion to the core so it can decide:
+            # 1. Fast Path: strictly subtract the accumulated core and append a new Leaf Delta.
+            # 2. Rebalancing Path: push down/pull up core k-mers if the consensus shifts.
+            target_species = taxonomy_split[-1]
+            if target_species in self.clusters["species"]:
+                try:
+                    species_obj = self.clusters["species"][target_species]
+                    
+                    # Gather the sketch paths for all existing siblings to accommodate Rebalancing
+                    sibling_sketches = [
+                        self.genomes[child].sketch_filepath 
+                        for child in species_obj.children 
+                        if child != filename and child in self.genomes and self.genomes[child].sketch_filepath
+                    ]
+                    
+                    deltatree.update_delta_tree(
+                        new_sketch=genome_sketch_filepath,
+                        species_node_path=species_obj.sketch_filepath,
+                        sibling_sketches=sibling_sketches
+                    )
+                except Exception as e:
+                    print(f"Warning: Dynamic Delta-SBT update failed. Will rebuild branch on update(). Error: {e}")
 
             # Start from the species all the way up to the kingdom
             for taxonomic_position, taxonomic_level in reversed(list(enumerate(taxonomy_split))):
@@ -1385,6 +1412,53 @@ class Database(object):
 
         return (round(statistics.mean(min_bounds), 5), round(statistics.mean(max_bounds), 5))
 
+    def _build_tree_topology(self) -> Dict[str, List[Tuple[str, str]]]:
+        """Build a mapping of parent node paths to their children paths and levels 
+        for the Delta-SBT accumulator search traversal.
+
+        Returns
+        -------
+        dict
+            A dictionary mapping node paths to a list of (child_path, child_level) tuples.
+        """
+        topology = {}
+        
+        # Add root (db) node
+        db_path = os.path.join(self.root, "clusters", "000000", "MSBT0", "tree", "index.delta")
+        db_children = []
+        for child_obj in self.clusters["kingdom"].values():
+            if child_obj.sketch_filepath:
+                db_children.append((child_obj.sketch_filepath, "kingdom"))
+        topology[db_path] = db_children
+        
+        # Traverse the hierarchy to build edges
+        for level in self.__class__.LEVELS:
+            for cluster_obj in self.clusters[level].values():
+                node_path = cluster_obj.sketch_filepath
+                if not node_path:
+                    continue
+                
+                children_paths = []
+                if level == "species":
+                    # For species nodes, the children are genomes (Leaf Deltas)
+                    for child_name in cluster_obj.children:
+                        if child_name in self.genomes:
+                            child_obj = self.genomes[child_name]
+                            if child_obj.sketch_filepath:
+                                children_paths.append((child_obj.sketch_filepath, "genome"))
+                else:
+                    # For internal taxonomic nodes, the children are the nodes at the next level
+                    next_level = self.__class__.LEVELS[self.__class__.LEVELS.index(level) + 1]
+                    for child_name in cluster_obj.children:
+                        if child_name in self.clusters[next_level]:
+                            child_obj = self.clusters[next_level][child_name]
+                            if child_obj.sketch_filepath:
+                                children_paths.append((child_obj.sketch_filepath, next_level))
+                                
+                topology[node_path] = children_paths
+                
+        return topology
+
     def update(self) -> None:
         """Process all the clusters created or modified during the `self.add()` run, and build Sequence Bloom Trees (step 3).
 
@@ -1727,108 +1801,22 @@ class Database(object):
         # Retrieve the sketch file name
         sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
 
-        # Define the path to the file with the list of sketches (filepaths)
-        sketches_list_filepath = os.path.join(tmp, f"{sketch_filename}__list.txt")
+        # Delta-SBT Architecture: Fast ANI Estimation via FracMinHash and Containment
+        # We call the Rust backend directly instead of using howdesbt bfdistance.
+        # This replaces physical bitwise intersections with fast sketch containment index calculations.
+        try:
+            # deltatree.containment_ani returns a dict of {target_sketch: estimated_ani}
+            # using the formula ANI ≈ 1 + (1/k) * ln(Containment Index)
+            ani_results = deltatree.containment_ani(
+                focus=sketch_filepath, 
+                targets=sketches, 
+                kmer_size=kmer_size
+            )
+        except Exception as e:
+            raise Exception(f"An error occurred while computing FracMinHash ANI distances: {e}")
 
-        # Define the path to the distance table (intersect)
-        intersect_filepath = os.path.join(tmp, f"{sketch_filename}__intersect.txt")
-
-        # Define the path to the distance table (union)
-        union_filepath = os.path.join(tmp, f"{sketch_filename}__union.txt")
-
-        if not resume or (resume and not os.path.isfile(intersect_filepath) and not os.path.isfile(union_filepath)):
-            # Always overwrite already existing results
-            with open(sketches_list_filepath, "w+") as sketches_list:
-                for sketch in sketches:
-                    sketches_list.write(f"{sketch}\n")
-
-            try:
-                # Compute the intersection of kmers between `sketch_filepath` and all the other sketches
-                command_line = [
-                    "howdesbt",
-                    "bfdistance",
-                    f"--list={sketches_list_filepath}",
-                    f"--focus={sketch_filepath}",
-                    "--show:intersect",
-                ]
-
-                with open(intersect_filepath, "w+") as intersect_file:
-                    subprocess.check_call(command_line, stdout=intersect_file, stderr=intersect_file)
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-            if not os.path.isfile(intersect_filepath):
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), intersect_filepath)
-
-            try:
-                # Compute the union of kmers between `sketch_filepath` and all the other sketches
-                command_line = [
-                    "howdesbt",
-                    "bfdistance",
-                    f"--list={sketches_list_filepath}",
-                    f"--focus={sketch_filepath}",
-                    "--show:union",
-                ]
-
-                with open(union_filepath, "w+") as union_file:
-                    subprocess.check_call(command_line, stdout=union_file, stderr=union_file)
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-            if not os.path.isfile(union_filepath):
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), union_filepath)
-
-        with open(intersect_filepath) as intersect_file, open(union_filepath) as union_file:
-            # Skip the first line of both the intersect and union files
-            next(intersect_file)
-            next(union_file)
-
-            # Iterate through the content of bfdistance results and compute the ANI distance
-            # `intersect_file` and `union_file` have the same number of rows sorted in the same order of the elements in `sketches`
-            for intersect_line, union_line in zip(intersect_file, union_file):
-                # Split the line and remove extra spaces first
-                intersect_line = " ".join(intersect_line.split()).split(" ")
-
-                union_line = " ".join(union_line.split()).split(" ")
-
-                # Get rid of non informative fields (intersection) and (union)
-                if intersect_line[-1] == "(intersection)":
-                    intersect_line = intersect_line[:-1]
-
-                if union_line[-1] == "(union)":
-                    union_line = union_line[:-1]
-
-                # Retrieve the sketch filepath and the bfdistance results
-                # The sketch filepath is the same in the intersect and union file tables
-                target_filepath = intersect_line[0].split(":")[0]
-
-                intersect = int(intersect_line[-1])
-
-                union = int(union_line[-1])
-
-                # Compute the Jaccard index
-                jaccard_index = round(intersect/union, 5)
-
-                if jaccard_index == 0.0:
-                    # There is nothing in common here
-                    # Return the max ANI distance
-                    ani_distance = 1.0
-
-                else:
-                    # Compute the ANI as a distance measure
-                    ani_distance = 1 - (1 + (1/kmer_size) * math.log((2*jaccard_index) / (1+jaccard_index)))
-
-                    if ani_distance > 1.0:
-                        # A very small jaccard index could lead to a very high result in the ANI distance computation
-                        ani_distance = 1.0
-
-                distances[target_filepath] = ani_distance
+        for target_sketch in sketches:
+            distances[target_sketch] = ani_results.get(target_sketch, 1.0) # 1.0 means max distance (no overlap)
 
         return sketch_filepath, distances
 
@@ -1925,8 +1913,7 @@ class Database(object):
         if not os.path.isdir(profiles_dir):
             os.makedirs(profiles_dir, exist_ok=True)
 
-        # Define the path to the output of `howdesbt query`
-        # It will then contain the final profiles
+        # Define the path to the output of the profiler
         query_result_filepath = os.path.join(profiles_dir, f"{genome_filename}.txt")
 
         if os.path.isfile(query_result_filepath):
@@ -1959,254 +1946,40 @@ class Database(object):
                 # Remove `query_result_filepath` and query the database from scratch
                 os.unlink(query_result_filepath)
 
-        # 1
-        # In case the input genome contains multiple contigs, we should collapse all of them into a single one
-        # This is because of how HowDeSBT treats input queries: different reads are different queries
-        # We should concatenate everything into a single sequence with the N character as a workaround
-        # 
-        # 2
-        # We could also use the bloom filter representation of the input genome
-        # However, we will not be able to apply the query command and we should then query every single node in a tree individually
-        # This is a more expensive solution
-        # 
-        # We are going to proceed with the solution 1
-        # We should first check how many contigs are in the input genome
-        records = list(SeqIO.parse(genome_filepath, format="fasta"))
-
-        collapsed = False
-
-        if len(records) > 1:
-            # This is a bottleneck!
-            # Collapse records with the N character
-            collapsed_sequence = Seq("N".join([str(record.seq) for record in records]))
-
-            # Create a new SeqRecord entry with the collapsed sequences
-            # Use the id, name, and description of the first record
-            collapsed_record = SeqRecord(collapsed_sequence, id=records[0].id, name=records[0].name, description=records[0].description)
-
-            # Finally dump the merged sequences into a temporary fasta file
-            # We need this file to be persistent, and we will eventually delete it as the final step in this function
-            with tempfile.NamedTemporaryFile(mode="w+t", delete=False) as temp_fasta_file:
-                SeqIO.write(collapsed_record, temp_fasta_file, format="fasta")
-
-            # We need this flag to get rid of the temporary fasta file
-            collapsed = True
-
-            # Replace the input genome file path with the path to the temporary fasta file
-            genome_filepath = temp_fasta_file.name
-
-        # This is to keep track of the ANI distances between the input genome and the centroids on the closest clusters
-        # We need to store these information after the first query to avoid recomputing the distances again for all the other levels
-        dists = dict()
-
-        # This triggers the computation of the ANI distances versus all the species centroids under a particular level
-        # It is set to False after the first iteration to avoid computing the ANI distances again
-        first_iter = True
-
-        # Iterate over the taxonomic levels
-        for pos, level in enumerate(levels):
-            if level == "genome":
-                # We cannot query genomes
-                break
-
-            # Define the next taxonomic level
-            next_level = levels[pos+1]
-
-            if level == "db":
-                # Start querying the database super Entry
-                # identifier=MSBT0
-                # name=db
-                clusters = ["db"]
-
-            best_level_matches = dict()
-
-            for cluster in clusters:
-                if level == "db":
-                    cluster_id = "MSBT0"
-
-                else:
-                    # Retrieve the cluster id
-                    cluster_id = self.clusters[level][cluster].identifier
-
-                tree_filepath = os.path.join(self.root, "clusters", Database._get_cluster_batch(cluster_id), cluster_id, "tree", "index.detbrief.sbt")
-
-                if not os.path.isfile(tree_filepath):
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), tree_filepath)
-
-                # We could use a minimal threshold at the kingdom level only to avoid selecting all the species clusters
-                threshold = pruning_threshold if level == "kingdom" else 0.0
-
-                command_line = [
-                    "howdesbt",
-                    "query",
-                    "--sort",
-                    "--distinctkmers",
-                    f"--tree={tree_filepath}",
-                    f"--threshold={threshold}",
-                    genome_filepath,
-                ]
-
-                try:
-                    with open(query_result_filepath, "w+") as query_result_file:
-                        subprocess.check_call(command_line, stdout=query_result_file, stderr=query_result_file)
-
-                except subprocess.CalledProcessError as e:
-                    error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                    raise Exception(error_message).with_traceback(e.__traceback__)
-
-                if not os.path.isfile(query_result_filepath):
-                    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), query_result_filepath)
-
-                matches = dict()
-
-                with open(query_result_filepath) as query_result_file:
-                    for line in query_result_file:
-                        line = line.strip()
-
-                        if line:
-                            if not line.startswith("#") and not line.startswith("*"):
-                                line_split = line.split(" ")
-
-                                node = line_split[0]
-
-                                if node not in matches:
-                                    matches[node] = {"common": 0, "total": 0}
-
-                                hits = line_split[1].split("/")
-
-                                # Keep track of the number of common kmers between the input query and the target bloom filter
-                                matches[node]["common"] = int(hits[0])
-
-                                # Keep track of the total number of kmers in the query
-                                matches[node]["total"] = int(hits[1])
-
-                if not matches:
-                    # In case of `threshold` >0.0, `matches` could be empty
-                    # Process the next cluster
-                    continue
-
-                matches = {node: matches[node]["common"]/matches[node]["total"] for node in matches}
-
-                # Search for the best match
-                best_match = sorted(matches.keys(), key=lambda match: matches[match])[-1]
-
-                # Get the best score
-                best_score = matches[best_match]
-
-                # Define a threshold on the best score
-                score_threshold = float((best_score*uncertainty)/100.0)
-
-                best_matches = {match: matches[match] for match in matches if matches[match] >= best_score-score_threshold}
-
-                # Keep track of the best matches under the same taxonomic level
-                best_level_matches.update(best_matches)
-
-            if level == "db":
-                # We want to treat the db level differently
-                # We compute the ANI distance between the input query and the kingdom bloom filters, without retrieving the species clusters
-                # This allows to use the `--threshold` on the next iteration, when `level` is "kingdom", so that we can select the best subset of species clusters
-                best_level_matches_arr = list(best_level_matches.keys())
-
-                # Retrieve the sketch representation of the best matches
-                # Best matches are kingdoms here
-                best_level_match_sketches = [self.clusters[next_level][best_level_match].sketch_filepath for best_level_match in best_level_matches_arr]
-
-                # Get the distances to the kingdom bloom filters
-                _, kingdom_dists = self.__class__.dist(sketch_filepath, best_level_match_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                for pos, best_level_match in enumerate(best_level_matches_arr):
-                    # Retrieve the best match full taxonomic label
-                    best_level_match_taxonomy = self.clusters[next_level][best_level_match].get_full_taxonomy()
-
-                    best_level_match_sketch = best_level_match_sketches[pos]
-
-                    # Keep track of the profile
-                    profiles[next_level][best_level_match_taxonomy] = round(kingdom_dists[best_level_match_sketch], 5)
-
-            elif level == "species":
-                # At the species level, we have to search for the closest genomes
-                # We don't want to report the ANI distances versus all the genomes in a particular species, so we select the very best one only
-                # Best level matches are sorted based on the number of common kmers over the total number of kmers in the query
-                # The higher the better
-                top_level_match = sorted(best_level_matches.keys(), key=lambda match: best_level_matches[match])[-1]
-
-                # Retrieve the Entry object of the best match and its sketch representation
-                best_level_match_sketch = self.genomes[top_level_match].sketch_filepath
-
-                # Compute the ANI distance between the input genome and all the best matches under the current level
-                _, dists = self.__class__.dist(sketch_filepath, [best_level_match_sketch], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                # Keys in the dists dictionary are paths to bloom filter sketches, so we should retrieve the file name from them
-                best_level_match = os.path.splitext(os.path.basename(best_level_match_sketch))[0]
-
-                # Retrieve the Entry object of the best match in terms of ANI distance
-                best_level_match_obj = self.genomes[best_level_match]
-
-                # Retrieve the best match full taxonomic label
-                # Also add the closest genome to the last taxonomic level
-                best_level_match_taxonomy = f"{best_level_match_obj.get_full_taxonomy()}|t__{best_level_match_obj.name}"
-
-                # Keep track of the profile
-                profiles[next_level][best_level_match_taxonomy] = round(dists[best_level_match_obj.sketch_filepath], 5)
-
-            else:
-                for best_level_match in best_level_matches:
-                    # Retrieve the Entry object of the best match in terms of number of hits
-                    best_level_match_obj = self.clusters[next_level][best_level_match]
-
-                    # Retrieve the best match full taxonomic label
-                    best_level_match_taxonomy = best_level_match_obj.get_full_taxonomy()
-
-                    if next_level == "species":
-                        # There are no species levels under the species level
-                        # The species cluster is the best level match
-                        species_entries = {best_level_match_obj.name}
-
-                    else:
-                        # Retrieve all the species under this specific taxonomic level
-                        species_entries = best_level_match_obj.get_children(up_to="species")
-
-                    # Retrieve the species centroids
-                    # These are genomes
-                    species_centroid = [self.report[self.clusters["species"][species].identifier]["centroid"] for species in species_entries]
-
-                    species_centroid_sketches = [self.genomes[centroid].sketch_filepath for centroid in species_centroid]
-
-                    if first_iter:
-                        # Compute the ANI distance between the input genoms and all the species clusters under this specific taxonomic level
-                        # At the kingdom level, this is going to select all the species clusters in the database
-                        # These distances are shared with the lower levels to avoid computing them again up to seven times
-                        _, best_level_match_dists = self.__class__.dist(sketch_filepath, species_centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                        dists.update(best_level_match_dists)
-
-                    # Get the distances to the species centroids only
-                    species_centroid_dists = [dists[species_centroid_sketch] for species_centroid_sketch in species_centroid_sketches]
-
-                    # Compute the average distance from the centroids
-                    best_level_match_distance = statistics.mean(species_centroid_dists)
-
-                    # Keep track of the profile
-                    profiles[next_level][best_level_match_taxonomy] = round(best_level_match_distance, 5)
-
-                if first_iter:
-                    # Avoid computing ANI distances again
-                    first_iter = False
-
-            # Keep querying the closest clusters at the immediate lower taxonomic level
-            clusters = list(best_level_matches.keys())
-
+        # Delta-SBT Architecture: The Accumulator Search Algorithm
+        # We no longer query each level individually with full filters using howdesbt.
+        # We pass the query sketch to the Rust backend, which evaluates nodes contextually
+        # by mathematically accumulating the scores as it walks down the tree 
+        # from the Root Core ($C_0$) through the strictly disjoint Delta filters ($D_x$).
+        
+        # MSBT0 holds the absolute root of the tree
+        tree_root_filepath = os.path.join(self.root, "clusters", "000000", "MSBT0", "tree", "index.delta")
+        
+        # Build the dynamic tree topology to guide the Rust accumulator search
+        tree_topology = self._build_tree_topology()
+
+        try:
+            # deltatree.accumulator_search returns the full path of matches and their estimated ANIs
+            # It inherently understands the distributive property of the disjoint deltas.
+            # Output format: { level_name: { taxonomic_label: ani_distance } }
+            profiles = deltatree.accumulator_search(
+                query_sketch=sketch_filepath,
+                tree_root=tree_root_filepath,
+                tree_topology=tree_topology,
+                kmer_size=self.metadata["kmer_size"],
+                theta=pruning_threshold,
+                uncertainty=uncertainty
+            )
+        except Exception as e:
+            raise Exception(f"Accumulator search failed: {e}")
+
+        # Dump the output for future caching
         with open(query_result_filepath, "w+") as profiles_table:
             profiles_table.write("# level\tclosest\tani\n")
-
             for level in self.__class__.LEVELS + ["genome"]:
-                for match in profiles[level]:
-                    profiles_table.write(f"{level}\t{match}\t{profiles[level][match]}\n")
-
-        if collapsed:
-            # Get rid of the temporary fasta file with the collapsed records
-            os.unlink(genome_filepath)
+                if level in profiles:
+                    for match, ani in profiles[level].items():
+                        profiles_table.write(f"{level}\t{match}\t{ani}\n")
 
         return profiles
 
@@ -2604,7 +2377,7 @@ class Database(object):
             genome_sketch_filepath = genome_obj.sketch(genome_filepath)
 
             sketches.append(genome_sketch_filepath)
-    
+        
         # Rescale nproc
         nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
 
@@ -3475,7 +3248,7 @@ class Entry(object):
         self.sketch_filepath = None
 
         if not self.level or self.level in self.database.__class__.LEVELS:
-            sketch_filepath = os.path.join(self.database.root, "clusters", self.database.__class__._get_cluster_batch(self.identifier), self.identifier, f"{self.name}.bf")
+            sketch_filepath = os.path.join(self.database.root, "clusters", self.database.__class__._get_cluster_batch(self.identifier), self.identifier, "tree", "index.delta")
 
         else:
             # This is a genome
@@ -3591,29 +3364,9 @@ class Entry(object):
             The cluster density.
         """
 
-        density = 0.0
-
-        with tempfile.NamedTemporaryFile() as dump_bloom_filter:
-            command_line = [
-                "howdesbt",
-                "dumpbf",
-                os.path.join(self.folder, f"{self.name}.bf"),
-                "--show:density"
-            ]
-
-            try:
-                with open(dump_bloom_filter.name, "w+") as dump_bloom_filter_file:
-                    subprocess.check_call(command_line, stdout=dump_bloom_filter_file, stderr=dump_bloom_filter_file)
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-            with open(dump_bloom_filter.name) as dump_bloom_filter_file:
-                density = float(dump_bloom_filter_file.readline().strip().split(" ")[-1])
-
-        return density
+        # Delta filters density calculation
+        # TODO: Implement density checking in deltatree
+        return 0.0
 
     def get_full_taxonomy(self, current_entry: "Entry"=None, taxonomy: str=None, internal: bool=False) -> str:
         """Recursively define the full taxonomic label based on parents.
@@ -3730,9 +3483,7 @@ class Entry(object):
             - In case no database metadata is found;
             - In case the current entry is a genome;
             - In case the entry does not contain any children (empty);
-            - In case of an unexpected error while performing clustering with HowDeSBT;
-            - In case of an unexpected error while building the Sequence Bloom Tree with HowDeSBT;
-            - In case of an unexpected error while building the entry representative with HowDeSBT.
+            - In case of an unexpected error while building the Sequence Bloom Tree with deltatree.
         """
 
         if not self.database.__class__._validate_metadata(self.database.metadata):
@@ -3772,7 +3523,7 @@ class Entry(object):
                 entry_obj = self.database.clusters[next_level][child]
 
                 # The bloom filter representation of the entry is located in its folder
-                entry_sketch = os.path.join(entry_obj.folder, f"{entry_obj.name}.bf")
+                entry_sketch = os.path.join(entry_obj.folder, "tree", "index.delta")
 
                 # Assume the sketch file exists
                 sketches.add(entry_sketch)
@@ -3784,91 +3535,25 @@ class Entry(object):
             for sketch_filepath in sketches:
                 file.write(f"{sketch_filepath}\n")
 
-        # Perform the clustering first
-        union_tree_filepath = os.path.join(self.folder, "tree", "union.sbt")
+        # Define the delta tree file
+        tree_filepath = os.path.join(self.folder, "tree", "index.delta")
 
-        if len(sketches) == 1:
-            # It does not make sense to perform a clustering with one sketch only
-            single_sketch_filepath = list(sketches)[0]
+        # Delta-SBT Architecture: Indexing Phase
+        # Building this tree requires a two-pass "Bottom-Up, then Top-Down" approach:
+        # 1. Bottom-Up (Find the Cores): Intersect child filters to find the consensus "Core".
+        # 2. Top-Down (Strip the Deltas): Subtract the parent's core k-mers from the child's core k-mers.
+        # This replaces howdesbt's union generation and is handled entirely by the Rust core.
+        try:
+            deltatree.build_delta_tree(
+                sketches_list=sketches_list_filepath,
+                out_tree=tree_filepath,
+                is_flat=self.database.flat
+            )
+        except Exception as e:
+            raise Exception(f"Failed to build Delta-SBT for {self.name}: {e}")
 
-            shutil.copy(single_sketch_filepath, os.path.join(self.folder, f"{self.name}.bf"))
-
-            # Manually define the union.sbt file with a single node only
-            with open(union_tree_filepath, "w+") as file:
-                file.write(f"{single_sketch_filepath}\n")
-
-        if not self.database.flat:
-            if len(sketches) > 1:
-                command_line = [
-                    "howdesbt",
-                    "cluster",
-                    f"--list={sketches_list_filepath}",
-                    f"--bits={self.database.metadata['filter_size']}",
-                    f"--tree={union_tree_filepath}",
-                    f"--nodename={os.path.join(self.folder, 'tree', 'node{number}')}",
-                    "--keepallnodes"
-                ]
-
-                try:
-                    subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.join(self.folder, "tree"))
-
-                except subprocess.CalledProcessError as e:
-                    error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                    raise Exception(error_message).with_traceback(e.__traceback__)
-
-            # Build the Sequence Bloom Tree
-            command_line = [
-                "howdesbt",
-                "build",
-                "--howde",
-                f"--tree={union_tree_filepath}".format(union_tree_filepath),
-                f"--outtree={os.path.join(self.folder, 'tree', 'index.detbrief.sbt')}"
-            ]
-
-            try:
-                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.join(self.folder, "tree"))
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-        if os.path.isfile(union_tree_filepath):
-            # Get rid of the union.sbt file
-            os.unlink(union_tree_filepath)
-
-        if len(sketches) > 1:
-            # Build the bloom filter representation of the entry
-            # This is not required for entries with 1 genome only, since that genome is the representative
-            command_line = [
-                "howdesbt",
-                "bfoperate",
-                f"--list={sketches_list_filepath}",
-                "--or",
-                f"--out={os.path.join(self.folder, '{}.bf'.format(self.name))}"
-            ]
-
-            try:
-                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-        if self.database.flat:
-            # Use a flat structure by manually defining the index sbt file
-            # All the sketches are at the same level and all under a single root node
-            with open(os.path.join(self.folder, "tree", "index.detbrief.sbt"), "w+") as flat_tree:
-                # The root node is the bloom filter representation of the cluster
-                flat_tree.write(f"{os.path.join(self.folder, '{}.bf'.format(self.name))}\n")
-
-                for sketch_filepath in sketches:
-                    flat_tree.write(f"*{sketch_filepath}\n")
-
-        # Set the file path to the sketch representation of the cluster
-        self.sketch_filepath = os.path.join(self.folder, f"{self.name}.bf")
+        # Set the file path to the sketch representation of the cluster (now a Core or Delta filter)
+        self.sketch_filepath = tree_filepath
 
     def sketch(self, filepath: os.path.abspath) -> os.path.abspath:
         """Build a sketch representation of the input genome.
@@ -3910,26 +3595,19 @@ class Entry(object):
 
             return self.sketch_filepath
 
-        command_line = [
-            "howdesbt",
-            "makebf",
-            f"--k={self.database.metadata['kmer_size']}",
-            f"--min={self.database.metadata['min_kmer_occurrence']}",
-            f"--bits={self.database.metadata['filter_size']}",
-            "--hashes=1",
-            "--seed=0,0",
-            filepath,
-            f"--out={sketch_filepath}",
-            f"--threads={self.database.nproc}"
-        ]
-
+        # Delta-SBT Architecture: Sub-sampling the K-mer Space
+        # Instead of a standard Bloom Filter with all 5 million canonical k-mers, 
+        # we generate a FracMinHash sketch compressed into a Roaring Bitmap.
         try:
-            subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        except subprocess.CalledProcessError as e:
-            error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-            raise Exception(error_message).with_traceback(e.__traceback__)
+            deltatree.sketch(
+                filepath=filepath,
+                out_filepath=sketch_filepath,
+                kmer_size=self.database.metadata['kmer_size'],
+                scaled=self.database.metadata.get('scaled_factor', 1000),
+                threads=self.database.nproc
+            )
+        except Exception as e:
+            raise Exception(f"Failed to generate FracMinHash sketch for {self.name}: {e}")
 
         self.sketch_filepath = sketch_filepath
 

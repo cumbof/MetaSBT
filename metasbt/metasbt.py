@@ -98,7 +98,13 @@ class MetaSBT(object):
 
         # Check for external software dependencies
         for dependency in DEPENDENCIES:
-            if shutil.which(dependency) is None:
+            if dependency == "deltatree":
+                # deltatree is a Python module bound to Rust, not a shell executable.
+                try:
+                    import deltatree
+                except ImportError:
+                    missing_dependencies.append(dependency)
+            elif shutil.which(dependency) is None:
                 missing_dependencies.append(dependency)
 
         if missing_dependencies:
@@ -1315,6 +1321,7 @@ class MetaSBT(object):
             for line in clusters_table:
                 if line.strip():
                     if line.startswith("#"):
+                        # The last commented line is the header
                         header = line[1:].strip().split("\t")
 
                     else:
