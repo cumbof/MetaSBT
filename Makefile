@@ -16,7 +16,7 @@ install:
 # Setup environment and run all unit tests using the test data
 test:
 	pip install ".[dev]"
-	python metasbt/metasbt.py test all --references test/references.tsv --mags test/mags.txt
+	python metasbt/metasbt.py test --references test/references.tsv --mags test/mags.txt
 
 # Setup environment, build source distribution, upload to PyPI, and clean up
 deploy:
