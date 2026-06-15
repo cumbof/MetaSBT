@@ -1,9 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
+# Restored setuptools and added setuptools-rust to compile the Rust backend
+requires = ["setuptools>=68", "setuptools-rust"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "MetaSBT"
+# Restored dynamic versioning
 dynamic = ["version"]
 description = "A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees"
 readme = "README.md"
@@ -29,6 +31,7 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -60,12 +63,18 @@ Wiki = "https://github.com/cumbof/MetaSBT/wiki"
 Databases = "https://github.com/cumbof/MetaSBT-DBs"
 Download = "https://pypi.org/project/MetaSBT/"
 
+# Restored original setuptools configurations
 [tool.setuptools]
 include-package-data = true
 script-files = ["scripts/get_ncbi_genomes.py"]
 packages = {find = {}}
 
+# Restored dynamic extraction from __init__.py
 [tool.setuptools.dynamic]
 version = {attr = "metasbt.__version__"}
 
-
+# Instructs setuptools to compile the PyO3 Rust extension module
+[[tool.setuptools-rust.ext-modules]]
+target = "deltatree"
+path = "deltatree/Cargo.toml"
+binding = "pyo3"
