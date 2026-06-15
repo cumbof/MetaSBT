@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68,<77", "setuptools-rust"]
+requires = ["setuptools>=68", "setuptools-rust"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,10 @@ name = "MetaSBT"
 dynamic = ["version"]
 description = "A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = [
+    "LICENSE",
+]
 authors = [
     {name = "Fabio Cumbo", email = "fabio.cumbo@gmail.com"},
 ]
