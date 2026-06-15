@@ -9,7 +9,7 @@ name = "MetaSBT"
 dynamic = ["version"]
 description = "A scalable framework for automatically indexing microbial genomes and accurately characterizing metagenome-assembled genomes with Sequence Bloom Trees"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Fabio Cumbo", email = "fabio.cumbo@gmail.com"},
 ]
@@ -27,7 +27,6 @@ keywords = [
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
