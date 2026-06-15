@@ -20,7 +20,6 @@ from collections import Counter, OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import fastcluster
 import numpy as np
 import scipy.cluster.hierarchy as hier
 import tqdm
