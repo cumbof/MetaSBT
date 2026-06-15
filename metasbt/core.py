@@ -783,7 +783,10 @@ class Database(object):
         # The, if it is not assigned, we need to test it against the closest species cluster
         # Otherwise, it is not assigned
         for level in ["genome", "species"]:
-            matches = genome_obj.profile[level]
+            matches = genome_obj.profile.get(level, dict())
+
+            if not matches:
+                continue
 
             # Closest clusters and genomes come with their ANI distances
             # The smaller the better
@@ -1107,7 +1110,10 @@ class Database(object):
 
             for pos, genome_obj in enumerate(self.__unknowns):
                 if genome_obj.sketch_filepath not in processed:
-                    matches = genome_obj.profile[level]
+                    matches = genome_obj.profile.get(level, dict())
+
+                    if not matches:
+                        continue
 
                     # Closest clusters come with their ANI distances
                     # The smaller the better
@@ -2489,6 +2495,9 @@ class Database(object):
 
                     for job in jobs:
                         genome_filepath, genome_profile = job.get()
+
+                        if not genome_profile.get("genome"):
+                            continue
 
                         # The profile function report the first closest genome only
                         # The name of the closest genome is reported under the t__ level
