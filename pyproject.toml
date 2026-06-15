@@ -84,4 +84,4 @@ version = {attr = "metasbt.__version__"}
 [[tool.setuptools-rust.ext-modules]]
 target = "deltatree"
 path = "deltatree/Cargo.toml"
-binding = "pyo3"
+binding = "PyO3"
