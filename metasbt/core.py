@@ -635,9 +635,7 @@ class Database(object):
 
         # Build a dendrogram based on the ANI distances between unknown genomes
         # Method: average-linkage
-        # Explicitly cast the matrix to a float64 numpy array to satisfy fastcluster's copy=False constraint
-        condensed_array = np.asarray(condensed_distance_matrix, dtype=np.float64)
-        dendro = fastcluster.linkage(condensed_array, method="average")
+        dendro = hier.linkage(condensed_distance_matrix, method="average")
 
         # Finally, cut the dendrogram on the input threshold
         if len(sketches) > 1:
@@ -1090,9 +1088,7 @@ class Database(object):
 
             # Build a dendrogram based on the ANI distances between unknown genomes
             # Method: average-linkage
-            # Explicitly cast the matrix to a float64 numpy array to satisfy fastcluster's copy=False constraint
-            condensed_array = np.asarray(condensed_distance_matrix, dtype=np.float64)
-            dendro = fastcluster.linkage(condensed_array, method="average")
+            dendro = hier.linkage(condensed_distance_matrix, method="average")
 
         # Assignments map
         assignments = dict()
