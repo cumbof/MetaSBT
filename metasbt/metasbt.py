@@ -1914,8 +1914,9 @@ class MetaSBT(object):
             characterized, unassigned = self.database.characterize()
 
         except Exception:
-            # `self.database.characterize()` fails if there are no uncharacterized genomes
-            pass
+            # Only ignore the exception if it is the expected "no unknown genomes" state
+            if "There are no unknown genomes" not in str(e):
+                raise e
 
         # Finally, index the new genomes
         self.database.update()
