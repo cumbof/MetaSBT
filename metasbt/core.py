@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import fastcluster
+import numpy as np
 import scipy.cluster.hierarchy as hier
 import tqdm
 
@@ -635,7 +636,7 @@ class Database(object):
         # Build a dendrogram based on the ANI distances between unknown genomes
         # Method: average-linkage
         # Explicitly cast the matrix to a float64 numpy array to satisfy fastcluster's copy=False constraint
-        condensed_array = numpy.asarray(condensed_distance_matrix, dtype=numpy.float64)
+        condensed_array = np.asarray(condensed_distance_matrix, dtype=np.float64)
         dendro = fastcluster.linkage(condensed_array, method="average")
 
         # Finally, cut the dendrogram on the input threshold
@@ -1090,7 +1091,7 @@ class Database(object):
             # Build a dendrogram based on the ANI distances between unknown genomes
             # Method: average-linkage
             # Explicitly cast the matrix to a float64 numpy array to satisfy fastcluster's copy=False constraint
-            condensed_array = numpy.asarray(condensed_distance_matrix, dtype=numpy.float64)
+            condensed_array = np.asarray(condensed_distance_matrix, dtype=np.float64)
             dendro = fastcluster.linkage(condensed_array, method="average")
 
         # Assignments map
