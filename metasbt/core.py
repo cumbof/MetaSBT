@@ -1963,7 +1963,7 @@ class Database(object):
             # deltatree.accumulator_search returns the full path of matches and their estimated ANIs
             # It inherently understands the distributive property of the disjoint deltas.
             # Output format: { level_name: { taxonomic_label: ani_distance } }
-            profiles = deltatree.accumulator_search(
+            raw_profiles = deltatree.accumulator_search(
                 sketch_filepath,
                 tree_root_filepath,
                 tree_topology,
@@ -1973,6 +1973,33 @@ class Database(object):
             )
         except Exception as e:
             raise Exception(f"Accumulator search failed: {e}")
+
+        # The Rust backend returns raw sketch file paths. The rest of the MetaSBT pipeline 
+        # strictly expects MetaSBT-formatted taxonomic strings. We must reverse-map the paths.
+        path_to_tax = dict()
+        for lvl in self.__class__.LEVELS:
+            for cluster_obj in self.clusters[lvl].values():
+                if cluster_obj.sketch_filepath:
+                    tax_label = cluster_obj.get_full_taxonomy()
+                    path_to_tax[cluster_obj.sketch_filepath] = tax_label
+                    # Map the basename too just in case Rust stripped the absolute path
+                    path_to_tax[os.path.basename(cluster_obj.sketch_filepath)] = tax_label
+
+        for genome_obj in self.genomes.values():
+            if genome_obj.sketch_filepath:
+                tax = genome_obj.get_full_taxonomy()
+                # Emulate MetaSBT's genome node naming convention ('t__')
+                tax_label = f"{tax}|t__{genome_obj.name}" if tax else f"t__{genome_obj.name}"
+                path_to_tax[genome_obj.sketch_filepath] = tax_label
+                path_to_tax[os.path.basename(genome_obj.sketch_filepath)] = tax_label
+
+        # Translate the profiles using the taxonomic labels
+        for lvl in raw_profiles:
+            if lvl not in profiles:
+                profiles[lvl] = dict()
+            for match_path, ani in raw_profiles[lvl].items():
+                tax_label = path_to_tax.get(match_path, match_path)
+                profiles[lvl][tax_label] = ani
 
         # Dump the output for future caching
         with open(query_result_filepath, "w+") as profiles_table:
