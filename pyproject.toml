@@ -51,6 +51,13 @@ dependencies = [
     "tqdm>=4.67.1",
 ]
 
+# Development dependencies (packaging tools, testing, etc.)
+[project.optional-dependencies]
+dev = [
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+
 [project.scripts]
 metasbt = "metasbt.metasbt:run"
 
