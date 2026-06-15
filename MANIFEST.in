@@ -1,2 +1,4 @@
 include test/references.tsv
 include test/mags.txt
+include deltatree/Cargo.toml
+recursive-include deltatree/src *
