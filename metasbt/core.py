@@ -3741,7 +3741,7 @@ class Entry(object):
                     target_sketches = [search_in[target].sketch_filepath for target in children[pos+1:]]
 
                     # Compute the ANI distance between source and targets
-                    _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.tmp, resume=False)
+                    _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.database.tmp, resume=False)
 
                     # Keep track of the ANI distances
                     for target_sketch in dists:
