@@ -918,23 +918,24 @@ class Database(object):
             # 2. Rebalancing Path: push down/pull up core k-mers if the consensus shifts.
             target_species = taxonomy_split[-1]
             if target_species in self.clusters["species"]:
-                try:
-                    species_obj = self.clusters["species"][target_species]
-                    
-                    # Gather the sketch paths for all existing siblings to accommodate Rebalancing
-                    sibling_sketches = [
-                        self.genomes[child].sketch_filepath 
-                        for child in species_obj.children 
-                        if child != filename and child in self.genomes and self.genomes[child].sketch_filepath
-                    ]
-                    
-                    deltatree.update_delta_tree(
-                        genome_sketch_filepath,
-                        species_obj.sketch_filepath,
-                        sibling_sketches
-                    )
-                except Exception as e:
-                    print(f"Warning: Dynamic Delta-SBT update failed. Will rebuild branch on update(). Error: {e}")
+                species_obj = self.clusters["species"][target_species]
+
+                if species_obj.sketch_filepath:
+                    try:
+                        # Gather the sketch paths for all existing siblings to accommodate Rebalancing
+                        sibling_sketches = [
+                            self.genomes[child].sketch_filepath 
+                            for child in species_obj.children 
+                            if child != filename and child in self.genomes and self.genomes[child].sketch_filepath
+                        ]
+
+                        deltatree.update_delta_tree(
+                            genome_sketch_filepath,
+                            species_obj.sketch_filepath,
+                            sibling_sketches
+                        )
+                    except Exception as e:
+                        print(f"Warning: Dynamic Delta-SBT update failed. Will rebuild branch on update(). Error: {e}")
 
             # Start from the species all the way up to the kingdom
             for taxonomic_position, taxonomic_level in reversed(list(enumerate(taxonomy_split))):
