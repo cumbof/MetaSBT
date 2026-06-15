@@ -1913,7 +1913,7 @@ class MetaSBT(object):
             # Cluster all the unassigned genomes together and define new clusters at different taxonomic levels
             characterized, unassigned = self.database.characterize()
 
-        except Exception:
+        except Exception as e:
             # Only ignore the exception if it is the expected "no unknown genomes" state
             if "There are no unknown genomes" not in str(e):
                 raise e
