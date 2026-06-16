@@ -1,12 +1,9 @@
 {
-    "definitions": {}, 
-    "$schema": "http://json-schema.org/draft-07/schema#", 
-    "id": "genome.json", 
-    "type": "object", 
-    "title": "Genome object schema", 
-    "description": "JSON schema for validating genomes information", 
-    "readOnly": true, 
-    "writeOnly": false, 
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://metasbt.github.io/mdm/v1/genome.schema.json",
+    "type": "object",
+    "title": "Genome object schema",
+    "description": "JSON schema for validating genome metadata in MetaSBT",
     "required": [
         "dataset_id",
         "sample_id",
@@ -15,140 +12,209 @@
     ],
     "properties": {
         "metasbt_id": {
-            "$id": "#/properties/metasbt_id",
             "type": "string",
-            "title": "The metasbt_id Schema",
-            "description": "MetaSBT Unique Genome Identifier",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "MetaSBT Unique Genome Identifier",
+            "description": "Unique 9-digit identifier assigned by MetaSBT",
             "pattern": "^[0-9]{9}$"
         },
         "dataset_id": {
-            "$id": "#/properties/dataset_id",
             "type": "string",
-            "title": "The dataset_id Schema",
-            "description": "Dataset ID",
-            "readOnly": true,
-            "writeOnly": false
+            "title": "Dataset ID",
+            "description": "Identifier of the dataset the genome belongs to"
         },
         "sample_id": {
-            "$id": "#/properties/sample_id",
             "type": "string",
-            "title": "The sample_id Schema",
-            "description": "Sample ID",
-            "default": "none",
-            "readOnly": true,
-            "writeOnly": false
+            "title": "Sample ID",
+            "description": "Identifier of the sample the genome was assembled from",
+            "default": "none"
         },
         "genome_id": {
-            "$id": "#/properties/genome_id",
             "type": "string",
-            "title": "The genome_id Schema",
-            "description": "Genome Identification",
-            "readOnly": true,
-            "writeOnly": false
+            "title": "Genome Identification",
+            "description": "Unique identifier for the genome within the dataset"
         },
         "genome_type": {
-            "$id": "#/properties/genome_type",
             "type": "string",
-            "title": "The genome_type Schema",
+            "title": "Genome Type",
             "description": "Metagenome-assembled genome or genome from isolate sequencing",
-            "readOnly": true,
-            "writeOnly": false,
             "enum": [
                 "Reference",
                 "MAG"
             ]
         },
-        "sha256": {
-            "$id": "#/properties/sha256",
+        "sequence_type": {
             "type": "string",
-            "title": "The sha256 Schema",
-            "description": "File SHA-256 hash",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "Sequence Type",
+            "description": "Type of sequencing approach used to generate the genome",
+            "default": "WGS",
+            "enum": [
+                "WGS",
+                "Amplicon",
+                "Metagenome"
+            ]
+        },
+        "assembly_level": {
+            "type": "string",
+            "title": "Assembly Level",
+            "description": "Level of genome assembly completion",
+            "default": "Contig",
+            "enum": [
+                "Complete",
+                "Chromosome",
+                "Scaffold",
+                "Contig",
+                "Unresolved"
+            ]
+        },
+        "ncbi_taxid": {
+            "type": "integer",
+            "title": "NCBI Taxonomy ID",
+            "description": "Direct NCBI taxonomy identifier for the genome"
+        },
+        "mags_quality": {
+            "$ref": "#/$defs/MAGsQuality"
+        },
+        "source": {
+            "$ref": "#/$defs/Source"
+        },
+        "sha256": {
+            "type": "string",
+            "title": "File SHA-256 Hash",
+            "description": "SHA-256 checksum of the genome file",
             "pattern": "^[0-9a-z]{64}$"
         },
         "file_path": {
-            "$id": "#/properties/file_path",
             "type": "string",
-            "title": "The file_path Schema",
-            "description": "Relative genome file path",
-            "default": "none",
-            "readOnly": true,
-            "writeOnly": false
+            "title": "Relative Genome File Path",
+            "description": "Relative path to the genome file within the database",
+            "default": "none"
         },
         "taxonomy": {
-            "$id": "#/properties/taxonomy",
             "type": "string",
-            "title": "The taxonomy Schema",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "Taxonomic Label",
+            "description": "Full taxonomic label from kingdom down to species level",
             "pattern": "^k__[^|]*[|]{1}p__[^|]*[|]{1}c__[^|]*[|]{1}o__[^|]*[|]{1}f__[^|]*[|]{1}g__[^|]*[|]{1}s__[^|]*$"
         },
         "taxonomy_id": {
-            "$id": "#/properties/taxonomy_id",
             "type": "string",
-            "title": "The taxonomy_id Schema",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "Taxonomy IDs",
+            "description": "Pipe-separated numeric taxonomy identifiers for each taxonomic level",
             "pattern": "^[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*[|]{1}[0-9]*$"
         },
         "completeness": {
-            "$id": "#/properties/completeness",
             "type": "string",
-            "title": "The completeness Schema",
-            "description": "Percentage of completeness computed by CheckM",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "Completeness",
+            "description": "Percentage of genome completeness computed by CheckM",
             "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
         },
         "contamination": {
-            "$id": "#/properties/contamination",
             "type": "string",
-            "title": "The contamination Schema",
+            "title": "Contamination",
             "description": "Percentage of contamination computed by CheckM",
-            "readOnly": true,
-            "writeOnly": false,
             "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
         },
         "strain_heterogeneity": {
-            "$id": "#/properties/strain_heterogeneity",
             "type": "string",
-            "title": "The strain_heterogeneity Schema",
+            "title": "Strain Heterogeneity",
             "description": "Percentage of strain heterogeneity computed by CheckM",
-            "readOnly": true,
-            "writeOnly": false,
             "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
         },
         "link": {
-            "$id": "#/properties/link",
             "type": "string",
-            "title": "The link Schema",
-            "default": "",
-            "readOnly": true,
-            "writeOnly": false
+            "title": "External Link",
+            "description": "URL or external reference for the genome",
+            "default": ""
         },
         "tags": {
-            "$id": "#/properties/tags",
             "type": [
-                "string", 
+                "string",
                 "array"
             ],
-            "title": "The tags Schema",
-            "description": "Optional tags for the file object",
-            "readOnly": true,
-            "writeOnly": false,
+            "title": "Tags",
+            "description": "Optional tags for the genome object",
             "uniqueItems": true,
             "items": {
-                "$id": "#/properties/tags/items",
                 "type": "string",
-                "title": "The Tag Items Schema",
                 "default": "none",
-                "readOnly": true, 
-                "writeOnly": false, 
                 "pattern": "^(.*)$"
             }
         }
-    }
+    },
+    "$defs": {
+        "MAGsQuality": {
+            "type": "object",
+            "title": "MAGs Quality Metrics",
+            "description": "Quality assessment metrics for metagenome-assembled genomes",
+            "properties": {
+                "completeness": {
+                    "type": "string",
+                    "title": "Completeness",
+                    "description": "Percentage of genome completeness computed by CheckM",
+                    "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+                },
+                "contamination": {
+                    "type": "string",
+                    "title": "Contamination",
+                    "description": "Percentage of contamination computed by CheckM",
+                    "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+                },
+                "strain_heterogeneity": {
+                    "type": "string",
+                    "title": "Strain Heterogeneity",
+                    "description": "Percentage of strain heterogeneity computed by CheckM",
+                    "pattern": "^[0-9]{1,2}[.]{1}[0-9]+$|^100[.]{1}0$"
+                },
+                "passes_mimag": {
+                    "type": "boolean",
+                    "title": "Passes MIMAG Criteria",
+                    "description": "Whether the MAG meets the Minimum Information about a Metagenome-Assembled Genome standards"
+                },
+                "checkm_version": {
+                    "type": "string",
+                    "title": "CheckM Version",
+                    "description": "Version of CheckM used for quality assessment"
+                }
+            }
+        },
+        "Source": {
+            "type": "object",
+            "title": "Genome Source",
+            "description": "Origin of the genome sequence data",
+            "required": [
+                "database"
+            ],
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "title": "Source Database",
+                    "description": "The database or repository from which the genome was obtained",
+                    "enum": [
+                        "NCBI",
+                        "IMG",
+                        "ENA",
+                        "DDBJ",
+                        "custom"
+                    ]
+                },
+                "accession": {
+                    "type": "string",
+                    "title": "Accession Number",
+                    "description": "Accession identifier in the source database"
+                },
+                "url": {
+                    "type": "string",
+                    "title": "Source URL",
+                    "description": "URL to the genome entry in the source database",
+                    "format": "uri"
+                },
+                "release_date": {
+                    "type": "string",
+                    "title": "Release Date",
+                    "description": "Date when the genome was released in the source database",
+                    "format": "date"
+                }
+            }
+        }
+    },
+    "additionalProperties": false
 }
