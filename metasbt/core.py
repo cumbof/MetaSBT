@@ -689,8 +689,6 @@ class Database(object):
 
         return {genome: label for label in assignments for genome in assignments[label]}
 
-    @staticmethod
-    @staticmethod
     def _is_known(args: Tuple["Database", os.path.abspath]) -> Tuple[os.path.abspath, Optional[str]]:
         """Wrapper for multiprocessing imap_unordered."""
         instance, filepath = args
@@ -1776,13 +1774,11 @@ class Database(object):
         return sketch_filepath, distances
 
     @staticmethod
-    @staticmethod
     def _profile(args: Tuple["Database", os.path.abspath, os.path.abspath, float, float]) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
         """Wrapper for multiprocessing imap_unordered."""
         instance, genome_filepath, sketch_filepath, uncertainty, pruning_threshold = args
         return (genome_filepath, instance.profile(genome_filepath, sketch_filepath, uncertainty=uncertainty, pruning_threshold=pruning_threshold))
 
-    @staticmethod
     def _dist(args: Tuple[os.path.abspath, List[os.path.abspath], int, os.path.abspath]) -> Tuple[os.path.abspath, Dict[str, float]]:
         """Wrapper for multiprocessing imap_unordered."""
         sketch_filepath, target_sketches, kmer_size, tmp = args
