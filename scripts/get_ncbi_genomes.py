@@ -564,6 +564,11 @@ def urlretrieve_wrapper(url: str, filepath: os.path.abspath, retry: int=5) -> Tu
     return filepath, exists_and_passed_integrity
 
 
+def _urlretrieve_wrapper_star(args: Tuple[str, os.path.abspath]) -> Tuple[str, bool]:
+    url, filepath = args
+    return urlretrieve_wrapper(url, filepath)
+
+
 def main() -> None:
     args = read_params()
 
@@ -709,31 +714,27 @@ def main() -> None:
         )
 
         if args.download:
-            with mp.Pool(processes=args.nproc) as pool, tqdm.tqdm(total=len(genomes)) as pbar:
-                # Wrapper around the update function of tqdm
-                def progress(*args):
-                    pbar.update()
-
-                # Process input genomes
-                jobs = [
-                    pool.apply_async(
-                        urlretrieve_wrapper,
-                        args=(
-                            ncbi_genomes[genome]["url"],
-                            os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))
-                        ),
-                        callback=progress,
-                    )
-                    for genome in genomes
-                ]
-
-                # Get results from jobs
-                for job in jobs:
-                    filepath, exists = job.get()
-
+            if args.nproc > 1:
+                with mp.Pool(processes=args.nproc) as pool:
+                    args_list = [(ncbi_genomes[genome]["url"], os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))) for genome in genomes]
+                    for filepath, exists in tqdm.tqdm(pool.imap_unordered(_urlretrieve_wrapper_star, args_list), total=len(args_list)):
+                        if exists:
+                            genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
+                            with open(out_file_path, "a+") as genomes_table:
+                                genomes_table.write(
+                                    "{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                                        genome,
+                                        ncbi_genomes[genome]["type"],
+                                        ncbi_genomes[genome]["taxonomy"],
+                                        ncbi_genomes[genome]["excluded_from_refseq"],
+                                        ncbi_genomes[genome]["assembly_level"],
+                                        ncbi_genomes[genome]["url"]
+                                    )
+                                )
+            else:
+                for genome in tqdm.tqdm(genomes):
+                    filepath, exists = urlretrieve_wrapper(ncbi_genomes[genome]["url"], os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"])))
                     if exists:
-                        genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
-
                         with open(out_file_path, "a+") as genomes_table:
                             genomes_table.write(
                                 "{}\t{}\t{}\t{}\t{}\t{}\n".format(

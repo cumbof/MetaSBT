@@ -597,29 +597,10 @@ class Database(object):
             # Keep track of the ANI distances
             dists = dict()
 
-            with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
-                # Wrapper around the update function of tqdm
-                def progress(*args):
-                    pbar.update()
+            with mp.Pool(processes=nproc) as pool:
+                args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
 
-                jobs = [
-                    pool.apply_async(
-                        self.__class__.dist, 
-                        args=(
-                            sketch_filepath, 
-                            sketches[pos+1:],
-                            self.metadata["kmer_size"],
-                            self.tmp,
-                            False,
-                        ),
-                        callback=progress
-                    ) for pos, sketch_filepath in enumerate(sketches)
-                ]
-
-                for job in jobs:
-                    sketch_filepath, sketch_dists = job.get()
-
-                    # `sketch_dists` is an OrderedDict so it maintains the same order of elements in `sketches`
+                for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                     dists[sketch_filepath] = list(sketch_dists.values())
 
             for sketch_filepath in sketches:
@@ -709,24 +690,10 @@ class Database(object):
         return {genome: label for label in assignments for genome in assignments[label]}
 
     @staticmethod
-    def _is_known(instance: "Database", filepath: os.path.abspath) -> Tuple[os.path.abspath, Optional[str]]:
-        """Just a wrapper aroung the `is_known` function to make it callable in multiprocessing.
-        It is safe to run in multiprocessing because it does not modify any instance attributes.
-
-        Parameters
-        ----------
-        instance : Database
-            A database instance.
-        filepath : os.path.abspath
-            Path to the uncompressed genome file.
-
-        Returns
-        -------
-        str
-            The assigned taxonomic label.
-            See the `is_known` function description for additional information.
-        """
-
+    @staticmethod
+    def _is_known(args: Tuple["Database", os.path.abspath]) -> Tuple[os.path.abspath, Optional[str]]:
+        """Wrapper for multiprocessing imap_unordered."""
+        instance, filepath = args
         return (filepath, instance.is_known(filepath))
 
     def is_known(self, filepath: os.path.abspath) -> Optional[str]:
@@ -1048,29 +1015,10 @@ class Database(object):
                 # Keep track of the ANI distances
                 dists = dict()
 
-                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
-                    # Wrapper around the update function of tqdm
-                    def progress(*args):
-                        pbar.update()
+                with mp.Pool(processes=nproc) as pool:
+                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
 
-                    jobs = [
-                        pool.apply_async(
-                            self.__class__.dist, 
-                            args=(
-                                sketch_filepath, 
-                                sketches[pos+1:],
-                                self.metadata["kmer_size"],
-                                self.tmp,
-                                False,
-                            ),
-                            callback=progress
-                        ) for pos, sketch_filepath in enumerate(sketches)
-                    ]
-
-                    for job in jobs:
-                        sketch_filepath, sketch_dists = job.get()
-
-                        # `sketch_dists` is an OrderedDict so it maintains the same order of elements in `sketches`
+                    for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                         dists[sketch_filepath] = list(sketch_dists.values())
 
                 for sketch_filepath in sketches:
@@ -1828,39 +1776,17 @@ class Database(object):
         return sketch_filepath, distances
 
     @staticmethod
-    def _profile(
-        instance: "Database",
-        genome_filepath: os.path.abspath,
-        sketch_filepath: os.path.abspath,
-        uncertainty: float=50.0,
-        pruning_threshold: float=0.0,
-    ) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
-        """Just a wrapper around the `profile` function to make it callable in multiprocessing.
-        It is safe to run in multiprocessing because it does not modify any instance attributes.
-
-        Parameters
-        ----------
-        instance : Database
-            A database instance.
-        genome_filepath : os.path.abspath
-            Path to the input genome file in fasta format.
-        sketch_filepath : os.path.abspath
-            Path to the sketch representation of the input genome.
-        uncertainty : float, default 50.0
-            Percentage of uncertainty used to expand the selection of best matches.
-        pruning_threshold : float, deafult 0.0
-            Percentage of number of kmer hits under which HowDeSBT prunes the Sequence Bloom Trees.
-            This is applied at the kingdom level only in order to avoid selecting all the species clusters in the database.
-            It must be between 0.0 and 1.0.
-
-        Returns
-        -------
-        tuple
-            A tuple with `genome_filepath` and a dictionary with a genome's profiles.
-            See the `profile` function description for additional information.
-        """
-
+    @staticmethod
+    def _profile(args: Tuple["Database", os.path.abspath, os.path.abspath, float, float]) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
+        """Wrapper for multiprocessing imap_unordered."""
+        instance, genome_filepath, sketch_filepath, uncertainty, pruning_threshold = args
         return (genome_filepath, instance.profile(genome_filepath, sketch_filepath, uncertainty=uncertainty, pruning_threshold=pruning_threshold))
+
+    @staticmethod
+    def _dist(args: Tuple[os.path.abspath, List[os.path.abspath], int, os.path.abspath]) -> Tuple[os.path.abspath, Dict[str, float]]:
+        """Wrapper for multiprocessing imap_unordered."""
+        sketch_filepath, target_sketches, kmer_size, tmp = args
+        return Database.dist(sketch_filepath, target_sketches, kmer_size, tmp=tmp, resume=False)
 
     def profile(
         self,
@@ -2423,36 +2349,14 @@ class Database(object):
         # Dereplicate the input genomes versus themselves
         if compare_with == "self":
             if nproc > 1:
-                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
-                    # Wrapper around the update function of tqdm
-                    def progress(*args):
-                        pbar.update()
+                with mp.Pool(processes=nproc) as pool:
+                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
 
-                    jobs = [
-                        pool.apply_async(
-                            self.__class__.dist, 
-                            args=(
-                                sketch_filepath, 
-                                sketches[pos+1:],
-                                self.metadata["kmer_size"],
-                                self.tmp,
-                                False,
-                            ),
-                            callback=progress
-                        ) for pos, sketch_filepath in enumerate(sketches)
-                    ]
-
-                    for job in jobs:
-                        sketch_filepath, sketch_dists = job.get()
-
-                        # Select sketch replicas
+                    for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                         sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
 
                         if sketch_clones:
-                            # Define the input file name
                             sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
-
-                            # Keep track of replicas
                             replicas[sketch_filename] = sketch_clones
 
             else:
@@ -2472,56 +2376,28 @@ class Database(object):
 
         elif compare_with == "database":
             if nproc > 1:
-                # Profile genomes in parallel
-                with mp.Pool(processes=nproc) as pool, tqdm.tqdm(total=len(sketches)) as pbar:
-                    def progress(*args):
-                        pbar.update()
+                with mp.Pool(processes=nproc) as pool:
+                    args_list = [(self, genome_filepath, sketch_filepath, 1.0, 0.0) for genome_filepath, sketch_filepath in zip(genomes, sketches)]
 
-                    # TODO Uncertainty and pruning threshold shouldn't be hardcoded
-                    # The uncertainty can be very low here since we are searching for replicas
-                    jobs = [
-                        pool.apply_async(
-                            self.__class__._profile, 
-                            args=(
-                                self,
-                                genome_filepath,
-                                sketch_filepath, 
-                                1.0,  # uncertainty
-                                0.0,  # pruning threshold
-                            ),
-                            callback=progress
-                        ) for genome_filepath, sketch_filepath in zip(genomes, sketches)
-                    ]
-
-                    for job in jobs:
-                        genome_filepath, genome_profile = job.get()
-
+                    for genome_filepath, genome_profile in tqdm.tqdm(pool.imap_unordered(self.__class__._profile, args_list), total=len(args_list)):
                         if not genome_profile.get("genome"):
                             continue
 
-                        # The profile function report the first closest genome only
-                        # The name of the closest genome is reported under the t__ level
                         closest_genome = list(genome_profile["genome"].keys())[0].split("|")[-1][3:]
-
-                        # Retrieve the ANI distance with the closest genome
                         closest_genome_distance = genome_profile["genome"][closest_genome]
 
                         if closest_genome_distance <= threshold:
-                            # Define the input file name
                             genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
 
                             if closest_genome not in replicas:
                                 replicas[closest_genome] = dict()
-
-                            # Keep track of the replica in the database
-                            # It doesn't matter if `closest_genome` is a full path here
                             replicas[closest_genome][genome_filename] = closest_genome_distance
 
             else:
                 # Avoid using multiprocessing if `nproc` is 1
                 for genome_filepath, sketch_filepath in zip(genomes, sketches):
                     # Again, the uncertainty can be very low here since we are searching for replicas
-                    _, genome_profile = self.__class__._profile(self, genome_filepath, sketch_filepath, 1.0, 0.0)
+                    _, genome_profile = self.__class__._profile((self, genome_filepath, sketch_filepath, 1.0, 0.0))
 
                     # The profile function report the first closest genome only
                     # The name of the closest genome is reported under the t__ level
@@ -3742,29 +3618,15 @@ class Entry(object):
 
         if nproc > 1:
             with mp.Pool(processes=nproc) as pool:
-                jobs = [
-                    pool.apply_async(
-                        self.database.__class__.dist, 
-                        args=(
-                            search_in[source].sketch_filepath, 
-                            [search_in[target].sketch_filepath for target in children[pos+1:]],
-                            self.database.metadata["kmer_size"],
-                            self.database.tmp,
-                            False,
-                        )
-                    ) for pos, source in enumerate(children)
-                ]
+                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp) for pos, source in enumerate(children) if pos < len(children)-1]
 
-                for job in jobs:
-                    source_sketch, sketch_dists = job.get()
-
+                for source_sketch, sketch_dists in pool.imap_unordered(self.database.__class__._dist, args_list):
                     source = os.path.splitext(os.path.basename(source_sketch))[0]
 
                     for target_sketch in sketch_dists:
                         target = os.path.splitext(os.path.basename(target_sketch))[0]
 
                         pairwise_dists[source].append(sketch_dists[target_sketch])
-
                         pairwise_dists[target].append(sketch_dists[target_sketch])
 
         else:
