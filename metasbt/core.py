@@ -1252,7 +1252,31 @@ class Database(object):
         # In case of an update with only reference genomes with no force assignment `force=False`
         # these new clusters should actually be transformed to known clusters based on a majority voting
         # mechanism on their genomes' taxonomic labels
-        # TODO
+        if new_clusters:
+            for cluster_name in list(self.clusters["species"].keys()):
+                cluster_obj = self.clusters["species"][cluster_name]
+
+                if cluster_obj.is_known():
+                    continue
+
+                # Collect taxonomies of all genome children in this cluster
+                genome_taxonomies = [
+                    self.genomes[child].taxonomy
+                    for child in cluster_obj.children
+                    if child in self.genomes and self.genomes[child].taxonomy
+                ]
+
+                if not genome_taxonomies:
+                    continue
+
+                # Majority vote: pick the most common taxonomy
+                taxonomy_votes = Counter(genome_taxonomies)
+                top_taxonomy, top_count = taxonomy_votes.most_common(1)[0]
+
+                if top_count >= len(genome_taxonomies) / 2:
+                    for child in cluster_obj.children:
+                        if child in self.genomes:
+                            self.genomes[child]._Entry__known = True
 
         # Reset the list of unknowns
         self.__unknowns = list()
