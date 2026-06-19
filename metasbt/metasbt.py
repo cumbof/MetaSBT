@@ -1685,20 +1685,8 @@ class MetaSBT(object):
                 for sketch_filepath in rebased_sketch_filepaths:
                     sketch_list_file.write(f"{sketch_filepath}\n")
 
-            # Under the same folder where the `sketch_list_filepath` is located, there is a tree folder
-            # This is supposed to contain the tree definition file with the list of sketches that compose the nodes of the SBTs
-            # The paths to these sketches must be fixed as well
-            index_detbrief_sbt_filepath = os.path.join(os.path.dirname(sketch_list_filepath), "tree", "index.detbrief.sbt")
-
-            sketch_filepaths = [line.strip() for line in open(index_detbrief_sbt_filepath).readlines() if line.strip()]
-
-            # Rebase the sketch filepaths to the new path on the local filesystem
-            # Keep track of the number os "*" characters in front of the paths. It is used to encode the position of the sketch in the tree
-            rebased_sketch_filepaths = [os.path.join("*"*line.count("*")+db_dir, os.sep.join(line.strip().split(os.sep)[sketches_or_clusters_dir_index:])) for line in sketch_filepaths]
-
-            with open(index_detbrief_sbt_filepath, "w+") as sbt_file:
-                for sketch_filepath in rebased_sketch_filepaths:
-                    sbt_file.write(f"{sketch_filepath}\n")
+            # Note: index.delta files (Delta-SBT) store only binary Roaring Bitmap data
+            # and contain no embedded absolute paths, so no rebasing is needed for them.
 
     def update(self, argv: List[Any]) -> None:
         """Update a specific MetaSBT database with new metagenome-assembled genomes.
