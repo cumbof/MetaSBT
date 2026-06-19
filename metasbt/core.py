@@ -1890,18 +1890,27 @@ class Database(object):
     @classmethod
     def _get_busco_lineage(cls, kingdom: str) -> str:
         prefix = kingdom.lower()
-        output = subprocess.check_output(["busco", "--list-datasets"], text=True)
+
+        try:
+            output = subprocess.check_output(
+                ["busco", "--list-datasets"], text=True, stderr=subprocess.STDOUT
+            )
+        except FileNotFoundError:
+            raise RuntimeError("busco is not installed or not found in PATH") from None
+
         pattern = re.compile(rf"^{re.escape(prefix)}_odb(\d+)")
         versions = []
         for line in output.splitlines():
             match = pattern.match(line.strip())
             if match:
                 versions.append(int(match.group(1)))
+
         if not versions:
             raise RuntimeError(
                 f"No BUSCO lineage found for kingdom '{kingdom}'. "
-                f"Run 'busco --list-datasets' to see available lineages."
+                f"Available datasets:\n{output}"
             )
+
         return f"{prefix}_odb{max(versions)}"
 
     @classmethod
