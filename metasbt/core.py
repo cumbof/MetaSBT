@@ -2847,12 +2847,17 @@ class Database(object):
 
             return f"{level_prefix}{level_suffix}"
 
-        taxonomic_levels = {cls.LEVELS[pos]: taxonomic_level[3:] for pos, taxonomic_level in enumerate(taxonomy.split("|"))}
+        parts = taxonomy.split("|")
+        raw_names = [part[3:] for part in parts]
 
-        # Build the new taxonomic label
-        taxonomy = "|".join([f"{level[0]}__{taxonomic_levels[level]}" for level in cls.LEVELS])
+        # Build the new taxonomic label, sanitizing each level via format_level
+        formatted = []
+        for pos, level in enumerate(cls.LEVELS):
+            raw_name = raw_names[pos]
+            prev_name = raw_names[pos - 1] if pos > 0 else raw_name
+            formatted.append(f"{level[0]}__{format_level(raw_name, prev_name)}")
 
-        return taxonomy
+        return "|".join(formatted)
 
     @staticmethod
     def _is_supported(filepath: os.path.abspath) -> bool:
