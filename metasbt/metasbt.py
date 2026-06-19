@@ -657,7 +657,7 @@ class MetaSBT(object):
 
             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-            raise Exception(error_message).with_traceback(e.__traceback__)
+            raise Exception(error_message) from e
 
         # Define the path to the names.dmp and nodes.dmp files
         ncbi_names_filepath = os.path.join(args.workdir, args.database, "taxonomy", "names.dmp")
@@ -873,7 +873,7 @@ class MetaSBT(object):
 
                             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                            raise Exception(error_message).with_traceback(e.__traceback__)
+                            raise Exception(error_message) from e
 
         # Finally, build the database
         command_line = [
@@ -900,7 +900,7 @@ class MetaSBT(object):
 
             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-            raise Exception(error_message).with_traceback(e.__traceback__)
+            raise Exception(error_message) from e
 
         # Set the current working directory back to the original one
         os.chdir(curr_workdir)
@@ -992,7 +992,7 @@ class MetaSBT(object):
         except subprocess.CalledProcessError as e:
             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-            raise Exception(error_message).with_traceback(e.__traceback__)
+            raise Exception(error_message) from e
 
         # Compute the sha256 hash
         sha256 = subprocess.run(["sha256sum", output_filepath], capture_output=True, text=True)
@@ -1417,7 +1417,7 @@ class MetaSBT(object):
                     except urllib.error.HTTPError as e:
                         error_message = f"Unable to retrieve {genome_url}\n\n"
 
-                        raise Exception(error_message).with_traceback(e.__traceback__)
+                        raise Exception(error_message) from e
 
             @classmethod
             def tearDownClass(cls):
@@ -1658,7 +1658,7 @@ class MetaSBT(object):
         except subprocess.CalledProcessError as e:
             error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-            raise Exception(error_message).with_traceback(e.__traceback__)
+            raise Exception(error_message) from e
 
         if args.database:
             # Rename the extracted database folder to args.database

@@ -445,7 +445,7 @@ class Database(object):
             except subprocess.CalledProcessError as e:
                 error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                raise Exception(error_message).with_traceback(e.__traceback__)
+                raise Exception(error_message) from e
 
             # Get kitsune output message
             kitsune_out_content = open(kitsune_out_filepath).read().strip()
@@ -2019,7 +2019,7 @@ class Database(object):
             except subprocess.CalledProcessError as e:
                 error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                raise Exception(error_message).with_traceback(e.__traceback__)
+                raise Exception(error_message) from e
 
             # The output quality summary table is in the tmp folder
             output_filepath = os.path.join(tmp, "quality_summary.tsv")
@@ -2115,7 +2115,7 @@ class Database(object):
             except subprocess.CalledProcessError as e:
                 error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                raise Exception(error_message).with_traceback(e.__traceback__)
+                raise Exception(error_message) from e
 
             # The quality summary file is generated in output_dir
             output_filepath = os.path.join(output_dir, "qa_summary.tsv")
@@ -2202,7 +2202,7 @@ class Database(object):
                 except subprocess.CalledProcessError as e:
                     error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
 
-                    raise Exception(error_message).with_traceback(e.__traceback__)
+                    raise Exception(error_message) from e
 
                 # Search for the BUSCO result as JSON file
                 busco_json_filepath = os.path.join(tmp, genome_name, f"short_summary.specific.{busco_db}.{genome_name}.json")
