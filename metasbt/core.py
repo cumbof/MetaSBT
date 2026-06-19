@@ -1219,13 +1219,16 @@ class Database(object):
         with open(metadata_json_filepath, "w+") as metadata_json_file:
             json.dump(self.metadata, metadata_json_file)
 
-    def _estimate_boundaries(self, taxonomy: str) -> Tuple[float, float]:
+    def _estimate_boundaries(self, taxonomy: str, species_threshold: float=0.05) -> Tuple[float, float]:
         """Estimate the boundaries of a given taxonomic entry.
 
         Parameters
         ----------
         taxonomy : str
             A taxonomic label.
+        species_threshold : float, default 0.05
+            Maximum genetic distance used as the radius for species-level clusters.
+            Corresponds to 1 - ANI (e.g. 0.05 = 95% ANI).
 
         Raises
         ------
@@ -1246,8 +1249,7 @@ class Database(object):
         cluster_level = self.__class__.LEVELS[taxonomy.count("|")]
 
         if cluster_level == "species":
-            # Force the radius of species clusters to 5% of genetic distance
-            return (0.0, 0.05)
+            return (0.0, species_threshold)
 
         cluster_name = taxonomy.split("|")[-1]
 
