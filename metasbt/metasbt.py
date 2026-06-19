@@ -174,6 +174,7 @@ class MetaSBT(object):
 
         print(message)
 
+    @staticmethod
     def _sketch_genome(args: Tuple["Database", str, os.path.abspath]) -> Tuple[os.path.abspath, os.path.abspath]:
         """Wrapper for multiprocessing imap_unordered."""
         database, genome_name, genome_filepath = args
