@@ -2341,8 +2341,9 @@ class Database(object):
                         if not genome_profile.get("genome"):
                             continue
 
-                        closest_genome = list(genome_profile["genome"].keys())[0].split("|")[-1][3:]
-                        closest_genome_distance = genome_profile["genome"][closest_genome]
+                        closest_genome_key = list(genome_profile["genome"].keys())[0]
+                        closest_genome = closest_genome_key.split("|")[-1][3:]
+                        closest_genome_distance = genome_profile["genome"][closest_genome_key]
 
                         if closest_genome_distance <= threshold:
                             genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
@@ -2357,12 +2358,13 @@ class Database(object):
                     # Again, the uncertainty can be very low here since we are searching for replicas
                     _, genome_profile = self.__class__._profile((self, genome_filepath, sketch_filepath, 1.0, 0.0, "dna"))
 
-                    # The profile function report the first closest genome only
+                    # The profile function reports the first closest genome only
                     # The name of the closest genome is reported under the t__ level
-                    closest_genome = list(genome_profile["genome"].keys())[0].split("|")[-1][3:]
+                    closest_genome_key = list(genome_profile["genome"].keys())[0]
+                    closest_genome = closest_genome_key.split("|")[-1][3:]
 
                     # Retrieve the ANI distance with the closest genome
-                    closest_genome_distance = genome_profile["genome"][closest_genome]
+                    closest_genome_distance = genome_profile["genome"][closest_genome_key]
 
                     if closest_genome_distance <= threshold:
                         # Define the input file name
@@ -2372,7 +2374,6 @@ class Database(object):
                             replicas[closest_genome] = dict()
 
                         # Keep track of the replica in the database
-                        # It doesn't matter if `closest_genome` is a full path here
                         replicas[closest_genome][genome_filename] = closest_genome_distance
 
         # Define the set of excluded genomes based on their ANI distance
