@@ -1105,7 +1105,30 @@ class MetaSBT(object):
         sketches = self.sketch(argv, parse_known_args=True)
 
         # Profile genomes in parallel
-        self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="dna")
+        results = self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="dna")
+
+        # Print human-readable summary with confidence scores
+        col_w = 70
+        header = f"{'Level':<12}  {'Closest':<{col_w}}  {'ANI':>8}  {'Confidence':>10}"
+        sep = "-" * len(header)
+
+        for genome_filepath in genomes:
+            profile = results.get(genome_filepath, {})
+            genome_name = os.path.splitext(os.path.basename(genome_filepath))[0]
+            print(f"\n## {genome_name}")
+            print(header)
+            print(sep)
+
+            confidences = profile.get("confidence", {})
+
+            for level in Database.LEVELS + ["genome"]:
+                if level not in profile or not profile[level]:
+                    continue
+                label, ani = min(profile[level].items(), key=lambda x: x[1])
+                confidence = confidences.get(level)
+                conf_str = f"{confidence:.3f}" if confidence is not None else "N/A"
+                warning = "  [LOW CONFIDENCE]" if confidence is not None and confidence < 0.5 else ""
+                print(f"{level:<12}  {label:<{col_w}}  {ani:>8.4f}  {conf_str:>10}{warning}")
 
     def sketch(self, argv: List[Any], parse_known_args=False) -> List[str]:
         """Sketch the input genomes.

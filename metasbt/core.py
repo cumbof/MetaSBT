@@ -1899,6 +1899,15 @@ class Database(object):
 
                                 profiles[level][label] = ani
 
+                                # 4th column is confidence (may be absent in older cache files)
+                                if len(line_split) > 3 and line_split[3].strip():
+                                    if "confidence" not in profiles:
+                                        profiles["confidence"] = {}
+                                    try:
+                                        profiles["confidence"][level] = float(line_split[3])
+                                    except ValueError:
+                                        pass
+
                 return profiles
 
             except Exception:
@@ -1962,13 +1971,34 @@ class Database(object):
                 tax_label = path_to_tax.get(match_path, match_path)
                 profiles[lvl][tax_label] = ani
 
+        # Compute confidence for each taxonomic level:
+        # confidence = clamp(1 - ani / max_boundary, 0.0, 1.0)
+        # A value of 1.0 means the genome sits at the centroid; 0.0 means it is at or beyond the boundary.
+        confidences: Dict[str, float] = {}
+        for level in self.__class__.LEVELS:
+            if level not in profiles or not profiles[level]:
+                continue
+            label, ani = min(profiles[level].items(), key=lambda x: x[1])
+            try:
+                _, max_boundary = self._estimate_boundaries(label)
+                if max_boundary and max_boundary > 0:
+                    confidences[level] = max(0.0, min(1.0, 1.0 - ani / max_boundary))
+                else:
+                    confidences[level] = 1.0 if ani == 0.0 else 0.0
+            except Exception:
+                pass
+
+        profiles["confidence"] = confidences
+
         # Dump the output for future caching
         with open(query_result_filepath, "w+") as profiles_table:
-            profiles_table.write("# level\tclosest\tani\n")
+            profiles_table.write("# level\tclosest\tani\tconfidence\n")
             for level in self.__class__.LEVELS + ["genome"]:
                 if level in profiles:
+                    conf = confidences.get(level)
+                    conf_str = f"{conf:.6f}" if conf is not None else ""
                     for match, ani in profiles[level].items():
-                        profiles_table.write(f"{level}\t{match}\t{ani}\n")
+                        profiles_table.write(f"{level}\t{match}\t{ani}\t{conf_str}\n")
 
         return profiles
 
@@ -2328,7 +2358,7 @@ class Database(object):
         uncertainty: float=50.0,
         pruning_threshold: float=0.0,
         mode: str="dna",
-    ) -> None:
+    ) -> Dict[str, Dict]:
         """Profile a list of genomes against the database in parallel.
 
         Parameters
@@ -2343,22 +2373,33 @@ class Database(object):
             Minimum containment ANI threshold for pruning the tree during search.
         mode : str, default "dna"
             Search mode — "dna" or "aa".
+
+        Returns
+        -------
+        dict
+            Mapping of genome filepath to its profile dict (level → {label: ani},
+            plus a "confidence" key mapping level → confidence score).
         """
         args_list = [
             (self, genome_filepath, sketch_filepath, uncertainty, pruning_threshold, mode)
             for genome_filepath, sketch_filepath in zip(genomes, sketches)
         ]
 
+        results: Dict[str, Dict] = {}
+
         if self.nproc > 1:
             with mp.Pool(processes=self.nproc) as pool:
-                for _ in tqdm.tqdm(
+                for genome_filepath, profile in tqdm.tqdm(
                     pool.imap_unordered(self.__class__._profile, args_list, chunksize=1),
                     total=len(args_list),
                 ):
-                    pass
+                    results[genome_filepath] = profile
         else:
             for args_tuple in args_list:
-                self.__class__._profile(args_tuple)
+                genome_filepath, profile = self.__class__._profile(args_tuple)
+                results[genome_filepath] = profile
+
+        return results
 
     def dereplicate(
         self, 
