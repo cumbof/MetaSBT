@@ -1402,15 +1402,18 @@ class Database(object):
         # Sweep 2: Rebuild AA Core at order+ levels.
         # The first sweep built DNA Core at all levels (with AA union passed upward).
         # Now we rebuild order, class, phylum, and kingdom using AA Core intersection.
+        # Uses a separate tracking set so Sweep 1's `processed` entries do not block it.
         aa_levels = self.__class__.LEVELS[self.__class__.LEVELS.index("order"):]
+        aa_processed = set()
         for level in reversed(aa_levels):
             pos = self.__class__.LEVELS.index(level)
             for taxonomy in self.__clusters:
                 partial_taxonomy = "|".join(taxonomy.split("|")[:pos+1])
-                if partial_taxonomy not in processed:
+                if partial_taxonomy not in aa_processed:
                     cluster = partial_taxonomy.split("|")[-1]
                     cluster_obj = self.clusters[level][cluster]
                     cluster_obj.index(mode="aa")
+                    aa_processed.add(partial_taxonomy)
 
         # Retrieve the set of kingdoms in the database
         kingdoms = set(self.clusters["kingdom"].keys())
