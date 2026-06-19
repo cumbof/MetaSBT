@@ -3365,6 +3365,7 @@ class Entry(object):
             if self.__known:
                 return True
 
+        self.__known = False
         return False
 
     def index(self, mode: str = "dna") -> str:
