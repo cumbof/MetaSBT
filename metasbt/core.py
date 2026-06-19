@@ -50,8 +50,8 @@ class Database(object):
     def __init__(
         self,
         name: str,
-        folder: os.path.abspath,
-        tmp: os.path.abspath,
+        folder: str,
+        tmp: str,
         flat: bool=True,
         nproc: int=os.cpu_count(),
     ) -> "Database":
@@ -61,9 +61,9 @@ class Database(object):
         ----------
         name : str
             The database id.
-        folder : os.path.abspath
+        folder : str
             Path to the database folder.
-        tmp : os.path.abspath
+        tmp : str
             Path to the temporary folder.
         flat : bool, default True
             Skip the clustering of bloom filters and the definition of the Sequence Bloom Trees.
@@ -369,7 +369,7 @@ class Database(object):
 
     def set_configs(
         self,
-        filepaths: Set[os.path.abspath],
+        filepaths: Set[str],
         kmer_size: int=None,
         kmer_max: int=None,
         scaled_factor: int=1000,
@@ -613,18 +613,18 @@ class Database(object):
         return {genome: label for label in assignments for genome in assignments[label]}
 
     @staticmethod
-    def _is_known(args: Tuple["Database", os.path.abspath]) -> Tuple[os.path.abspath, Optional[str]]:
+    def _is_known(args: Tuple["Database", str]) -> Tuple[str, Optional[str]]:
         """Wrapper for multiprocessing imap_unordered."""
         instance, filepath = args
         return (filepath, instance.is_known(filepath))
 
-    def is_known(self, filepath: os.path.abspath) -> Optional[str]:
+    def is_known(self, filepath: str) -> Optional[str]:
         """Check whether an input MAG could be characterized to any species in the database.
         This must be run for MAGs only and always before `add()`.
 
         Parameters
         ----------
-        filepath : os.path.abspath
+        filepath : str
             Path to the uncompressed genome file.
 
         Returns
@@ -739,7 +739,7 @@ class Database(object):
 
     def add(
         self,
-        filepath: os.path.abspath,
+        filepath: str,
         reference: bool=False,
         taxonomy: Optional[str]=None,
     ) -> None:
@@ -748,7 +748,7 @@ class Database(object):
 
         Parameters
         ----------
-        filepath : os.path.abspath
+        filepath : str
             Path to the uncompressed genome file.
         reference : bool, default False
             The type of the input genome. True if `filepath` is a reference genome, False otherwise.
@@ -1656,24 +1656,24 @@ class Database(object):
 
     @staticmethod
     def dist(
-        sketch_filepath: os.path.abspath, 
-        sketches: List[os.path.abspath], 
+        sketch_filepath: str, 
+        sketches: List[str], 
         kmer_size: int,
-        tmp: os.path.abspath=None,
+        tmp: str=None,
         resume: bool=False,
         mode: str = "dna",
-    ) -> Tuple[os.path.abspath, Dict[str, float]]:
+    ) -> Tuple[str, Dict[str, float]]:
         """Compute the Average Nucleotide/Aminoacid Identity (ANI/AAI) between genome sketches.
 
         Parameters
         ----------
-        sketch_filepath : os.path.abspath
+        sketch_filepath : str
             The path to the first genome sketch.
         sketches : list
             List with paths to the sketch files.
         kmer_size : int
             The kmer size (or AA k-mer size when mode="aa").
-        tmp : os.path.abspath, default None
+        tmp : str, default None
             Path to the temporary folder.
             Use the current working directory if None.
         resume : bool, default False
@@ -1728,21 +1728,21 @@ class Database(object):
         return sketch_filepath, distances
 
     @staticmethod
-    def _profile(args: Tuple["Database", os.path.abspath, os.path.abspath, float, float, str]) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
+    def _profile(args: Tuple["Database", str, str, float, float, str]) -> Tuple[str, Dict[str, Dict[str, float]]]:
         """Wrapper for multiprocessing imap_unordered."""
         instance, genome_filepath, sketch_filepath, uncertainty, pruning_threshold, mode = args
         return (genome_filepath, instance.profile(genome_filepath, sketch_filepath, uncertainty=uncertainty, pruning_threshold=pruning_threshold, mode=mode))
 
     @staticmethod
-    def _dist(args: Tuple[os.path.abspath, List[os.path.abspath], int, os.path.abspath, str]) -> Tuple[os.path.abspath, Dict[str, float]]:
+    def _dist(args: Tuple[str, List[str], int, str, str]) -> Tuple[str, Dict[str, float]]:
         """Wrapper for multiprocessing imap_unordered."""
         sketch_filepath, target_sketches, kmer_size, tmp, mode = args
         return Database.dist(sketch_filepath, target_sketches, kmer_size, tmp=tmp, resume=False, mode=mode)
 
     def profile(
         self,
-        genome_filepath: os.path.abspath,
-        sketch_filepath: os.path.abspath,
+        genome_filepath: str,
+        sketch_filepath: str,
         uncertainty: float=50.0,
         pruning_threshold: float=0.0,
         mode: str = "dna",
@@ -1753,9 +1753,9 @@ class Database(object):
 
         Parameters
         ----------
-        genome_filepath : os.path.abspath
+        genome_filepath : str
             Path to the input genome file in fasta format.
-        sketch_filepath : os.path.abspath
+        sketch_filepath : str
             Path to the sketch representation of the input genome.
         uncertainty : float, default 50.0
             Percentage of uncertainty used to expand the selection of best matches.
@@ -1921,11 +1921,11 @@ class Database(object):
     @classmethod
     def qc(
         cls,
-        genomes: Set[os.path.abspath], 
+        genomes: Set[str], 
         kingdom: str, 
         nproc: int=os.cpu_count(), 
-        tmp: os.path.abspath=os.getcwd()
-    ) -> Dict[os.path.abspath, Dict[str, float]]:
+        tmp: str=os.getcwd()
+    ) -> Dict[str, Dict[str, float]]:
         """Perform a quality control based on the genomes' kingdom.
         Genomes from different kingdoms are not allowed to be in the same set.
 
@@ -1943,7 +1943,7 @@ class Database(object):
             Possible values: "Viruses", "Bacteria", "Archaea", "Fungi".
         nproc : int, default os.cpu_count()
             Maximum number of CPUs for multiprocessing.
-        tmp : os.path.abspath, default os.getcwd()
+        tmp : str, default os.getcwd()
             Path to the temporary folder.
 
         Raises
@@ -2243,10 +2243,10 @@ class Database(object):
 
     def dereplicate(
         self, 
-        genomes: Set[os.path.abspath], 
+        genomes: Set[str], 
         threshold: float=0.01, 
         compare_with: str="self"
-    ) -> List[os.path.abspath]:
+    ) -> List[str]:
         """Dereplicate a set of genomes versus themselves or versus the genomes in the database.
         The dereplication process is based on their ANI distance according to a specific threshold.
 
@@ -2873,12 +2873,12 @@ class Database(object):
         return "|".join(formatted)
 
     @staticmethod
-    def _is_supported(filepath: os.path.abspath) -> bool:
+    def _is_supported(filepath: str) -> bool:
         """Check whether an input file is supported base on its extension.
 
         Parameters
         ----------
-        filepath : os.path.abspath
+        filepath : str
             The input file path.
 
         Raises
@@ -2901,12 +2901,12 @@ class Database(object):
         return os.path.splitext(filepath)[1] in supported
 
     @staticmethod
-    def _load_report(filepath: os.path.abspath) -> Dict[str, Any]:
+    def _load_report(filepath: str) -> Dict[str, Any]:
         """Load the report table with the list of clusters in the database.
 
         Parameters
         ----------
-        filepath : os.path.abspath
+        filepath : str
             Path to the report table.
 
         Raises
@@ -3021,7 +3021,7 @@ class Entry(object):
         identifier: str,
         name: str,
         level: str,
-        folder: Optional[os.path.abspath]=None,
+        folder: Optional[str]=None,
         parent: Optional[str]=None,
         children: Optional[Set[str]]=None,
         taxonomy: Optional[str]=None,
@@ -3040,7 +3040,7 @@ class Entry(object):
         level : str
             Taxonomic level.
             Possible values: {'kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'genome'}
-        folder : os.path.abspath, optional, default None
+        folder : str, optional, default None
             Path to the entry root folder.
         parent : str, optional, default None
             The name of the parent entry.
@@ -3452,12 +3452,12 @@ class Entry(object):
 
         self.sketch_filepath = tree_filepath
 
-    def sketch(self, filepath: os.path.abspath) -> os.path.abspath:
+    def sketch(self, filepath: str) -> str:
         """Build a sketch representation of the input genome.
 
         Parameters
         ----------
-        filepath : os.path.abspath
+        filepath : str
             Path to the input genome.
 
         Raises
@@ -3470,7 +3470,7 @@ class Entry(object):
 
         Returns
         -------
-        os.path.abspath
+        str
             The path to the output sketch file.
         """
 

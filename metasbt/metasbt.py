@@ -175,7 +175,7 @@ class MetaSBT(object):
         print(message)
 
     @staticmethod
-    def _sketch_genome(args: Tuple["Database", str, os.path.abspath]) -> Tuple[os.path.abspath, os.path.abspath]:
+    def _sketch_genome(args: Tuple["Database", str, str]) -> Tuple[str, str]:
         """Wrapper for multiprocessing imap_unordered."""
         database, genome_name, genome_filepath = args
         genome_object = Entry(database, genome_name, genome_name, "genome")
@@ -214,12 +214,12 @@ class MetaSBT(object):
         parser.add_argument(
             "--download",
             required="--list" not in argv,
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
             "--version",
-            type=str,
+            type=os.path.abspath,
             help="The database version. It automatically select the most recent one if a version is not provided."
         )
         parser.add_argument(
@@ -365,7 +365,7 @@ class MetaSBT(object):
         general_group.add_argument(
             "--database",
             required=True,
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         general_group.add_argument(
@@ -568,7 +568,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
@@ -941,7 +941,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
 
@@ -1041,7 +1041,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
@@ -1122,7 +1122,7 @@ class MetaSBT(object):
             for genome_filepath, sketch_filepath in zip(genomes, sketches):
                 Database._profile((self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna"))
 
-    def sketch(self, argv: List[Any], parse_known_args=False) -> List[os.path.abspath]:
+    def sketch(self, argv: List[Any], parse_known_args=False) -> List[str]:
         """Sketch the input genomes.
 
         Parameters
@@ -1158,7 +1158,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
@@ -1255,7 +1255,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
 
@@ -1536,14 +1536,14 @@ class MetaSBT(object):
                     # The tarball should exist here
                     self.assertTrue(os.path.isfile(tarball_filepath))
 
-        def run_test(references: os.path.abspath, mags: os.path.abspath) -> None:
+        def run_test(references: str, mags: str) -> None:
             """Run unit tests.
 
             Parameters
             ----------
-            references : os.path.abspath
+            references : str
                 Path to the file with the list of reference genomes and their taxonomic labels.
-            mags : os.path.abspath
+            mags : str
                 Path to the file with the list of metagenome-assembled genomes.
             """
 
@@ -1600,7 +1600,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
@@ -1728,7 +1728,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             required=True,
-            type=str,
+            type=os.path.abspath,
             help="The database name."
         )
         parser.add_argument(
