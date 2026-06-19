@@ -631,7 +631,8 @@ class MetaSBT(object):
         # Load the list of paths to the genome files
         # This is a dict with the paths to the input genomes indexed by their file name
         # Assume the input files are not compressed
-        genomes = {os.path.splitext(os.path.basename(line.strip()))[0]: line.strip() for line in open(args.genomes).readlines() if line.strip()}
+        with open(args.genomes) as fh:
+            genomes = {os.path.splitext(os.path.basename(line.strip()))[0]: line.strip() for line in fh if line.strip()}
 
         # Keep track of the current working directory
         curr_workdir = os.getcwd()
@@ -1100,7 +1101,11 @@ class MetaSBT(object):
             self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
 
         # Load the list of paths to the input genomes
-        genomes = [args.genome] if args.genome else [line.strip() for line in open(args.genomes).readlines() if line.strip()]
+        if args.genome:
+            genomes = [args.genome]
+        else:
+            with open(args.genomes) as fh:
+                genomes = [line.strip() for line in fh if line.strip()]
 
         # Genomes must be sketched first
         # Note that this function and `sketch()` have the same set of arguments
@@ -1198,7 +1203,11 @@ class MetaSBT(object):
             self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
 
         # Load the list of paths to the input genomes
-        genomes = [args.genome] if args.genome else [line.strip() for line in open(args.genomes).readlines() if line.strip()]
+        if args.genome:
+            genomes = [args.genome]
+        else:
+            with open(args.genomes) as fh:
+                genomes = [line.strip() for line in fh if line.strip()]
 
         sketch_map = dict()
         args_list = [(self.database, os.path.splitext(os.path.basename(genome_filepath))[0], genome_filepath) for genome_filepath in genomes]
@@ -1673,7 +1682,8 @@ class MetaSBT(object):
         sketch_lists = Path(os.path.join(db_dir, "clusters")).glob("**/*.txt")
 
         for sketch_list_filepath in sketch_lists:
-            sketch_filepaths = [line.strip() for line in open(sketch_list_filepath).readlines() if line.strip()]
+            with open(sketch_list_filepath) as fh:
+                sketch_filepaths = [line.strip() for line in fh if line.strip()]
 
             # Retrieve the partial path to the sketches starting from the clusters or sketches folder
             # Search for the last occurrence of "clusters" or "sketches" if it appears in multiple positions
@@ -1804,7 +1814,11 @@ class MetaSBT(object):
         self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
 
         # Load the set of paths to the input genomes
-        genomes = {args.genome} if args.genome else {line.strip() for line in open(args.genomes).readlines() if line.strip()}
+        if args.genome:
+            genomes = {args.genome}
+        else:
+            with open(args.genomes) as fh:
+                genomes = {line.strip() for line in fh if line.strip()}
 
         if args.completeness > 0.0 or args.contamination < 100.0:
             # Retrieve the kingdom from the root node of the target database

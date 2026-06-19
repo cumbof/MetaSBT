@@ -448,7 +448,8 @@ class Database(object):
                 raise Exception(error_message) from e
 
             # Get kitsune output message
-            kitsune_out_content = open(kitsune_out_filepath).read().strip()
+            with open(kitsune_out_filepath) as fh:
+                kitsune_out_content = fh.read().strip()
 
             # Retrieve the optimal kmer size
             kmer_size = int(kitsune_out_content.split(" ")[-1])
