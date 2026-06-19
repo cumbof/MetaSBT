@@ -1108,7 +1108,7 @@ class MetaSBT(object):
         if args.nproc > 1:
             with multiprocessing.Pool(processes=args.nproc) as pool:
                 args_list = [(self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna") for genome_filepath, sketch_filepath in zip(genomes, sketches)]
-                for _ in tqdm.tqdm(pool.imap_unordered(Database._profile, args_list), total=len(args_list)):
+                for _ in tqdm.tqdm(pool.imap_unordered(Database._profile, args_list, chunksize=1), total=len(args_list)):
                     pass
         else:
             for genome_filepath, sketch_filepath in zip(genomes, sketches):
@@ -1202,7 +1202,7 @@ class MetaSBT(object):
 
         if args.nproc > 1:
             with multiprocessing.Pool(processes=args.nproc) as pool:
-                for g_path, s_path in tqdm.tqdm(pool.imap_unordered(self.__class__._sketch_genome, args_list), total=len(args_list)):
+                for g_path, s_path in tqdm.tqdm(pool.imap_unordered(self.__class__._sketch_genome, args_list, chunksize=1), total=len(args_list)):
                     sketch_map[g_path] = s_path
         else:
             for args_tuple in args_list:
@@ -1849,7 +1849,7 @@ class MetaSBT(object):
         if args.nproc > 1:
             with multiprocessing.Pool(processes=args.nproc) as pool:
                 args_list = [(self.database, genome_filepath) for genome_filepath in genomes]
-                for genome_filepath, taxonomy in tqdm.tqdm(pool.imap_unordered(Database._is_known, args_list), total=len(args_list)):
+                for genome_filepath, taxonomy in tqdm.tqdm(pool.imap_unordered(Database._is_known, args_list, chunksize=1), total=len(args_list)):
                     species_assignments[genome_filepath] = taxonomy
         else:
             for genome_filepath in genomes:
