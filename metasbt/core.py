@@ -134,6 +134,9 @@ class Database(object):
         # Also define a dictionary to keep track of the genomes in the database indexed by their id.
         self.genomes: Dict[str, "Entry"] = dict()
 
+        # Cache for _build_tree_topology(); invalidated at the end of update()
+        self._topology_cache: Optional[Dict[str, List[Tuple[str, str]]]] = None
+
         if not os.path.isdir(self.root):
             self.flat = flat
 
@@ -1316,7 +1319,7 @@ class Database(object):
         return (round(statistics.mean(min_bounds), 5), round(statistics.mean(max_bounds), 5))
 
     def _build_tree_topology(self) -> Dict[str, List[Tuple[str, str]]]:
-        """Build a mapping of parent node paths to their children paths and levels 
+        """Build a mapping of parent node paths to their children paths and levels
         for the Delta-SBT accumulator search traversal.
 
         Returns
@@ -1324,6 +1327,9 @@ class Database(object):
         dict
             A dictionary mapping node paths to a list of (child_path, child_level) tuples.
         """
+        if self._topology_cache is not None:
+            return self._topology_cache
+
         topology = {}
         
         # Add root (db) node
@@ -1359,7 +1365,8 @@ class Database(object):
                                 children_paths.append((child_obj.sketch_filepath, next_level))
                                 
                 topology[node_path] = children_paths
-                
+
+        self._topology_cache = topology
         return topology
 
     def update(self) -> None:
@@ -1450,6 +1457,9 @@ class Database(object):
 
         # Reset the list of clusters
         self.__clusters = list()
+
+        # The tree structure changed; discard the cached topology
+        self._topology_cache = None
 
     def _dump_genomes(self) -> None:
         """Dump the list of reference genomes and mags with their assignments.
