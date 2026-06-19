@@ -2323,7 +2323,7 @@ class Database(object):
                     _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
 
                     # Select sketch replicas
-                    sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target in sketch_dists if sketch_dist <= threshold}
+                    sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
 
                     if sketch_clones:
                         # Define the input file name
