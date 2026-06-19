@@ -520,7 +520,7 @@ class Database(object):
             dists = dict()
 
             with mp.Pool(processes=nproc) as pool:
-                args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
+                args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
 
                 for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                     dists[sketch_filepath] = list(sketch_dists.values())
@@ -936,7 +936,7 @@ class Database(object):
                 dists = dict()
 
                 with mp.Pool(processes=nproc) as pool:
-                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
+                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
 
                     for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                         dists[sketch_filepath] = list(sketch_dists.values())
@@ -2305,7 +2305,7 @@ class Database(object):
         if compare_with == "self":
             if nproc > 1:
                 with mp.Pool(processes=nproc) as pool:
-                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp) for pos, sketch_filepath in enumerate(sketches)]
+                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
 
                     for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list), total=len(args_list)):
                         sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
@@ -3581,7 +3581,7 @@ class Entry(object):
 
         if nproc > 1:
             with mp.Pool(processes=nproc) as pool:
-                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp) for pos, source in enumerate(children) if pos < len(children)-1]
+                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp, "dna") for pos, source in enumerate(children) if pos < len(children)-1]
 
                 for source_sketch, sketch_dists in pool.imap_unordered(self.database.__class__._dist, args_list):
                     source = os.path.splitext(os.path.basename(source_sketch))[0]
