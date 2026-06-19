@@ -10,6 +10,9 @@ build/
 
 # Rust (deltatree)
 deltatree/target/
+*.so
+*.dylib
+*.pyd
 
 # Environment
 .env

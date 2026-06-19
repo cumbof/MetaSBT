@@ -1,5 +1,4 @@
 include test/references.tsv
 include test/mags.txt
 include deltatree/Cargo.toml
-include metasbt/py.typed
 recursive-include deltatree/src *

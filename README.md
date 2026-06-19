@@ -49,17 +49,11 @@ No separate Rust toolchain is required for end users.
 # Index a set of reference genomes
 metasbt index --genomes references.tsv
 
-# Update the database (build trees, compute profiles)
+# Update the database (build trees, characterize MAGs)
 metasbt update
 
-# Characterize MAGs against the indexed database
-metasbt characterize --genomes mags.txt
-
-# Query a genome against the database
-metasbt query --genome genome.fna
-
-# Search for similar genomes
-metasbt search --genome genome.fna
+# Profile a genome against the indexed database
+metasbt profile --workdir . --genome genome.fna
 ```
 
 Input files are TSV/CSV with genome identifiers and paths:
