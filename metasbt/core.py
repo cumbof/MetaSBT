@@ -2332,7 +2332,7 @@ class Database(object):
         elif compare_with == "database":
             if nproc > 1:
                 with mp.Pool(processes=nproc) as pool:
-                    args_list = [(self, genome_filepath, sketch_filepath, 1.0, 0.0) for genome_filepath, sketch_filepath in zip(genomes, sketches)]
+                    args_list = [(self, genome_filepath, sketch_filepath, 1.0, 0.0, "dna") for genome_filepath, sketch_filepath in zip(genomes, sketches)]
 
                     for genome_filepath, genome_profile in tqdm.tqdm(pool.imap_unordered(self.__class__._profile, args_list), total=len(args_list)):
                         if not genome_profile.get("genome"):
@@ -2352,7 +2352,7 @@ class Database(object):
                 # Avoid using multiprocessing if `nproc` is 1
                 for genome_filepath, sketch_filepath in zip(genomes, sketches):
                     # Again, the uncertainty can be very low here since we are searching for replicas
-                    _, genome_profile = self.__class__._profile((self, genome_filepath, sketch_filepath, 1.0, 0.0))
+                    _, genome_profile = self.__class__._profile((self, genome_filepath, sketch_filepath, 1.0, 0.0, "dna"))
 
                     # The profile function report the first closest genome only
                     # The name of the closest genome is reported under the t__ level

@@ -1107,12 +1107,12 @@ class MetaSBT(object):
         # Profile genomes in parallel
         if args.nproc > 1:
             with multiprocessing.Pool(processes=args.nproc) as pool:
-                args_list = [(self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold) for genome_filepath, sketch_filepath in zip(genomes, sketches)]
+                args_list = [(self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna") for genome_filepath, sketch_filepath in zip(genomes, sketches)]
                 for _ in tqdm.tqdm(pool.imap_unordered(Database._profile, args_list), total=len(args_list)):
                     pass
         else:
             for genome_filepath, sketch_filepath in zip(genomes, sketches):
-                Database._profile((self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold))
+                Database._profile((self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna"))
 
     def sketch(self, argv: List[Any], parse_known_args=False) -> List[os.path.abspath]:
         """Sketch the input genomes.
