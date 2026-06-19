@@ -2002,16 +2002,14 @@ class Database(object):
             with open(merged_filepath, "w+") as merged_file:
                 for genome in genomes:
                     with open(genome) as genome_file:
-                        lines = genome_file.readlines()
-
-                        # Assuming the first line is not empty
-                        # Extract the contig ID from the first line
-                        contig_id = lines[0].strip()[1:]
-
+                        # Read only the header to extract the contig ID
+                        first_line = genome_file.readline()
+                        contig_id = first_line.strip()[1:]
                         contig_to_genome[contig_id] = genome
 
-                        # Write the genome content into the merged file
-                        merged_file.write("".join(lines))
+                        # Stream the rest rather than loading the whole file into RAM
+                        merged_file.write(first_line)
+                        shutil.copyfileobj(genome_file, merged_file)
 
             try:
                 # Define the command line to run CheckV
