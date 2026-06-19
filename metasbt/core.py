@@ -976,7 +976,7 @@ class Database(object):
 
             print(f"Clustering at the {level} level")
 
-            for pos, genome_obj in enumerate(self.__unknowns):
+            for outer_pos, genome_obj in enumerate(self.__unknowns):
                 if genome_obj.sketch_filepath not in processed:
                     matches = genome_obj.profile.get(level, dict())
 
@@ -1012,8 +1012,8 @@ class Database(object):
                     # Compute the distance between the unknown genome and the closest cluster centroids
                     _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False)
 
-                    for pos, closest_cluster_taxonomy in enumerate(taxonomies):
-                        distance_from_centroid = dists[centroid_sketches[pos]]
+                    for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
+                        distance_from_centroid = dists[centroid_sketches[inner_pos]]
 
                         try:
                             # Retrieve the closest cluster boundaries
@@ -1037,7 +1037,7 @@ class Database(object):
                                 clusters = [1]
 
                             # Search for the cluster id assigned to the current genome
-                            cluster_id = clusters[pos]
+                            cluster_id = clusters[outer_pos]
 
                             # Collect all the genomes that have been assigned to the same cluster id
                             for sketch_filepath, assigned_cluster in zip(sketches, clusters):
