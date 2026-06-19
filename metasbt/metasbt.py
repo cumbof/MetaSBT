@@ -1450,20 +1450,18 @@ class MetaSBT(object):
 
                 # Build the baseline with the `index` command
                 # Define the index command line
-                # Test genomes are viruses, so we can set --kmer-size and --min-kmer-occurrrences a priori here
+                # Test genomes are viruses, so we can set --kmer-size a priori here
                 sys.argv = [
-                    "metasbt", 
-                    "index", 
-                    "--workdir", 
-                    self.__class__.working_dir.name, 
-                    "--database", 
-                    self.__class__.db_name, 
-                    "--references", 
+                    "metasbt",
+                    "index",
+                    "--workdir",
+                    self.__class__.working_dir.name,
+                    "--database",
+                    self.__class__.db_name,
+                    "--references",
                     references_filepath,
                     "--kmer-size",
                     "9",
-                    "--min-kmer-occurrences",
-                    "1",
                     "--nproc",
                     "1"
                 ]
