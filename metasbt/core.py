@@ -370,11 +370,9 @@ class Database(object):
     def set_configs(
         self,
         filepaths: Set[os.path.abspath],
-        min_kmer_occurrence: int=None,
         kmer_size: int=None,
         kmer_max: int=None,
-        filter_size: int=None,
-        filter_expand_by: float=None,
+        scaled_factor: int=1000,
     ) -> None:
         """Set global configuration parameters.
         Search for the best configuration if no input is provided.
@@ -383,18 +381,12 @@ class Database(object):
         ----------
         filepaths : set
             Set of paths to the input uncompressed genome files.
-        min_kmer_occurrence : int, default None
-            Minimum number of kmer occurrences for establishing a proper bloom filter size.
         kmer_size : int, default None
             Kmers size.
         kmer_max : int, default None
             Max kmer size for kitsune, to be used if `kmer_size=None`.
-        filter_size : int, default None
-            Bloom filter size.
-        filter_expand_by : float, default None
-            Expand the bloom filter size by a predefined percentage.
-            This is used in case of `filter_size=None` only.
-            If `filter_size` is not None, this is ignored.
+        scaled_factor : int, default 1000
+            FracMinHash scaled factor (1 in N k-mers are sampled).
 
         Raises
         ------
@@ -402,7 +394,6 @@ class Database(object):
             If a metadata.json file already exists for the current database.
         ValueError:
             - if `filepaths` is empty;
-            - if `min_kmer_occurrence` is None;
             - if both `kmer_size` and `kmer_max` are None.
         """
 
@@ -414,14 +405,9 @@ class Database(object):
         if not filepaths:
             raise ValueError("One or more genome files must be provided in input!")
 
-        if not min_kmer_occurrence:
-            raise ValueError("The minimum number of kmer occurrences must be provided in input!")
-
-        self.metadata["min_kmer_occurrence"] = min_kmer_occurrence
-
         input_list_filepath = os.path.join(self.tmp, "genomes.txt")
 
-        if (not kmer_size and kmer_max) or not filter_size:
+        if not kmer_size and kmer_max:
             # Dump the list of paths to the input genomes
             with open(input_list_filepath, "w+") as input_list:
                 for filepath in filepaths:
@@ -468,71 +454,7 @@ class Database(object):
             kmer_size = int(kitsune_out_content.split(" ")[-1])
 
         self.metadata["kmer_size"] = kmer_size
-
-        if not filter_size:
-            # Search for the best bloom filter size based on the input set of genomes with ntcard
-            try:
-                # Estimate the bloom filter size with ntcard
-                command_line = [
-                    "ntcard",
-                    f"--kmer={self.metadata['kmer_size']}",
-                    f"--threads={self.nproc}",
-                    f"--pref={os.path.join(self.tmp, 'genomes')}",
-                    f"@{input_list_filepath}"
-                ]
-
-                subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            except subprocess.CalledProcessError as e:
-                error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
-
-                raise Exception(error_message).with_traceback(e.__traceback__)
-
-            # Total number of kmers in reads
-            F1 = 0
-
-            # Number of distinct kmers
-            F0 = 0
-
-            # List with number of kmers occurring less than `min_kmer_occurrence`
-            fs = list()
-
-            with open(os.path.join(self.tmp, f"genomes_k{self.metadata['kmer_size']}.hist")) as hist_file:
-                for line in hist_file:
-                    line = line.strip()
-
-                    if line:
-                        line_split = line.split()
-
-                        if line_split[0] == "F1":
-                            F1 = int(line_split[-1])
-
-                        elif line_split[0] == "F0":
-                            F0 = int(line_split[-1])
-
-                        elif line_split[0].isdigit() and int(line_split[0]) < min_kmer_occurrence:
-                            fs.append(int(line_split[-1]))
-
-                        else:
-                            break
-
-            # Use F1 as the estimated bloom filter size if F0 == 0
-            # It could happen for very small genomes
-            filter_size = F1 if F0 == 0 else F0-sum(fs)
-
-            if filter_expand_by:
-                # Expand the filter size
-                # Transform `filter_expand_by` from percentage to absolute value based on `filter_size`
-                filter_expand_by = int((filter_size*filter_expand_by)/100.0)
-
-                filter_size += filter_expand_by
-
-        self.metadata["filter_size"] = filter_size
-
-        # Store the global parameters into the metadata.json file under the database root folder
-        # For Delta-SBT (FracMinHash), filter_size is deprecated in favor of a scaled factor.
-        # We store it for backward compatibility but add the scaled factor.
-        self.metadata["scaled_factor"] = 1000 
+        self.metadata["scaled_factor"] = scaled_factor
         self._dump_metadata()
 
     def cluster(self, genomes: Dict[str, str], threshold: float=0.05) -> Dict[str, str]:
@@ -3064,7 +2986,7 @@ class Database(object):
         """
 
         # Define the set of attributes that a database is required to have
-        required_attributes = {"clusters_count", "filter_size", "kmer_size", "min_kmer_occurrence", "flat"}
+        required_attributes = {"clusters_count", "kmer_size", "scaled_factor", "flat"}
 
         return len(set(metadata.keys()).intersection(required_attributes)) == len(required_attributes)
 

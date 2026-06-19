@@ -402,38 +402,12 @@ class MetaSBT(object):
             help="Pack the database into a compressed tarball.",
         )
 
-        # Group of arguments for estimating the bloom filter size
-        filter_size_group = parser.add_argument_group("Estimate a proper bloom filter size")
-
-        filter_size_group.add_argument(
-            "--filter-size",
+        general_group.add_argument(
+            "--scaled-factor",
             type=int,
-            required=False,
-            dest="filter_size",
-            help=(
-                "This is the size of the bloom filters. "
-                "It automatically estimates a proper bloom filter size if not provided."
-            )
-        )
-        filter_size_group.add_argument(
-            "--increase-filter-size",
-            type=float,
-            default=50.0,
-            dest="increase_filter_size",
-            help=(
-                "Increase the estimated filter size by the specified percentage. "
-                "It is highly recommended to increase the filter size by a good percentage in case you are planning to update the index with new genomes."
-            )
-        )
-        filter_size_group.add_argument(
-            "--min-kmer-occurrences",
-            type=int,
-            default=2,
-            dest="min_kmer_occurrences",
-            help=(
-                "Minimum number of occurrences of kmers to be considered for estimating the bloom filter size "
-                "and for building the bloom filter files."
-            )
+            default=1000,
+            dest="scaled_factor",
+            help="FracMinHash scaled factor (1 in N k-mers are sampled). Lower values yield larger sketches."
         )
 
         # Group of arguments for estimating the optimal kmer size
@@ -521,14 +495,12 @@ class MetaSBT(object):
         genomes = set(references.keys())
 
         # Define the database metadata
-        # Eventually, estimate the optimal kmer size and a proper bloom filter size
+        # Eventually, estimate the optimal kmer size
         self.database.set_configs(
             genomes,
-            min_kmer_occurrence=args.min_kmer_occurrences,
             kmer_size=args.kmer_size,
             kmer_max=args.limit_kmer_size,
-            filter_size=args.filter_size,
-            filter_expand_by=args.increase_filter_size
+            scaled_factor=args.scaled_factor
         )
 
         if args.completeness > 0.0 or args.contamination < 100.0:
