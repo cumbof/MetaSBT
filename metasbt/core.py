@@ -1964,6 +1964,23 @@ class Database(object):
         return profiles
 
     @classmethod
+    def _get_busco_lineage(cls, kingdom: str) -> str:
+        prefix = kingdom.lower()
+        output = subprocess.check_output(["busco", "--list-datasets"], text=True)
+        pattern = re.compile(rf"^{re.escape(prefix)}_odb(\d+)")
+        versions = []
+        for line in output.splitlines():
+            match = pattern.match(line.strip())
+            if match:
+                versions.append(int(match.group(1)))
+        if not versions:
+            raise RuntimeError(
+                f"No BUSCO lineage found for kingdom '{kingdom}'. "
+                f"Run 'busco --list-datasets' to see available lineages."
+            )
+        return f"{prefix}_odb{max(versions)}"
+
+    @classmethod
     def qc(
         cls,
         genomes: Set[os.path.abspath], 
@@ -2224,10 +2241,7 @@ class Database(object):
         elif kingdom == "Fungi":
             tmp = os.path.join(tmp, "busco")
 
-            # Define the latest BUSCO database version for Fungi
-            # TODO This is hardcoded!
-            #      We should automatically point to the latest BUSCO database for Fungi
-            busco_db = "fungi_odb10"
+            busco_db = cls._get_busco_lineage(kingdom)
 
             # BUSCO runs over one genome at a time
             for genome in genomes:
