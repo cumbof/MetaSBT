@@ -172,13 +172,16 @@ fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
 /// * `filepath` - Path to the input FASTA file.
 /// * `out_filepath` - Path to save the dual-payload sketch file.
 /// * `kmer_size` - The length of DNA k-mers to extract (e.g., 21, 31).
-/// * `aa_kmer_size` - The length of amino acid k-mers to extract (e.g., 7).
+///   AA k-mer size is derived automatically as max(3, kmer_size / 3).
 /// * `scaled` - The scale factor (e.g., 1000 means keep 1 in 1000 k-mers).
 /// * `_threads` - Number of threads (currently unused, reserved for future Rayon integration).
 #[pyfunction]
-fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, aa_kmer_size: usize, scaled: u32, _threads: usize) -> PyResult<()> {
+fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, _threads: usize) -> PyResult<()> {
     let mut dna_bm = RoaringBitmap::new();
     let mut aa_bm = RoaringBitmap::new();
+
+    // AA k-mer size is derived from DNA k-mer size: N bp → N/3 AA
+    let aa_kmer_size = std::cmp::max(3, kmer_size / 3);
 
     let max_hash = (u32::MAX as f64 / scaled as f64) as u32;
 
@@ -239,24 +242,33 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, aa_kmer_size: us
 /// Because we use FracMinHash, we can estimate ANI/AAI purely mathematically 
 /// without needing full alignments.
 /// The `mode` parameter selects the DNA or AA bitmap from the dual-payload file.
+/// When mode is "aa", the effective k-mer size is derived as max(3, kmer_size / 3).
 #[pyfunction]
-fn containment_ani(focus: &str, targets: Vec<&str>, kmer_size: usize, mode: &str) -> PyResult<HashMap<String, f64>> {
+fn containment_ani(focus: &str, targets: Vec<String>, kmer_size: usize, mode: &str) -> PyResult<HashMap<String, f64>> {
+    // In AA mode, the effective k-mer size is derived from the DNA k-mer size:
+    // a k-mer of N bp translates to N/3 AA residues.
+    let eff_kmer = if matches!(mode, "aa" | "AA") {
+        std::cmp::max(3, kmer_size / 3)
+    } else {
+        kmer_size
+    };
+
     let focus_bm = select_bitmap(focus, mode)?;
     let focus_len = focus_bm.len() as f64;
     let mut results = HashMap::new();
 
     if focus_len == 0.0 {
-        for t in targets { results.insert(t.to_string(), 1.0); }
+        for t in &targets { results.insert(t.clone(), 1.0); }
         return Ok(results);
     }
 
-    for target in targets {
-        let target_bm = select_bitmap(&target, mode)?;
+    for target in targets.iter() {
+        let target_bm = select_bitmap(target, mode)?;
         let intersection = focus_bm.intersection_len(&target_bm) as f64;
         let containment = intersection / focus_len;
 
         let ani = if containment > 0.0 {
-            1.0 + (1.0 / kmer_size as f64) * containment.ln()
+            1.0 + (1.0 / eff_kmer as f64) * containment.ln()
         } else {
             0.0
         };
@@ -386,6 +398,13 @@ fn accumulator_search(
     mode: &str,
 ) -> PyResult<HashMap<String, HashMap<String, f64>>> {
     
+    // In AA mode, derive the effective k-mer size from the DNA k-mer size
+    let eff_kmer = if matches!(mode, "aa" | "AA") {
+        std::cmp::max(3, kmer_size / 3)
+    } else {
+        kmer_size
+    };
+
     let query_bm = select_bitmap(query_sketch, mode)?;
     let query_len = query_bm.len() as f64;
 
@@ -408,7 +427,7 @@ fn accumulator_search(
         }
 
         let ani = if containment > 0.0 {
-            1.0 + (1.0 / kmer_size as f64) * containment.ln()
+            1.0 + (1.0 / eff_kmer as f64) * containment.ln()
         } else { 
             0.0
         };
@@ -438,7 +457,7 @@ fn accumulator_search(
 /// The `mode` parameter selects the bitmap (dna/aa) for rebalancing.
 /// The other bitmap passes through unchanged.
 #[pyfunction]
-fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches: Vec<&str>, mode: &str) -> PyResult<()> {
+fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches: Vec<String>, mode: &str) -> PyResult<()> {
     let primary = matches!(mode, "dna" | "DNA");
     let (new_dna, new_aa) = read_bitmap_pair(new_sketch)?;
     let (species_dna, species_aa) = read_bitmap_pair(species_node_path)?;
@@ -456,8 +475,8 @@ fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches
     lost_core -= &new_core;
 
     if !lost_core.is_empty() {
-        for sibling_path in sibling_sketches {
-            let (sib_dna, sib_aa) = read_bitmap_pair(&sibling_path)?;
+        for sibling_path in &sibling_sketches {
+            let (sib_dna, sib_aa) = read_bitmap_pair(sibling_path)?;
             let (mut sib_bm, sib_other) = if primary {
                 (sib_dna, sib_aa)
             } else {
@@ -465,9 +484,9 @@ fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches
             };
             sib_bm |= &lost_core;
             if primary {
-                write_bitmap_pair(&sibling_path, &sib_bm, &sib_other)?;
+                write_bitmap_pair(sibling_path, &sib_bm, &sib_other)?;
             } else {
-                write_bitmap_pair(&sibling_path, &sib_other, &sib_bm)?;
+                write_bitmap_pair(sibling_path, &sib_other, &sib_bm)?;
             }
         }
         if primary {
@@ -507,7 +526,7 @@ fn sketch_cardinality(sketch_path: &str, mode: &str) -> PyResult<u64> {
 /// into the Python extension module. The name of the function `deltatree` MUST 
 /// match the `lib.name` setting in the `Cargo.toml`.
 #[pymodule]
-fn deltatree(_py: Python, m: &PyModule) -> PyResult<()> {
+fn deltatree(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sketch, m)?)?;
     m.add_function(wrap_pyfunction!(sketch_cardinality, m)?)?;
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;

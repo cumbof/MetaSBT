@@ -3557,7 +3557,6 @@ class Entry(object):
                 filepath,
                 sketch_filepath,
                 self.database.metadata['kmer_size'],
-                self.database.metadata.get('aa_kmer_size', 7),
                 self.database.metadata.get('scaled_factor', 1000),
                 self.database.nproc
             )

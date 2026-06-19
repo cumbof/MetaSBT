@@ -7,7 +7,7 @@ authors:
   - family-names: Blankenberg
     given-names: Daniel
     orcid: https://orcid.org/0000-0002-6833-9049
-title: "cumbof/MetaSBT: MetaSBT v0.1.5"
-version: 0.1.5
-date-released: 2025-06-27
+title: "cumbof/MetaSBT: MetaSBT v2.3.0"
+version: 2.3.0
+date-released: 2026-06-18
 url: https://github.com/cumbof/MetaSBT

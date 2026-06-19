@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings. The "extension-module" feature is required to build a Python library.
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.23", features = ["extension-module"] }
 
 # Roaring Bitmaps for the compressed, updatable Delta filters
 roaring = "0.10"
