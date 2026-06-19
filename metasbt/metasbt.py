@@ -975,13 +975,15 @@ class MetaSBT(object):
         output_filepath = os.path.join(args.workdir, f"{output_filename}.tar.gz")
 
         # Build the compressed tarball
+        # Use args.database (relative) as the source so that -C args.workdir produces
+        # a tarball whose root entry is just the database folder name, not an absolute path.
         command_line = [
             "tar",
             "-czvf",
             output_filepath,
             "-C",
             args.workdir,
-            db_dir
+            args.database
         ]
 
         try:
