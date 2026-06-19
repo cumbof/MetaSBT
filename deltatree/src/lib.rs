@@ -380,6 +380,24 @@ fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches
     Ok(())
 }
 
+/// Read a serialized RoaringBitmap sketch file and return its cardinality.
+///
+/// Cardinality is the exact number of elements (subsampled k-mer hashes) stored
+/// in the FracMinHash sketch. In the Delta-SBT architecture this replaces the
+/// obsolete "density" metric (ratio of set bits to total bits) that was only
+/// meaningful for fixed-size Bloom filters.
+///
+/// For a delta-encoded tree, comparing the cardinality of child nodes against
+/// their parent's Core provides a direct measure of compression efficiency.
+#[pyfunction]
+fn sketch_cardinality(sketch_path: &str) -> PyResult<u64> {
+    let mut file = File::open(sketch_path)
+        .map_err(|e| PyIOError::new_err(format!("Failed to open sketch {}: {}", sketch_path, e)))?;
+    let bitmap = RoaringBitmap::deserialize_from(&mut file)
+        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize sketch {}: {}", sketch_path, e)))?;
+    Ok(bitmap.len())
+}
+
 /// The Python Module Definition.
 /// 
 /// This macro creates the entry points that `pyo3` and `maturin` will compile 
@@ -388,6 +406,7 @@ fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches
 #[pymodule]
 fn deltatree(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sketch, m)?)?;
+    m.add_function(wrap_pyfunction!(sketch_cardinality, m)?)?;
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;
     m.add_function(wrap_pyfunction!(accumulator_search, m)?)?;
     m.add_function(wrap_pyfunction!(build_delta_tree, m)?)?;

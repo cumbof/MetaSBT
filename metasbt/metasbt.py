@@ -1305,8 +1305,8 @@ class MetaSBT(object):
         # Count the number of reference genomes and MAGs
         genomes = {"references": 0, "mags": 0}
 
-        # Keep track of the bloom filter density at the root
-        density = 0.0
+        # Keep track of the root cardinality (from the kingdom cluster)
+        root_cardinality = 0
 
         with open(search_for[2]) as clusters_table:
             header = list()
@@ -1331,8 +1331,8 @@ class MetaSBT(object):
                             knowns[line_split[header.index("level")]] += 1 
 
                         if line_split[header.index("level")] == "kingdom":
-                            # Update the bloom filter density
-                            density = float(line_split[header.index("density")])
+                            # Update the root cardinality
+                            root_cardinality = int(line_split[header.index("cardinality")])
 
                         if line_split[header.index("level")] == "species":
                             # Increment the number of reference genomes and MAGs
@@ -1350,8 +1350,8 @@ class MetaSBT(object):
         for level in clusters:
             table.append([level, f"{knowns[level]}/{clusters[level]}"])
 
-        # Add the root density
-        table.append(["density", density])
+        # Add the root cardinality
+        table.append(["cardinality", root_cardinality])
 
         print(tabulate(table, tablefmt="fancy_grid"))
 

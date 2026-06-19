@@ -1576,7 +1576,7 @@ class Database(object):
             header = [
                 "cluster_id",
                 "level",
-                "density",
+                "cardinality",
                 "references_count",
                 "mags_count",
                 "references_list",
@@ -1607,8 +1607,8 @@ class Database(object):
 
                     cluster_mags = list(cluster_obj.children.difference(cluster_references))
 
-                    # The bloom filter density must be compute every time
-                    cluster_density = cluster_obj.get_density()
+                    # The cardinality must be computed every time
+                    cluster_cardinality = cluster_obj.get_cardinality()
 
                     processed = False
 
@@ -1631,7 +1631,7 @@ class Database(object):
                             cluster_info = [
                                 cluster_obj.identifier,
                                 cluster_obj.level,
-                                str(cluster_density),
+                                str(cluster_cardinality),
                                 str(len(cluster_references)),
                                 str(len(cluster_mags)),
                                 ",".join(cluster_references),
@@ -1665,7 +1665,7 @@ class Database(object):
                         cluster_info = [
                             cluster_obj.identifier,
                             cluster_obj.level,
-                            str(cluster_density),
+                            str(cluster_cardinality),
                             str(len(cluster_references)),
                             str(len(cluster_mags)),
                             ",".join(cluster_references),
@@ -1684,8 +1684,8 @@ class Database(object):
                         # Retrieve the cluster level
                         self.report[cluster_obj.identifier]["level"] = cluster_obj.level
 
-                        # Retrieve the cluster density
-                        self.report[cluster_obj.identifier]["density"] = cluster_density
+                        # Retrieve the cluster cardinality
+                        self.report[cluster_obj.identifier]["cardinality"] = cluster_cardinality
     
                         # Retrieve the set of reference genomes
                         self.report[cluster_obj.identifier]["references"] = set(cluster_references)
@@ -3006,8 +3006,8 @@ class Database(object):
                         # Retrieve the cluster level
                         report_table[cluster_id]["level"] = line_split[header.index("level")]
 
-                        # Retrieve the cluster density
-                        report_table[cluster_id]["density"] = float(line_split[header.index("density")])
+                        # Retrieve the cluster cardinality
+                        report_table[cluster_id]["cardinality"] = int(line_split[header.index("cardinality")])
     
                         # Retrieve the set of reference genomes
                         report_table[cluster_id]["references"] = set()
@@ -3302,18 +3302,30 @@ class Entry(object):
 
         return children
 
-    def get_density(self) -> float:
-        """Retrieve the density of the bloom filter representation of a cluster.
+    def get_cardinality(self) -> int:
+        """Retrieve the cardinality of the delta tree representation of a cluster.
+
+        Cardinality is the exact number of elements (subsampled k-mer hashes)
+        stored in the FracMinHash/RoaringBitmap sketch. This replaces the
+        obsolete "density" metric from the HowDeSBT era, which measured bit
+        saturation in fixed-size Bloom filters. In the Delta-SBT architecture
+        density has no meaning because Roaring Bitmaps store exact hash values
+        and never saturate.
 
         Returns
         -------
-        float
-            The cluster density.
+        int
+            The cluster cardinality (number of k-mer hashes), or 0 if no sketch
+            file exists for this entry.
         """
 
-        # Delta filters density calculation
-        # TODO: Implement density checking in deltatree
-        return 0.0
+        if not self.sketch_filepath or not os.path.isfile(self.sketch_filepath):
+            return 0
+
+        try:
+            return deltatree.sketch_cardinality(self.sketch_filepath)
+        except Exception:
+            return 0
 
     def get_full_taxonomy(self, current_entry: "Entry"=None, taxonomy: str=None, internal: bool=False) -> str:
         """Recursively define the full taxonomic label based on parents.
