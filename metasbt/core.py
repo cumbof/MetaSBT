@@ -3577,11 +3577,8 @@ class Entry(object):
             limit = len(children)
 
         if 0 < limit < len(children):
-            # Always set the random seed to preserve reproducibility
-            random.seed(0)
-
-            # Random sample children up to `limit`
-            children = random.sample(children, limit)
+            # Use an isolated RNG so this doesn't perturb the global random state
+            children = random.Random(0).sample(children, limit)
 
         # Boundaries can be computed with a minimum of 3 children
         if len(children) < 3:
