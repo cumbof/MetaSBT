@@ -7,7 +7,6 @@ import argparse
 import errno
 import gzip
 import json
-import multiprocessing
 import os
 import re
 import requests
@@ -24,7 +23,7 @@ from datetime import datetime
 from packaging import version
 from pathlib import Path
 from tabulate import tabulate
-from typing import Any, List, Tuple
+from typing import Any, List
 
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -173,13 +172,6 @@ class MetaSBT(object):
         """
 
         print(message)
-
-    @staticmethod
-    def _sketch_genome(args: Tuple["Database", str, str]) -> Tuple[str, str]:
-        """Wrapper for multiprocessing imap_unordered."""
-        database, genome_name, genome_filepath = args
-        genome_object = Entry(database, genome_name, genome_name, "genome")
-        return genome_filepath, genome_object.sketch(genome_filepath)
 
     def db(self, argv: List[Any]) -> None:
         """List and retrieve public MetaSBT databases.
@@ -1113,14 +1105,7 @@ class MetaSBT(object):
         sketches = self.sketch(argv, parse_known_args=True)
 
         # Profile genomes in parallel
-        if args.nproc > 1:
-            with multiprocessing.Pool(processes=args.nproc) as pool:
-                args_list = [(self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna") for genome_filepath, sketch_filepath in zip(genomes, sketches)]
-                for _ in tqdm.tqdm(pool.imap_unordered(Database._profile, args_list, chunksize=1), total=len(args_list)):
-                    pass
-        else:
-            for genome_filepath, sketch_filepath in zip(genomes, sketches):
-                Database._profile((self.database, genome_filepath, sketch_filepath, args.uncertainty, args.pruning_threshold, "dna"))
+        self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="dna")
 
     def sketch(self, argv: List[Any], parse_known_args=False) -> List[str]:
         """Sketch the input genomes.
@@ -1209,17 +1194,7 @@ class MetaSBT(object):
             with open(args.genomes) as fh:
                 genomes = [line.strip() for line in fh if line.strip()]
 
-        sketch_map = dict()
-        args_list = [(self.database, os.path.splitext(os.path.basename(genome_filepath))[0], genome_filepath) for genome_filepath in genomes]
-
-        if args.nproc > 1:
-            with multiprocessing.Pool(processes=args.nproc) as pool:
-                for g_path, s_path in tqdm.tqdm(pool.imap_unordered(self.__class__._sketch_genome, args_list, chunksize=1), total=len(args_list)):
-                    sketch_map[g_path] = s_path
-        else:
-            for args_tuple in args_list:
-                g_path, s_path = self.__class__._sketch_genome(args_tuple)
-                sketch_map[g_path] = s_path
+        sketch_map = self.database.sketch_genomes(genomes)
 
         # Preserve original order
         sketches = [sketch_map[g] for g in genomes]
@@ -1847,17 +1822,7 @@ class MetaSBT(object):
             # Dereplicate the input genomes again versus the genomes in the database
             genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, compare_with="database")
 
-        species_assignments = dict()
-
-        if args.nproc > 1:
-            with multiprocessing.Pool(processes=args.nproc) as pool:
-                args_list = [(self.database, genome_filepath) for genome_filepath in genomes]
-                for genome_filepath, taxonomy in tqdm.tqdm(pool.imap_unordered(Database._is_known, args_list, chunksize=1), total=len(args_list)):
-                    species_assignments[genome_filepath] = taxonomy
-        else:
-            for genome_filepath in genomes:
-                _, taxonomy = Database._is_known((self.database, genome_filepath))
-                species_assignments[genome_filepath] = taxonomy
+        species_assignments = self.database.is_known_batch(genomes)
 
         for genome_filepath in species_assignments:
             # Immediately add genomes to their species assignment

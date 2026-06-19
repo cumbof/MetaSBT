@@ -621,6 +621,13 @@ class Database(object):
         instance, filepath = args
         return (filepath, instance.is_known(filepath))
 
+    @staticmethod
+    def _sketch_genome(args: Tuple["Database", str, str]) -> Tuple[str, str]:
+        """Wrapper for multiprocessing imap_unordered."""
+        database, genome_name, genome_filepath = args
+        genome_object = Entry(database, genome_name, genome_name, "genome")
+        return genome_filepath, genome_object.sketch(genome_filepath)
+
     def is_known(self, filepath: str) -> Optional[str]:
         """Check whether an input MAG could be characterized to any species in the database.
         This must be run for MAGs only and always before `add()`.
@@ -739,6 +746,69 @@ class Database(object):
                 break
 
         return taxonomy
+
+    def is_known_batch(self, genomes: List[str]) -> Dict[str, Optional[str]]:
+        """Check whether each genome in a list can be assigned to a known species.
+
+        Parameters
+        ----------
+        genomes : list
+            List of paths to uncompressed genome files.
+
+        Returns
+        -------
+        dict
+            Mapping of genome filepath to assigned taxonomy, or None if unassigned.
+        """
+        args_list = [(self, filepath) for filepath in genomes]
+        assignments: Dict[str, Optional[str]] = {}
+
+        if self.nproc > 1:
+            with mp.Pool(processes=self.nproc) as pool:
+                for filepath, taxonomy in tqdm.tqdm(
+                    pool.imap_unordered(self.__class__._is_known, args_list, chunksize=1),
+                    total=len(args_list),
+                ):
+                    assignments[filepath] = taxonomy
+        else:
+            for args_tuple in args_list:
+                filepath, taxonomy = self.__class__._is_known(args_tuple)
+                assignments[filepath] = taxonomy
+
+        return assignments
+
+    def sketch_genomes(self, genomes: List[str]) -> Dict[str, str]:
+        """Sketch a list of genomes in parallel.
+
+        Parameters
+        ----------
+        genomes : list
+            List of paths to uncompressed genome files.
+
+        Returns
+        -------
+        dict
+            Mapping of genome filepath to sketch filepath.
+        """
+        args_list = [
+            (self, os.path.splitext(os.path.basename(p))[0], p)
+            for p in genomes
+        ]
+        sketch_map: Dict[str, str] = {}
+
+        if self.nproc > 1:
+            with mp.Pool(processes=self.nproc) as pool:
+                for g_path, s_path in tqdm.tqdm(
+                    pool.imap_unordered(self.__class__._sketch_genome, args_list, chunksize=1),
+                    total=len(args_list),
+                ):
+                    sketch_map[g_path] = s_path
+        else:
+            for args_tuple in args_list:
+                g_path, s_path = self.__class__._sketch_genome(args_tuple)
+                sketch_map[g_path] = s_path
+
+        return sketch_map
 
     def add(
         self,
@@ -2250,6 +2320,45 @@ class Database(object):
             raise ValueError(f"Invalid kingdom {kingdom}!")
 
         return quality
+
+    def profile_genomes(
+        self,
+        genomes: List[str],
+        sketches: List[str],
+        uncertainty: float=50.0,
+        pruning_threshold: float=0.0,
+        mode: str="dna",
+    ) -> None:
+        """Profile a list of genomes against the database in parallel.
+
+        Parameters
+        ----------
+        genomes : list
+            List of paths to uncompressed genome files.
+        sketches : list
+            List of paths to corresponding genome sketches (same order as genomes).
+        uncertainty : float, default 50.0
+            Percentage of uncertainty used to expand the selection of best matches.
+        pruning_threshold : float, default 0.0
+            Minimum containment ANI threshold for pruning the tree during search.
+        mode : str, default "dna"
+            Search mode — "dna" or "aa".
+        """
+        args_list = [
+            (self, genome_filepath, sketch_filepath, uncertainty, pruning_threshold, mode)
+            for genome_filepath, sketch_filepath in zip(genomes, sketches)
+        ]
+
+        if self.nproc > 1:
+            with mp.Pool(processes=self.nproc) as pool:
+                for _ in tqdm.tqdm(
+                    pool.imap_unordered(self.__class__._profile, args_list, chunksize=1),
+                    total=len(args_list),
+                ):
+                    pass
+        else:
+            for args_tuple in args_list:
+                self.__class__._profile(args_tuple)
 
     def dereplicate(
         self, 
