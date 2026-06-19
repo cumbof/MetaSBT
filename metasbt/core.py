@@ -3360,22 +3360,22 @@ class Entry(object):
             # An unknown entry could become known, but a known entry could not become unknown
             return True
 
-        entries = self.children
+        if self.level == "species":
+            for genome in self.children:
+                self.__known = genome in self.database.genomes and self.database.genomes[genome].is_known()
 
-        if self.level != "species":
-            for level in self.database.__class__.LEVELS[self.database.__class__.LEVELS.index(self.level)+1:]:
-                next_entries = set()
+                if self.__known:
+                    return True
 
-                for entry in entries:
-                    next_entries = next_entries.union(self.database.clusters[level][entry].children)
+        else:
+            # Delegate to direct children so their cached __known is reused rather than
+            # re-traversing the full subtree down to genome level on every call.
+            next_level = self.database.__class__.LEVELS[self.database.__class__.LEVELS.index(self.level)+1]
 
-                entries = next_entries
-
-        for genome in entries:
-            self.__known = genome in self.database.genomes and self.database.genomes[genome].is_known()
-
-            if self.__known:
-                return True
+            for child in self.children:
+                if self.database.clusters[next_level][child].is_known():
+                    self.__known = True
+                    return True
 
         self.__known = False
         return False
