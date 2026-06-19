@@ -1477,6 +1477,19 @@ class Database(object):
 
                     processed.add(partial_taxonomy)
 
+        # Sweep 2: Rebuild AA Core at order+ levels.
+        # The first sweep built DNA Core at all levels (with AA union passed upward).
+        # Now we rebuild order, class, phylum, and kingdom using AA Core intersection.
+        aa_levels = self.__class__.LEVELS[self.__class__.LEVELS.index("order"):]
+        for level in reversed(aa_levels):
+            pos = self.__class__.LEVELS.index(level)
+            for taxonomy in self.__clusters:
+                partial_taxonomy = "|".join(taxonomy.split("|")[:pos+1])
+                if partial_taxonomy not in processed:
+                    cluster = partial_taxonomy.split("|")[-1]
+                    cluster_obj = self.clusters[level][cluster]
+                    cluster_obj.index(mode="aa")
+
         # Retrieve the set of kingdoms in the database
         kingdoms = set(self.clusters["kingdom"].keys())
 
@@ -1494,8 +1507,8 @@ class Database(object):
         # It must stay out of the clusters folder
         db_obj = Entry(self, "MSBT0", "db", None, folder=db_folder, parent=None, children=kingdoms)
 
-        # Index the kingdom entries
-        db_obj.index()
+        # Index the kingdom entries (AA mode for the kingdom-level root as well)
+        db_obj.index(mode="aa")
 
         # Dump the report
         self._dump_report()
@@ -1719,12 +1732,9 @@ class Database(object):
         kmer_size: int,
         tmp: os.path.abspath=None,
         resume: bool=False,
+        mode: str = "dna",
     ) -> Tuple[os.path.abspath, Dict[str, float]]:
-        """Compute the Average Nucleotide Identity (ANI) between genome sketches.
-
-        TODO: If the input genomes have been sketched starting from their translated aminoacid sequences,
-              we could use this function to compute the Average Aminoacid Identity (AAI) that we could use
-              as a metric to better cluster genomes at higher taxonomic levels.
+        """Compute the Average Nucleotide/Aminoacid Identity (ANI/AAI) between genome sketches.
 
         Parameters
         ----------
@@ -1733,13 +1743,15 @@ class Database(object):
         sketches : list
             List with paths to the sketch files.
         kmer_size : int
-            The kmer size.
+            The kmer size (or AA k-mer size when mode="aa").
         tmp : os.path.abspath, default None
             Path to the temporary folder.
             Use the current working directory if None.
         resume : bool, default False
             If True, load a distance table if it already exists.
             Otherwise, overwrite the results.
+        mode : str, default "dna"
+            The bitmap mode: "dna" for ANI or "aa" for AAI.
 
         Raises
         ------
@@ -1749,45 +1761,34 @@ class Database(object):
         Returns
         -------
         tuple
-            A tuple with the path to the input `sketch_filepath` and a dictionary with the ANI distances between 
-            the input genome and the sketches in `sketches` indexed by sketches names in the same order of `sketches`.
+            A tuple with the path to the input `sketch_filepath` and a dictionary with the ANI/AAI distances
+            between the input genome and the sketches in `sketches` indexed by sketches names in the same order of `sketches`.
         """
 
         if not sketches:
             return (sketch_filepath, dict())
 
         if not tmp:
-            # Use the current working directory as temporary folder if not specified
             tmp = os.getcwd()
 
-        # Store the distance tables into a dedicated subfolder
         tmp = os.path.join(tmp, "distances")
 
         if not os.path.isdir(tmp):
             os.makedirs(tmp, exist_ok=True)
 
-        # Testing whether all the sketches in `sketches` exist could be expensive
-        # Check whether `sketch_filepath` exists only, and assume all the sketches in `sketches` exist
         if not os.path.isfile(sketch_filepath):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), sketch_filepath)
 
-        # Keep track of the ANI distances between sketches
-        # The order of keys must be the same of the elements in `scketches`
         distances = OrderedDict()
 
-        # Retrieve the sketch file name
         sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
 
-        # Delta-SBT Architecture: Fast ANI Estimation via FracMinHash and Containment
-        # We call the Rust backend directly instead of using howdesbt bfdistance.
-        # This replaces physical bitwise intersections with fast sketch containment index calculations.
         try:
-            # deltatree.containment_ani returns a dict of {target_sketch: estimated_ani}
-            # using the formula ANI ≈ 1 + (1/k) * ln(Containment Index)
             ani_results = deltatree.containment_ani(
                 sketch_filepath, 
                 sketches, 
-                kmer_size
+                kmer_size,
+                mode
             )
         except Exception as e:
             raise Exception(f"An error occurred while computing FracMinHash ANI distances: {e}")
@@ -1798,15 +1799,15 @@ class Database(object):
         return sketch_filepath, distances
 
     @staticmethod
-    def _profile(args: Tuple["Database", os.path.abspath, os.path.abspath, float, float]) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
+    def _profile(args: Tuple["Database", os.path.abspath, os.path.abspath, float, float, str]) -> Tuple[os.path.abspath, Dict[str, Dict[str, float]]]:
         """Wrapper for multiprocessing imap_unordered."""
-        instance, genome_filepath, sketch_filepath, uncertainty, pruning_threshold = args
-        return (genome_filepath, instance.profile(genome_filepath, sketch_filepath, uncertainty=uncertainty, pruning_threshold=pruning_threshold))
+        instance, genome_filepath, sketch_filepath, uncertainty, pruning_threshold, mode = args
+        return (genome_filepath, instance.profile(genome_filepath, sketch_filepath, uncertainty=uncertainty, pruning_threshold=pruning_threshold, mode=mode))
 
-    def _dist(args: Tuple[os.path.abspath, List[os.path.abspath], int, os.path.abspath]) -> Tuple[os.path.abspath, Dict[str, float]]:
+    def _dist(args: Tuple[os.path.abspath, List[os.path.abspath], int, os.path.abspath, str]) -> Tuple[os.path.abspath, Dict[str, float]]:
         """Wrapper for multiprocessing imap_unordered."""
-        sketch_filepath, target_sketches, kmer_size, tmp = args
-        return Database.dist(sketch_filepath, target_sketches, kmer_size, tmp=tmp, resume=False)
+        sketch_filepath, target_sketches, kmer_size, tmp, mode = args
+        return Database.dist(sketch_filepath, target_sketches, kmer_size, tmp=tmp, resume=False, mode=mode)
 
     def profile(
         self,
@@ -1814,6 +1815,7 @@ class Database(object):
         sketch_filepath: os.path.abspath,
         uncertainty: float=50.0,
         pruning_threshold: float=0.0,
+        mode: str = "dna",
     ) -> Dict[str, Dict[str, float]]:
         """Profile the input genome by querying the root node to establish the closest kingdom, and expanding 
         the subsequent queries up to the species level in order to establish the closest clusters at all the 
@@ -1831,6 +1833,8 @@ class Database(object):
             Percentage of number of kmer hits under which HowDeSBT prunes the Sequence Bloom Trees.
             This is applied at the kingdom level only in order to avoid selecting all the species clusters in the database.
             It must be between 0.0 and 1.0.
+        mode : str, default "dna"
+            The bitmap mode: "dna" or "aa" for the accumulator search.
 
         Raises
         ------
@@ -1846,14 +1850,8 @@ class Database(object):
             A dictionary with the closest cluster and its ANI distance, indexed by the name of the taxonomic level.
         """
 
-        # Define the list of taxonomic levels
-        # Prepend the db level with the index of all the kingdoms in the database
-        # Also append the genome level as a break point
         levels = ["db"] + self.__class__.LEVELS + ["genome"]
 
-        # Keep track of the profiles
-        # Mapping between the closest cluster and its distance indexexd by the taxonomic level
-        # It may map multiple closest clusters
         profiles = {level: dict() for level in levels[1:]}
 
         clusters = list()
@@ -1921,7 +1919,8 @@ class Database(object):
                 tree_topology,
                 self.metadata["kmer_size"],
                 pruning_threshold,
-                uncertainty
+                uncertainty,
+                mode
             )
         except Exception as e:
             raise Exception(f"Accumulator search failed: {e}")
@@ -3302,7 +3301,7 @@ class Entry(object):
 
         return children
 
-    def get_cardinality(self) -> int:
+    def get_cardinality(self, mode: str = "dna") -> int:
         """Retrieve the cardinality of the delta tree representation of a cluster.
 
         Cardinality is the exact number of elements (subsampled k-mer hashes)
@@ -3311,6 +3310,11 @@ class Entry(object):
         saturation in fixed-size Bloom filters. In the Delta-SBT architecture
         density has no meaning because Roaring Bitmaps store exact hash values
         and never saturate.
+
+        Parameters
+        ----------
+        mode : str, default "dna"
+            Select the DNA or AA bitmap ("dna" or "aa").
 
         Returns
         -------
@@ -3323,7 +3327,7 @@ class Entry(object):
             return 0
 
         try:
-            return deltatree.sketch_cardinality(self.sketch_filepath)
+            return deltatree.sketch_cardinality(self.sketch_filepath, mode)
         except Exception:
             return 0
 
@@ -3432,9 +3436,17 @@ class Entry(object):
 
         return False
 
-    def index(self) -> str:
+    def index(self, mode: str = "dna") -> str:
         """Build the Sequence Bloom Tree.
         It overwrites the index if it already exists.
+
+        Parameters
+        ----------
+        mode : str, default "dna"
+            The bitmap mode to index: "dna" or "aa".
+            In "dna" mode, children DNA bitmaps are intersected for the Core
+            and the AA bitmaps are unioned into the parent. In "aa" mode,
+            AA bitmaps are intersected and the parent's DNA slot is preserved.
 
         Raises
         ------
@@ -3454,64 +3466,46 @@ class Entry(object):
         if not self.children:
             raise Exception("This entry is empty!")
 
-        # Delete the index folder if it already exists
-        if os.path.isdir(self.folder):
-            shutil.rmtree(os.path.join(self.folder, "tree"), ignore_errors=True)
-
-            # Recreate the cluster folder
-            os.makedirs(os.path.join(self.folder, "tree"), exist_ok=True)
+        # In DNA mode, always rebuild from scratch.
+        # In AA mode, preserve the tree folder and only overwrite index.delta.
+        if mode == "dna":
+            if os.path.isdir(self.folder):
+                shutil.rmtree(os.path.join(self.folder, "tree"), ignore_errors=True)
+                os.makedirs(os.path.join(self.folder, "tree"), exist_ok=True)
 
         # Colect paths to the children sketches
         sketches = set()
 
         if self.level == "species":
-            # This entry is a species
-            # We should search for Sequence objects here
             for child in self.children:
-                # Assume the sketch file exists
                 sketches.add(self.database.genomes[child].sketch_filepath)
 
         else:
-            # Children are located at the next higher taxonomic level
             next_level = "kingdom" if not self.level else self.database.__class__.LEVELS[self.database.__class__.LEVELS.index(self.level)+1]
 
-            # This entry represent a taxonomic level, different than a species
-            # Thus, children are Entry objects
             for child in self.children:
-                # Retrieve the Entry object from the database
                 entry_obj = self.database.clusters[next_level][child]
-
-                # The bloom filter representation of the entry is located in its folder
                 entry_sketch = os.path.join(entry_obj.folder, "tree", "index.delta")
-
-                # Assume the sketch file exists
                 sketches.add(entry_sketch)
 
-        # Dump the list of sketches to file
         sketches_list_filepath = os.path.join(self.folder, f"{self.name}.txt")
 
         with open(sketches_list_filepath, "w+") as file:
             for sketch_filepath in sketches:
                 file.write(f"{sketch_filepath}\n")
 
-        # Define the delta tree file
         tree_filepath = os.path.join(self.folder, "tree", "index.delta")
 
-        # Delta-SBT Architecture: Indexing Phase
-        # Building this tree requires a two-pass "Bottom-Up, then Top-Down" approach:
-        # 1. Bottom-Up (Find the Cores): Intersect child filters to find the consensus "Core".
-        # 2. Top-Down (Strip the Deltas): Subtract the parent's core k-mers from the child's core k-mers.
-        # This replaces howdesbt's union generation and is handled entirely by the Rust core.
         try:
             deltatree.build_delta_tree(
                 sketches_list_filepath,
                 tree_filepath,
-                self.database.flat
+                self.database.flat,
+                mode
             )
         except Exception as e:
             raise Exception(f"Failed to build Delta-SBT for {self.name}: {e}")
 
-        # Set the file path to the sketch representation of the cluster (now a Core or Delta filter)
         self.sketch_filepath = tree_filepath
 
     def sketch(self, filepath: os.path.abspath) -> os.path.abspath:
@@ -3556,12 +3550,14 @@ class Entry(object):
 
         # Delta-SBT Architecture: Sub-sampling the K-mer Space
         # Instead of a standard Bloom Filter with all 5 million canonical k-mers, 
-        # we generate a FracMinHash sketch compressed into a Roaring Bitmap.
+        # we generate a dual-payload FracMinHash sketch (DNA + 3-frame AA translation)
+        # compressed into a pair of Roaring Bitmaps.
         try:
             deltatree.sketch(
                 filepath,
                 sketch_filepath,
                 self.database.metadata['kmer_size'],
+                self.database.metadata.get('aa_kmer_size', 7),
                 self.database.metadata.get('scaled_factor', 1000),
                 self.database.nproc
             )

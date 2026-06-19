@@ -15,7 +15,7 @@ use pyo3::prelude::*;
 use pyo3::exceptions::{PyIOError, PyValueError};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::path::Path;
 
 use roaring::RoaringBitmap;
@@ -38,7 +38,131 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Generate a FracMinHash sketch and save it as a compressed Roaring Bitmap.
+/// Translate a single DNA codon (3 bases) to an amino acid using the standard
+/// genetic code. Returns b'X' for unknown codons.
+fn dna_to_aa(codon: &[u8]) -> u8 {
+    if codon.len() < 3 { return b'X'; }
+    let a = codon[0].to_ascii_uppercase();
+    let b = codon[1].to_ascii_uppercase();
+    let c = codon[2].to_ascii_uppercase();
+    match (a, b, c) {
+        (b'T', b'T', b'T') | (b'T', b'T', b'C') => b'F',
+        (b'T', b'T', b'A') | (b'T', b'T', b'G') => b'L',
+        (b'T', b'C', b'T') | (b'T', b'C', b'C') | (b'T', b'C', b'A') | (b'T', b'C', b'G') => b'S',
+        (b'T', b'A', b'T') | (b'T', b'A', b'C') => b'Y',
+        (b'T', b'A', b'A') | (b'T', b'A', b'G') => b'*',
+        (b'T', b'G', b'T') | (b'T', b'G', b'C') => b'C',
+        (b'T', b'G', b'A') | (b'T', b'G', b'G') => b'W',
+        (b'C', b'T', b'T') | (b'C', b'T', b'C') | (b'C', b'T', b'A') | (b'C', b'T', b'G') => b'L',
+        (b'C', b'C', b'T') | (b'C', b'C', b'C') | (b'C', b'C', b'A') | (b'C', b'C', b'G') => b'P',
+        (b'C', b'A', b'T') | (b'C', b'A', b'C') => b'H',
+        (b'C', b'A', b'A') | (b'C', b'A', b'G') => b'Q',
+        (b'C', b'G', b'T') | (b'C', b'G', b'C') | (b'C', b'G', b'A') | (b'C', b'G', b'G') => b'R',
+        (b'A', b'T', b'T') | (b'A', b'T', b'C') | (b'A', b'T', b'A') => b'I',
+        (b'A', b'T', b'G') => b'M',
+        (b'A', b'C', b'T') | (b'A', b'C', b'C') | (b'A', b'C', b'A') | (b'A', b'C', b'G') => b'T',
+        (b'A', b'A', b'T') | (b'A', b'A', b'C') => b'N',
+        (b'A', b'A', b'A') | (b'A', b'A', b'G') => b'K',
+        (b'A', b'G', b'T') | (b'A', b'G', b'C') => b'S',
+        (b'A', b'G', b'A') | (b'A', b'G', b'G') => b'R',
+        (b'G', b'T', b'T') | (b'G', b'T', b'C') | (b'G', b'T', b'A') | (b'G', b'T', b'G') => b'V',
+        (b'G', b'C', b'T') | (b'G', b'C', b'C') | (b'G', b'C', b'A') | (b'G', b'C', b'G') => b'A',
+        (b'G', b'A', b'T') | (b'G', b'A', b'C') => b'D',
+        (b'G', b'A', b'A') | (b'G', b'A', b'G') => b'E',
+        (b'G', b'G', b'T') | (b'G', b'G', b'C') | (b'G', b'G', b'A') | (b'G', b'G', b'G') => b'G',
+        _ => b'X',
+    }
+}
+
+/// Translate a DNA sequence in 3 forward reading frames into amino acid sequences.
+/// Each frame starts at offset 0, 1, or 2 and translates consecutive codons.
+/// Translation stops at the first stop codon (*) in each frame.
+fn translate_3frames(seq: &[u8]) -> [Vec<u8>; 3] {
+    let mut frames: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for offset in 0..3 {
+        let mut i = offset;
+        while i + 3 <= seq.len() {
+            let aa = dna_to_aa(&seq[i..i+3]);
+            if aa == b'*' { break; }
+            frames[offset].push(aa);
+            i += 3;
+        }
+    }
+    frames
+}
+
+/// Write a dual-payload file containing two serialized RoaringBitmaps
+/// (DNA and AA), each prefixed by an 8-byte length in little-endian.
+fn write_bitmap_pair(path: &str, dna: &RoaringBitmap, aa: &RoaringBitmap) -> PyResult<()> {
+    let mut dna_buf = Vec::new();
+    dna.serialize_into(&mut dna_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to serialize DNA bitmap: {}", e)))?;
+    let mut aa_buf = Vec::new();
+    aa.serialize_into(&mut aa_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to serialize AA bitmap: {}", e)))?;
+
+    let mut file = File::create(path)
+        .map_err(|e| PyIOError::new_err(format!("Failed to create {}: {}", path, e)))?;
+
+    let dna_len = dna_buf.len() as u64;
+    file.write_all(&dna_len.to_le_bytes())
+        .map_err(|e| PyIOError::new_err(format!("Failed to write DNA length: {}", e)))?;
+    file.write_all(&dna_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to write DNA bitmap: {}", e)))?;
+
+    let aa_len = aa_buf.len() as u64;
+    file.write_all(&aa_len.to_le_bytes())
+        .map_err(|e| PyIOError::new_err(format!("Failed to write AA length: {}", e)))?;
+    file.write_all(&aa_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to write AA bitmap: {}", e)))?;
+
+    Ok(())
+}
+
+/// Read a dual-payload file and return (dna_bitmap, aa_bitmap).
+fn read_bitmap_pair(path: &str) -> PyResult<(RoaringBitmap, RoaringBitmap)> {
+    let mut file = File::open(path)
+        .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", path, e)))?;
+
+    let mut dna_len_buf = [0u8; 8];
+    file.read_exact(&mut dna_len_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read DNA bitmap length: {}", e)))?;
+    let dna_len = u64::from_le_bytes(dna_len_buf) as usize;
+
+    let mut dna_buf = vec![0u8; dna_len];
+    file.read_exact(&mut dna_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read DNA bitmap: {}", e)))?;
+    let dna = RoaringBitmap::deserialize_from(&mut Cursor::new(dna_buf))
+        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize DNA bitmap: {}", e)))?;
+
+    let mut aa_len_buf = [0u8; 8];
+    file.read_exact(&mut aa_len_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read AA bitmap length: {}", e)))?;
+    let aa_len = u64::from_le_bytes(aa_len_buf) as usize;
+
+    let mut aa_buf = vec![0u8; aa_len];
+    file.read_exact(&mut aa_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read AA bitmap: {}", e)))?;
+    let aa = RoaringBitmap::deserialize_from(&mut Cursor::new(aa_buf))
+        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize AA bitmap: {}", e)))?;
+
+    Ok((dna, aa))
+}
+
+/// Select one bitmap from a dual-payload file based on mode.
+fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
+    let (dna, aa) = read_bitmap_pair(path)?;
+    match mode {
+        "dna" | "DNA" => Ok(dna),
+        "aa" | "AA" => Ok(aa),
+        _ => Err(PyValueError::new_err(format!(
+            "Invalid mode '{}': expected 'dna' or 'aa'", mode
+        ))),
+    }
+}
+
+/// Generate a dual-payload FracMinHash sketch and save it as two compressed
+/// Roaring Bitmaps (DNA + AA translation in 3 forward frames).
 ///
 /// FracMinHash sub-samples the k-mer space deterministically. Instead of storing 
 /// every k-mer in a genome, it only stores hashes that fall below a certain threshold.
@@ -46,112 +170,97 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
 ///
 /// # Arguments
 /// * `filepath` - Path to the input FASTA file.
-/// * `out_filepath` - Path to save the serialized RoaringBitmap.
-/// * `kmer_size` - The length of k-mers to extract (e.g., 21, 31).
+/// * `out_filepath` - Path to save the dual-payload sketch file.
+/// * `kmer_size` - The length of DNA k-mers to extract (e.g., 21, 31).
+/// * `aa_kmer_size` - The length of amino acid k-mers to extract (e.g., 7).
 /// * `scaled` - The scale factor (e.g., 1000 means keep 1 in 1000 k-mers).
 /// * `_threads` - Number of threads (currently unused, reserved for future Rayon integration).
 #[pyfunction]
-fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, _threads: usize) -> PyResult<()> {
-    let mut bitmap = RoaringBitmap::new();
-    
-    // Calculate the maximum hash value allowed for the given scaled fraction.
-    // We cast u32::MAX to f64 to avoid overflow during division.
-    // RoaringBitmaps store 32-bit integers, making u32 the perfect target type.
+fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, aa_kmer_size: usize, scaled: u32, _threads: usize) -> PyResult<()> {
+    let mut dna_bm = RoaringBitmap::new();
+    let mut aa_bm = RoaringBitmap::new();
+
     let max_hash = (u32::MAX as f64 / scaled as f64) as u32;
 
-    // Open the FASTA file using needletail for fast parsing
     let mut reader = parse_fastx_file(filepath)
         .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", filepath, e)))?;
 
     while let Some(record) = reader.next() {
         let seqrec = record.map_err(|e| PyValueError::new_err(e.to_string()))?;
         let seq = seqrec.seq();
-        
-        // Skip sequences shorter than the k-mer size
-        if seq.len() < kmer_size {
-            continue;
+
+        // DNA k-mer sketching
+        if seq.len() >= kmer_size {
+            for kmer in seq.windows(kmer_size) {
+                if kmer.iter().any(|&b| b == b'N' || b == b'n') {
+                    continue;
+                }
+                let revcomp = reverse_complement(kmer);
+                let canonical = if kmer < revcomp.as_slice() { kmer } else { revcomp.as_slice() };
+
+                let mut hasher = XxHash64::with_seed(0);
+                hasher.write(canonical);
+                let h = hasher.finish() as u32;
+                if h <= max_hash {
+                    dna_bm.insert(h);
+                }
+            }
         }
 
-        // Iterate over sliding windows of size k
-        for kmer in seq.windows(kmer_size) {
-            // Ignore k-mers containing ambiguous bases (N)
-            if kmer.iter().any(|&b| b == b'N' || b == b'n') {
-                continue;
-            }
-
-            // Determine the canonical k-mer (the lexicographically smaller of the forward
-            // sequence and its reverse complement). This ensures strand independence.
-            let revcomp = reverse_complement(kmer);
-            let canonical = if kmer < revcomp.as_slice() { kmer } else { revcomp.as_slice() };
-
-            // Hash the canonical k-mer using XxHash64 (extremely fast, non-cryptographic)
-            let mut hasher = XxHash64::with_seed(0);
-            hasher.write(canonical);
-            let h = hasher.finish() as u32; // Truncate down to u32 for RoaringBitmap compatibility
-
-            // Apply the FracMinHash condition: only keep the hash if it is <= max_hash
-            if h <= max_hash {
-                bitmap.insert(h);
+        // AA k-mer sketching via 3-frame translation
+        if seq.len() >= 3 {
+            let frames = translate_3frames(&seq);
+            for aa_seq in frames.iter() {
+                if aa_seq.len() < aa_kmer_size {
+                    continue;
+                }
+                for aa_kmer in aa_seq.windows(aa_kmer_size) {
+                    // Skip windows containing ambiguous amino acids
+                    if aa_kmer.iter().any(|&b| b == b'X' || b == b'*') {
+                        continue;
+                    }
+                    let mut hasher = XxHash64::with_seed(1); // different seed from DNA
+                    hasher.write(aa_kmer);
+                    let h = hasher.finish() as u32;
+                    if h <= max_hash {
+                        aa_bm.insert(h);
+                    }
+                }
             }
         }
     }
 
-    // Serialize the highly compressed RoaringBitmap to disk
-    let mut out_file = File::create(out_filepath)
-        .map_err(|e| PyIOError::new_err(format!("Failed to create {}: {}", out_filepath, e)))?;
-    
-    bitmap.serialize_into(&mut out_file)
-        .map_err(|e| PyIOError::new_err(format!("Failed to serialize bitmap to {}: {}", out_filepath, e)))?;
-
-    Ok(())
+    write_bitmap_pair(out_filepath, &dna_bm, &aa_bm)
 }
 
-/// Compute Containment-based Average Nucleotide Identity (ANI) 
+/// Compute Containment-based Average Nucleotide/Aminoacid Identity (ANI/AAI)
 /// between a focus sketch and a list of target sketches.
 ///
-/// Because we use FracMinHash, we can estimate ANI purely mathematically 
+/// Because we use FracMinHash, we can estimate ANI/AAI purely mathematically 
 /// without needing full alignments.
+/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload file.
 #[pyfunction]
-fn containment_ani(focus: &str, targets: Vec<&str>, kmer_size: usize) -> PyResult<HashMap<String, f64>> {
-    // 1. Load the focus query sketch
-    let mut focus_file = File::open(focus)
-        .map_err(|e| PyIOError::new_err(format!("Failed to open focus sketch {}: {}", focus, e)))?;
-    
-    let focus_bm = RoaringBitmap::deserialize_from(&mut focus_file)
-        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize focus sketch {}: {}", focus, e)))?;
-    
+fn containment_ani(focus: &str, targets: Vec<&str>, kmer_size: usize, mode: &str) -> PyResult<HashMap<String, f64>> {
+    let focus_bm = select_bitmap(focus, mode)?;
     let focus_len = focus_bm.len() as f64;
     let mut results = HashMap::new();
 
-    // Edge case: If the focus sketch is completely empty, distance is maximum (1.0)
     if focus_len == 0.0 {
         for t in targets { results.insert(t.to_string(), 1.0); }
         return Ok(results);
     }
 
-    // 2. Compare against every target sketch
     for target in targets {
-        let mut t_file = File::open(target)
-            .map_err(|e| PyIOError::new_err(format!("Failed to open target sketch {}: {}", target, e)))?;
-        
-        let target_bm = RoaringBitmap::deserialize_from(&mut t_file)
-            .map_err(|e| PyIOError::new_err(format!("Failed to deserialize target sketch {}: {}", target, e)))?;
-        
-        // Fast bitwise intersection length computed directly on the compressed RoaringBitmap!
+        let target_bm = select_bitmap(&target, mode)?;
         let intersection = focus_bm.intersection_len(&target_bm) as f64;
-        
-        // Containment Index (C) = |Focus ∩ Target| / |Focus|
         let containment = intersection / focus_len;
-        
-        // Estimate ANI using the Mash distance formula: ANI ≈ 1 + (1/k) * ln(C)
-        let mut ani = 1.0;
-        if containment > 0.0 {
-            ani = 1.0 + (1.0 / kmer_size as f64) * containment.ln();
-        } else {
-            ani = 0.0;
-        }
 
-        // MetaSBT expects a distance metric where 0.0 is identical and 1.0 is completely different
+        let ani = if containment > 0.0 {
+            1.0 + (1.0 / kmer_size as f64) * containment.ln()
+        } else {
+            0.0
+        };
+
         let distance = if ani <= 0.0 { 
             1.0 
         } else if ani >= 1.0 { 
@@ -170,63 +279,88 @@ fn containment_ani(focus: &str, targets: Vec<&str>, kmer_size: usize) -> PyResul
 ///
 /// In a Delta-SBT, an internal node (Core) is the mathematical intersection of its children.
 /// The children are then modified to only contain their unique "Delta" (Accessory) genes.
+///
+/// The `mode` parameter selects which bitmap (dna/aa) to operate on.
+/// In "dna" mode, the parent's AA slot stores the union of children's AA bitmaps
+/// (so AA data propagates upward through DNA-based levels for later AA mode sweeps).
+/// In "aa" mode, only AA bitmaps are intersected/stripped; DNA passes through unchanged.
 #[pyfunction]
-fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool) -> PyResult<()> {
+fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &str) -> PyResult<()> {
     let list_file = File::open(sketches_list)
         .map_err(|e| PyIOError::new_err(format!("Cannot open sketches list: {}", e)))?;
     let reader = BufReader::new(list_file);
 
-    let mut child_paths = Vec::new();
-    let mut child_bms = Vec::new();
+    // Select which bitmap to use for Core/Delta operations: "dna" or "aa"
+    let primary = match mode {
+        "dna" | "DNA" => true,
+        "aa" | "AA" => false,
+        _ => return Err(PyValueError::new_err(
+            format!("Invalid mode '{}': expected 'dna' or 'aa'", mode)
+        )),
+    };
+
+    let mut child_paths: Vec<String> = Vec::new();
+    let mut child_primary: Vec<RoaringBitmap> = Vec::new(); // DNA or AA (depending on mode)
+    let mut child_secondary: Vec<RoaringBitmap> = Vec::new(); // the other bitmap
     let mut core_bitmap = RoaringBitmap::new();
+    let mut union_bitmap = RoaringBitmap::new(); // Union of the secondary bitmap (used in DNA mode)
     let mut first = true;
 
-    // PASS 1 (Bottom-Up Step): Load all children and compute their strictly shared Core (Intersection)
+    // PASS 1 (Bottom-Up Step): Load children and compute Core/Union
     for line in reader.lines() {
         let filepath = line.map_err(|e| PyIOError::new_err(e.to_string()))?;
         let filepath = filepath.trim().to_string();
         if filepath.is_empty() { continue; }
 
-        let mut t_file = File::open(&filepath)
-            .map_err(|e| PyIOError::new_err(format!("Failed to open sketch {}: {}", filepath, e)))?;
-        
-        let t_bm = RoaringBitmap::deserialize_from(&mut t_file)
-            .map_err(|e| PyIOError::new_err(format!("Failed to deserialize {}: {}", filepath, e)))?;
-        
+        let (dna, aa) = read_bitmap_pair(&filepath)?;
+        let (p_bm, s_bm) = if primary { (dna, aa) } else { (aa, dna) };
+
         if first {
-            core_bitmap = t_bm.clone();
+            core_bitmap = p_bm.clone();
             first = false;
         } else {
-            // Core is the strict mathematical intersection of all children: C = C ∩ Child_i
-            core_bitmap &= &t_bm;
+            core_bitmap &= &p_bm;
         }
+        // Union of the secondary bitmap (meaningful in DNA mode)
+        union_bitmap |= &s_bm;
 
         child_paths.push(filepath);
-        child_bms.push(t_bm);
+        child_primary.push(p_bm);
+        child_secondary.push(s_bm);
     }
 
-    // PASS 2 (Top-Down Step): Strip the Core from the children, leaving strictly disjoint Deltas
-    // We skip this if the database is configured as 'flat' (no hierarchical stripping)
+    // PASS 2 (Top-Down Step): Strip Core from children's primary bitmap
     if !is_flat {
-        for (path, mut bm) in child_paths.into_iter().zip(child_bms.into_iter()) {
-            // DELTA = CHILD \ CORE
-            // This removes all shared sequences, shrinking the child sketch by ~95%
-            bm -= &core_bitmap;
+        for (i, path) in child_paths.iter().enumerate() {
+            let mut p_bm = child_primary[i].clone();
+            p_bm -= &core_bitmap;
 
-            // Overwrite the child sketch on disk with its new, stripped Delta version
-            let mut out_child = File::create(&path)
-                .map_err(|e| PyIOError::new_err(format!("Failed to overwrite delta child {}: {}", path, e)))?;
-            bm.serialize_into(&mut out_child)
-                .map_err(|e| PyIOError::new_err(format!("Failed to serialize delta child: {}", e)))?;
+            let s_bm = &child_secondary[i];
+
+            // Write back: primary is stripped, secondary is unchanged
+            if primary {
+                write_bitmap_pair(path, &p_bm, s_bm)?;
+            } else {
+                write_bitmap_pair(path, s_bm, &p_bm)?;
+            }
         }
     }
 
-    // PASS 3: Save the Core intersection as the signpost filter for this parent node
-    let mut out_file = File::create(out_tree)
-        .map_err(|e| PyIOError::new_err(format!("Cannot create tree out file: {}", e)))?;
-    
-    core_bitmap.serialize_into(&mut out_file)
-        .map_err(|e| PyIOError::new_err(format!("Cannot serialize tree: {}", e)))?;
+    // PASS 3: Save the parent node
+    // For DNA mode: Core in DNA slot, Union in AA slot
+    // For AA mode: read existing parent (if any) for DNA, use Core for AA
+    if primary {
+        write_bitmap_pair(out_tree, &core_bitmap, &union_bitmap)?;
+    } else {
+        // Preserve existing DNA bitmap if the parent file already exists
+        let dna_bitmap = if Path::new(out_tree).exists() {
+            let (existing_dna, _) = read_bitmap_pair(out_tree)?;
+            existing_dna
+        } else {
+            RoaringBitmap::new()
+        };
+        write_bitmap_pair(out_tree, &dna_bitmap, &core_bitmap)?;
+    }
 
     Ok(())
 }
@@ -240,13 +374,7 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool) -> PyRes
 /// We keep a running tally (`accumulated_score`) and never have to decompress or rebuild
 /// the full Bloom Filters in memory!
 ///
-/// # Arguments
-/// * `query_sketch` - Path to the query genome's sketch.
-/// * `tree_root` - Path to the database root Core filter.
-/// * `tree_topology` - A dictionary mapping a parent node path to a list of its children `(path, level)`.
-/// * `kmer_size` - Used for ANI estimation.
-/// * `theta` - The minimum containment threshold to continue searching down a branch.
-/// * `_uncertainty` - Currently unused in core rust loop, reserved for advanced pruning.
+/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files.
 #[pyfunction]
 fn accumulator_search(
     query_sketch: &str,
@@ -254,60 +382,43 @@ fn accumulator_search(
     tree_topology: HashMap<String, Vec<(String, String)>>,
     kmer_size: usize,
     theta: f64,
-    _uncertainty: f64
+    _uncertainty: f64,
+    mode: &str,
 ) -> PyResult<HashMap<String, HashMap<String, f64>>> {
     
-    // Load the query sketch into memory once
-    let mut q_file = File::open(query_sketch).map_err(|e| PyIOError::new_err(e.to_string()))?;
-    let query_bm = RoaringBitmap::deserialize_from(&mut q_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
+    let query_bm = select_bitmap(query_sketch, mode)?;
     let query_len = query_bm.len() as f64;
 
-    // This will hold the final profile mapping: { level_name: { node_path: distance } }
     let mut profiles: HashMap<String, HashMap<String, f64>> = HashMap::new();
 
-    // Initialize the Breadth-First Search (BFS) queue.
-    // Tuple holds: (Current Node File Path, Running Tally of Matches, Taxonomic Level)
     let mut queue = VecDeque::new();
     queue.push_back((tree_root.to_string(), 0.0, "db".to_string()));
 
     while let Some((node_path, mut accumulated_score, level_name)) = queue.pop_front() {
         if !Path::new(&node_path).exists() { continue; }
 
-        let mut node_file = File::open(&node_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
-        let node_bm = RoaringBitmap::deserialize_from(&mut node_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        let node_bm = select_bitmap(&node_path, mode)?;
 
-        // 1. Accumulate Score: 
-        // Compute how many query k-mers hit this specific Delta, and add it to the tally
-        // inherited from the parent nodes.
         let node_intersection = query_bm.intersection_len(&node_bm) as f64;
         accumulated_score += node_intersection;
 
-        // 2. Evaluate Threshold (Pruning Phase)
         let containment = accumulated_score / query_len;
         if containment < theta {
-            // The query does not have enough k-mers in this branch. 
-            // We stop pushing its children to the queue (Pruning).
-            continue; 
+            continue;
         }
 
-        // 3. Compute Distance for Profiling
-        // Estimate ANI dynamically based on the accumulated score
-        let mut ani = 1.0;
-        if containment > 0.0 {
-            ani = 1.0 + (1.0 / kmer_size as f64) * containment.ln();
+        let ani = if containment > 0.0 {
+            1.0 + (1.0 / kmer_size as f64) * containment.ln()
         } else { 
-            ani = 0.0; 
-        }
-        
+            0.0
+        };
+
         let distance = if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani };
 
-        // Record the valid match
         profiles.entry(level_name.clone())
             .or_insert_with(HashMap::new)
             .insert(node_path.clone(), distance);
 
-        // 4. Graph Traversal: Look up this node's children in the topology dict
-        // and enqueue them for processing, passing the current accumulated score down to them.
         if let Some(children) = tree_topology.get(&node_path) {
             for (child_path, next_level) in children {
                 queue.push_back((child_path.clone(), accumulated_score, next_level.clone()));
@@ -324,77 +435,69 @@ fn accumulator_search(
 /// If the new genome is missing a "Core" gene, that gene is no longer core! It must be
 /// evicted from the parent node and pushed down into the Deltas of the existing siblings.
 ///
-/// # Arguments
-/// * `new_sketch` - Path to the newly sketched genome (contains ALL its k-mers).
-/// * `species_node_path` - Path to the species Core filter it is being added to.
-/// * `sibling_sketches` - Paths to the Delta filters of all existing strains in this species.
+/// The `mode` parameter selects the bitmap (dna/aa) for rebalancing.
+/// The other bitmap passes through unchanged.
 #[pyfunction]
-fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches: Vec<&str>) -> PyResult<()> {
-    // 1. Load the new genome sketch (Full complement of k-mers, N)
-    let mut n_file = File::open(new_sketch).map_err(|e| PyIOError::new_err(e.to_string()))?;
-    let mut new_bm = RoaringBitmap::deserialize_from(&mut n_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
+fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches: Vec<&str>, mode: &str) -> PyResult<()> {
+    let primary = matches!(mode, "dna" | "DNA");
+    let (new_dna, new_aa) = read_bitmap_pair(new_sketch)?;
+    let (species_dna, species_aa) = read_bitmap_pair(species_node_path)?;
 
-    // 2. Load the current species Core (Intersection of all existing siblings, C)
-    let mut s_file = File::open(species_node_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
-    let species_bm = RoaringBitmap::deserialize_from(&mut s_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
+    let (mut new_primary, species_primary, species_other, new_other) = if primary {
+        (new_dna, species_dna, species_aa, new_aa)
+    } else {
+        (new_aa, species_aa, species_dna, new_dna)
+    };
 
-    // 3. Rebalancing Math:
-    // The strictly new core (C') MUST be the intersection of the Old Core and the New Genome
-    // C' = C ∩ N
-    let mut new_core = species_bm.clone();
-    new_core &= &new_bm;
+    let mut new_core = species_primary.clone();
+    new_core &= &new_primary;
 
-    // The Lost Core (L) = C \ C'
-    // These are k-mers that were previously shared by all strains, but the new strain lacks them!
-    let mut lost_core = species_bm.clone();
+    let mut lost_core = species_primary.clone();
     lost_core -= &new_core;
 
-    // 4. Execute the Rebalance IF the core shifted (L is not empty)
     if !lost_core.is_empty() {
-        // Push the Lost Core down into the existing Delta of every sibling
-        // This ensures no genetic information is accidentally deleted from the tree
         for sibling_path in sibling_sketches {
-            let mut sib_file = File::open(sibling_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
-            let mut sib_bm = RoaringBitmap::deserialize_from(&mut sib_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
-            
-            sib_bm |= &lost_core; // Bitwise OR: Inject lost core into sibling delta
-            
-            // Overwrite sibling delta on disk
-            let mut sib_out = File::create(sibling_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
-            sib_bm.serialize_into(&mut sib_out).map_err(|e| PyIOError::new_err(e.to_string()))?;
+            let (sib_dna, sib_aa) = read_bitmap_pair(&sibling_path)?;
+            let (mut sib_bm, sib_other) = if primary {
+                (sib_dna, sib_aa)
+            } else {
+                (sib_aa, sib_dna)
+            };
+            sib_bm |= &lost_core;
+            if primary {
+                write_bitmap_pair(&sibling_path, &sib_bm, &sib_other)?;
+            } else {
+                write_bitmap_pair(&sibling_path, &sib_other, &sib_bm)?;
+            }
         }
-
-        // Overwrite the species node with the new, mathematically strict (smaller) core
-        let mut core_out = File::create(species_node_path).map_err(|e| PyIOError::new_err(e.to_string()))?;
-        new_core.serialize_into(&mut core_out).map_err(|e| PyIOError::new_err(e.to_string()))?;
+        if primary {
+            write_bitmap_pair(species_node_path, &new_core, &species_other)?;
+        } else {
+            write_bitmap_pair(species_node_path, &species_other, &new_core)?;
+        }
     }
 
-    // 5. Finally, compute the Delta for the newly inserted genome
-    // D_new = N \ C'
-    new_bm -= &new_core;
+    new_primary -= &new_core;
 
-    // Overwrite the original full-genome sketch with its highly compressed Leaf Delta
-    let mut out_file = File::create(new_sketch).map_err(|e| PyIOError::new_err(e.to_string()))?;
-    new_bm.serialize_into(&mut out_file).map_err(|e| PyIOError::new_err(e.to_string()))?;
+    if primary {
+        write_bitmap_pair(new_sketch, &new_primary, &new_other)?;
+    } else {
+        write_bitmap_pair(new_sketch, &new_other, &new_primary)?;
+    }
 
     Ok(())
 }
 
-/// Read a serialized RoaringBitmap sketch file and return its cardinality.
+/// Read a serialized dual-payload sketch file and return the cardinality of the
+/// selected bitmap (DNA or AA).
 ///
 /// Cardinality is the exact number of elements (subsampled k-mer hashes) stored
 /// in the FracMinHash sketch. In the Delta-SBT architecture this replaces the
 /// obsolete "density" metric (ratio of set bits to total bits) that was only
 /// meaningful for fixed-size Bloom filters.
-///
-/// For a delta-encoded tree, comparing the cardinality of child nodes against
-/// their parent's Core provides a direct measure of compression efficiency.
 #[pyfunction]
-fn sketch_cardinality(sketch_path: &str) -> PyResult<u64> {
-    let mut file = File::open(sketch_path)
-        .map_err(|e| PyIOError::new_err(format!("Failed to open sketch {}: {}", sketch_path, e)))?;
-    let bitmap = RoaringBitmap::deserialize_from(&mut file)
-        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize sketch {}: {}", sketch_path, e)))?;
+fn sketch_cardinality(sketch_path: &str, mode: &str) -> PyResult<u64> {
+    let bitmap = select_bitmap(sketch_path, mode)?;
     Ok(bitmap.len())
 }
 
