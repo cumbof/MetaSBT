@@ -1105,7 +1105,7 @@ class MetaSBT(object):
         sketches = self.sketch(argv, parse_known_args=True)
 
         # Profile genomes in parallel
-        results = self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="dna")
+        results = self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="split")
 
         # Print human-readable summary with confidence scores
         col_w = 70

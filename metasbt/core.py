@@ -1825,10 +1825,10 @@ class Database(object):
         sketch_filepath: str,
         uncertainty: float=50.0,
         pruning_threshold: float=0.0,
-        mode: str = "dna",
+        mode: str = "split",
     ) -> Dict[str, Dict[str, float]]:
-        """Profile the input genome by querying the root node to establish the closest kingdom, and expanding 
-        the subsequent queries up to the species level in order to establish the closest clusters at all the 
+        """Profile the input genome by querying the root node to establish the closest kingdom, and expanding
+        the subsequent queries up to the species level in order to establish the closest clusters at all the
         seven taxonomic levels and the closest genome in the database.
 
         Parameters
@@ -1840,143 +1840,143 @@ class Database(object):
         uncertainty : float, default 50.0
             Percentage of uncertainty used to expand the selection of best matches.
         pruning_threshold : float, default 0.0
-            Percentage of number of kmer hits under which HowDeSBT prunes the Sequence Bloom Trees.
-            This is applied at the kingdom level only in order to avoid selecting all the species clusters in the database.
-            It must be between 0.0 and 1.0.
-        mode : str, default "dna"
-            The bitmap mode: "dna" or "aa" for the accumulator search.
+            Minimum containment score below which a branch is pruned during the accumulator search.
+            Must be between 0.0 and 1.0.
+        mode : str, default "split"
+            Search mode.  "split" (default) mirrors the two-sweep tree layout: AA bitmaps are
+            queried at kingdom/phylum/class/order levels (where Sweep 2 built AA Cores), then DNA
+            bitmaps are queried at family/genus/species/genome levels (where Sweep 1 built DNA
+            Cores).  Pass "dna" or "aa" for a single-mode search across all levels.
 
         Raises
         ------
         Exception
-            If an error occurs while running HowDeSBT.
-        FileNotFoundError
-            - If a tree definition file does not exist.
-            - If the output of HowDeSBT does not exist.
+            If the accumulator search fails.
 
         Returns
         -------
         dict
-            A dictionary with the closest cluster and its ANI distance, indexed by the name of the taxonomic level.
+            A dictionary with the closest cluster and its ANI distance, indexed by the taxonomic
+            level name.  In "split" mode a "confidence" key is also present for the DNA levels.
         """
 
         levels = ["db"] + self.__class__.LEVELS + ["genome"]
-
         profiles = {level: dict() for level in levels[1:]}
 
-        clusters = list()
+        # Levels where the tree stores AA Cores (Sweep 2) vs DNA Cores (Sweep 1)
+        order_idx = self.__class__.LEVELS.index("order")
+        aa_level_set = set(self.__class__.LEVELS[:order_idx + 1])   # kingdom → order
+        dna_level_set = set(self.__class__.LEVELS[order_idx + 1:])  # family → species
 
-        # Get the input file name
         genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
 
         profiles_dir = os.path.join(self.tmp, "profiles")
+        os.makedirs(profiles_dir, exist_ok=True)
 
-        if not os.path.isdir(profiles_dir):
-            os.makedirs(profiles_dir, exist_ok=True)
-
-        # Define the path to the output of the profiler
-        query_result_filepath = os.path.join(profiles_dir, f"{genome_filename}.txt")
+        # Split mode writes to a separate cache file so legacy DNA-only caches are not served
+        cache_suffix = ".split.txt" if mode == "split" else ".txt"
+        query_result_filepath = os.path.join(profiles_dir, f"{genome_filename}{cache_suffix}")
 
         if os.path.isfile(query_result_filepath):
             try:
-                # Read the output file if it exists and return the genomes' profiles
                 with open(query_result_filepath) as profile_file:
                     for line in profile_file:
                         line = line.strip()
-
-                        if line:
-                            if not line.startswith("#"):
-                                line_split = line.split("\t")
-
-                                # Retrieve the taxonomic level
-                                level = line_split[0]
-
-                                # Retrieve the taxonomic label
-                                label = line_split[1]
-
-                                # Retrieve the ANI distance between the input genome and the closest cluster
-                                ani = float(line_split[2])
-
-                                profiles[level][label] = ani
-
-                                # 4th column is confidence (may be absent in older cache files)
-                                if len(line_split) > 3 and line_split[3].strip():
-                                    if "confidence" not in profiles:
-                                        profiles["confidence"] = {}
-                                    try:
-                                        profiles["confidence"][level] = float(line_split[3])
-                                    except ValueError:
-                                        pass
-
+                        if line and not line.startswith("#"):
+                            line_split = line.split("\t")
+                            level = line_split[0]
+                            label = line_split[1]
+                            ani   = float(line_split[2])
+                            profiles[level][label] = ani
+                            if len(line_split) > 3 and line_split[3].strip():
+                                if "confidence" not in profiles:
+                                    profiles["confidence"] = {}
+                                try:
+                                    profiles["confidence"][level] = float(line_split[3])
+                                except ValueError:
+                                    pass
                 return profiles
-
             except Exception:
-                # The query result file could be corrupted or could contain an intermediate result
-                # because of previous unexpectedly interrupted jobs;
-                # Remove `query_result_filepath` and query the database from scratch
                 os.unlink(query_result_filepath)
 
-        # Delta-SBT Architecture: The Accumulator Search Algorithm
-        # We no longer query each level individually with full filters using howdesbt.
-        # We pass the query sketch to the Rust backend, which evaluates nodes contextually
-        # by mathematically accumulating the scores as it walks down the tree 
-        # from the Root Core ($C_0$) through the strictly disjoint Delta filters ($D_x$).
-        
-        # MSBT0 holds the absolute root of the tree
+        # MSBT0 holds the absolute root of the Delta-SBT
         tree_root_filepath = os.path.join(self.root, "clusters", "000000", "MSBT0", "tree", "index.delta")
-        
-        # Build the dynamic tree topology to guide the Rust accumulator search
         tree_topology = self._build_tree_topology()
 
-        try:
-            # deltatree.accumulator_search returns the full path of matches and their estimated ANIs
-            # It inherently understands the distributive property of the disjoint deltas.
-            # Output format: { level_name: { taxonomic_label: ani_distance } }
-            raw_profiles = deltatree.accumulator_search(
-                sketch_filepath,
-                tree_root_filepath,
-                tree_topology,
-                self.metadata["kmer_size"],
-                pruning_threshold,
-                uncertainty,
-                mode
-            )
-        except Exception as e:
-            raise Exception(f"Accumulator search failed: {e}")
+        if mode == "split":
+            # Phase 1 — AA accumulator search (kingdom / phylum / class / order).
+            # These levels carry AA Cores built by Sweep 2 of update(), so querying the AA
+            # bitmap here is both correct and more informative than DNA at this evolutionary scale.
+            try:
+                raw_aa = deltatree.accumulator_search(
+                    sketch_filepath, tree_root_filepath, tree_topology,
+                    self.metadata["kmer_size"], pruning_threshold, uncertainty, "aa"
+                )
+            except Exception as e:
+                raise Exception(f"AA accumulator search failed: {e}")
 
-        # The Rust backend returns raw sketch file paths. The rest of the MetaSBT pipeline 
-        # strictly expects MetaSBT-formatted taxonomic strings. We must reverse-map the paths.
-        path_to_tax = dict()
+            # Phase 2 — DNA accumulator search (family / genus / species / genome).
+            # These levels carry DNA Cores/Deltas from Sweep 1; DNA resolution is appropriate here.
+            # Running from the same root is necessary to correctly accumulate DNA Core contributions
+            # from every level (MSBT0 → kingdom → … → order) before entering the lower subtree —
+            # mixing AA scores with DNA scores in a single pass is not mathematically valid.
+            try:
+                raw_dna = deltatree.accumulator_search(
+                    sketch_filepath, tree_root_filepath, tree_topology,
+                    self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna"
+                )
+            except Exception as e:
+                raise Exception(f"DNA accumulator search failed: {e}")
+
+            # Merge: take AA results for upper levels, DNA results for lower levels
+            raw_profiles = {}
+            for lvl, matches in raw_aa.items():
+                if lvl in aa_level_set:
+                    raw_profiles[lvl] = matches
+            for lvl, matches in raw_dna.items():
+                if lvl not in aa_level_set:
+                    raw_profiles[lvl] = matches
+
+        else:
+            try:
+                raw_profiles = deltatree.accumulator_search(
+                    sketch_filepath, tree_root_filepath, tree_topology,
+                    self.metadata["kmer_size"], pruning_threshold, uncertainty, mode
+                )
+            except Exception as e:
+                raise Exception(f"Accumulator search failed: {e}")
+
+        # Reverse-map raw sketch file paths → MetaSBT taxonomic labels
+        path_to_tax: Dict[str, str] = {}
         for lvl in self.__class__.LEVELS:
             for cluster_obj in self.clusters[lvl].values():
                 if cluster_obj.sketch_filepath:
                     tax_label = cluster_obj.get_full_taxonomy()
                     path_to_tax[cluster_obj.sketch_filepath] = tax_label
-                    # Map the basename too just in case Rust stripped the absolute path
                     path_to_tax[os.path.basename(cluster_obj.sketch_filepath)] = tax_label
 
         for genome_obj in self.genomes.values():
             if genome_obj.sketch_filepath:
                 tax = genome_obj.get_full_taxonomy()
-                # Emulate MetaSBT's genome node naming convention ('t__')
                 tax_label = f"{tax}|t__{genome_obj.name}" if tax else f"t__{genome_obj.name}"
                 path_to_tax[genome_obj.sketch_filepath] = tax_label
                 path_to_tax[os.path.basename(genome_obj.sketch_filepath)] = tax_label
 
-        # Translate the profiles using the taxonomic labels
         for lvl in raw_profiles:
             if lvl not in profiles:
                 profiles[lvl] = dict()
             for match_path, ani in raw_profiles[lvl].items():
-                tax_label = path_to_tax.get(match_path, match_path)
-                profiles[lvl][tax_label] = ani
+                profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
 
-        # Compute confidence for each taxonomic level:
-        # confidence = clamp(1 - ani / max_boundary, 0.0, 1.0)
-        # A value of 1.0 means the genome sits at the centroid; 0.0 means it is at or beyond the boundary.
+        # Confidence: clamp(1 - ani / max_boundary, 0.0, 1.0).
+        # Only meaningful for DNA-mode levels where stored boundaries are DNA-based.
+        # AA-mode levels (kingdom → order) in split mode are skipped to avoid comparing
+        # AA distances against DNA boundaries.
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
             if level not in profiles or not profiles[level]:
+                continue
+            if mode == "split" and level in aa_level_set:
                 continue
             label, ani = min(profiles[level].items(), key=lambda x: x[1])
             try:
@@ -1990,7 +1990,6 @@ class Database(object):
 
         profiles["confidence"] = confidences
 
-        # Dump the output for future caching
         with open(query_result_filepath, "w+") as profiles_table:
             profiles_table.write("# level\tclosest\tani\tconfidence\n")
             for level in self.__class__.LEVELS + ["genome"]:
@@ -2357,7 +2356,7 @@ class Database(object):
         sketches: List[str],
         uncertainty: float=50.0,
         pruning_threshold: float=0.0,
-        mode: str="dna",
+        mode: str="split",
     ) -> Dict[str, Dict]:
         """Profile a list of genomes against the database in parallel.
 
