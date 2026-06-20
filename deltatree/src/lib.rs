@@ -17,11 +17,26 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::path::Path;
+use std::sync::OnceLock;
 
+use rayon::prelude::*;
 use roaring::RoaringBitmap;
 use needletail::parse_fastx_file;
 use twox_hash::XxHash64;
 use std::hash::Hasher;
+
+// One Rayon thread pool per process, sized on first sketch() call.
+// Each mp.Pool worker process initialises its own independent copy.
+static RAYON_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+fn get_pool(nthreads: usize) -> &'static rayon::ThreadPool {
+    RAYON_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(nthreads)
+            .build()
+            .expect("Failed to build Rayon thread pool")
+    })
+}
 
 /// A simple helper function to compute the reverse complement of a DNA sequence.
 /// It maps A <-> T and C <-> G, defaulting unknown characters to N.
@@ -176,62 +191,74 @@ fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
 /// * `scaled` - The scale factor (e.g., 1000 means keep 1 in 1000 k-mers).
 /// * `_threads` - Number of threads (currently unused, reserved for future Rayon integration).
 #[pyfunction]
-fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, _threads: usize) -> PyResult<()> {
-    let mut dna_bm = RoaringBitmap::new();
-    let mut aa_bm = RoaringBitmap::new();
-
-    // AA k-mer size is derived from DNA k-mer size: N bp → N/3 AA
+fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nthreads: usize) -> PyResult<()> {
     let aa_kmer_size = std::cmp::max(3, kmer_size / 3);
-
     let max_hash = (u32::MAX as f64 / scaled as f64) as u32;
 
+    // Collect sequences first: needletail's reader holds a file handle and is not Send,
+    // so it cannot cross thread boundaries. We pay one sequential pass to gather owned
+    // byte vectors, then fan out the heavy hashing work in parallel.
+    let mut sequences: Vec<Vec<u8>> = Vec::new();
     let mut reader = parse_fastx_file(filepath)
         .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", filepath, e)))?;
-
     while let Some(record) = reader.next() {
         let seqrec = record.map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let seq = seqrec.seq();
+        sequences.push(seqrec.seq().to_vec());
+    }
 
-        // DNA k-mer sketching
-        if seq.len() >= kmer_size {
-            for kmer in seq.windows(kmer_size) {
-                if kmer.iter().any(|&b| b == b'N' || b == b'n') {
-                    continue;
-                }
-                let revcomp = reverse_complement(kmer);
-                let canonical = if kmer < revcomp.as_slice() { kmer } else { revcomp.as_slice() };
+    // Process sequences in parallel. Each sequence produces its own pair of bitmaps;
+    // the reduce step merges them with bitwise OR, which is correct for FracMinHash sets.
+    let pool = get_pool(nthreads);
+    let (dna_bm, aa_bm) = pool.install(|| {
+        sequences.par_iter().map(|seq| {
+            let mut dna = RoaringBitmap::new();
+            let mut aa  = RoaringBitmap::new();
 
-                let mut hasher = XxHash64::with_seed(0);
-                hasher.write(canonical);
-                let h = hasher.finish() as u32;
-                if h <= max_hash {
-                    dna_bm.insert(h);
-                }
-            }
-        }
-
-        // AA k-mer sketching via 3-frame translation
-        if seq.len() >= 3 {
-            let frames = translate_3frames(&seq);
-            for aa_seq in frames.iter() {
-                if aa_seq.len() < aa_kmer_size {
-                    continue;
-                }
-                for aa_kmer in aa_seq.windows(aa_kmer_size) {
-                    // Skip windows containing ambiguous amino acids
-                    if aa_kmer.iter().any(|&b| b == b'X' || b == b'*') {
+            // DNA k-mer sketching
+            if seq.len() >= kmer_size {
+                for kmer in seq.windows(kmer_size) {
+                    if kmer.iter().any(|&b| b == b'N' || b == b'n') {
                         continue;
                     }
-                    let mut hasher = XxHash64::with_seed(1); // different seed from DNA
-                    hasher.write(aa_kmer);
+                    let revcomp = reverse_complement(kmer);
+                    let canonical = if kmer < revcomp.as_slice() { kmer } else { revcomp.as_slice() };
+                    let mut hasher = XxHash64::with_seed(0);
+                    hasher.write(canonical);
                     let h = hasher.finish() as u32;
                     if h <= max_hash {
-                        aa_bm.insert(h);
+                        dna.insert(h);
                     }
                 }
             }
-        }
-    }
+
+            // AA k-mer sketching via 3-frame translation
+            if seq.len() >= 3 {
+                let frames = translate_3frames(seq);
+                for aa_seq in frames.iter() {
+                    if aa_seq.len() < aa_kmer_size {
+                        continue;
+                    }
+                    for aa_kmer in aa_seq.windows(aa_kmer_size) {
+                        if aa_kmer.iter().any(|&b| b == b'X' || b == b'*') {
+                            continue;
+                        }
+                        let mut hasher = XxHash64::with_seed(1);
+                        hasher.write(aa_kmer);
+                        let h = hasher.finish() as u32;
+                        if h <= max_hash {
+                            aa.insert(h);
+                        }
+                    }
+                }
+            }
+
+            (dna, aa)
+        })
+        .reduce(
+            || (RoaringBitmap::new(), RoaringBitmap::new()),
+            |(mut d1, mut a1), (d2, a2)| { d1 |= d2; a1 |= a2; (d1, a1) },
+        )
+    });
 
     write_bitmap_pair(out_filepath, &dna_bm, &aa_bm)
 }

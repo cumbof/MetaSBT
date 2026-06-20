@@ -3657,12 +3657,16 @@ class Entry(object):
         # we generate a dual-payload FracMinHash sketch (DNA + 3-frame AA translation)
         # compressed into a pair of Roaring Bitmaps.
         try:
+            # When multiple Python workers are already running in parallel (nproc > 1),
+            # restrict Rayon to 1 thread to avoid nproc × rayon_threads oversubscription.
+            # When called single-threaded, give Rayon all available cores.
+            nthreads = 1 if self.database.nproc > 1 else os.cpu_count()
             deltatree.sketch(
                 filepath,
                 sketch_filepath,
                 self.database.metadata['kmer_size'],
                 self.database.metadata.get('scaled_factor', 1000),
-                self.database.nproc
+                nthreads,
             )
         except Exception as e:
             raise Exception(f"Failed to generate FracMinHash sketch for {self.name}: {e}")
