@@ -406,12 +406,28 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &s
 
 /// The Accumulator Search Algorithm for Delta-SBT traversal.
 ///
-/// Standard SBTs search full filters. Delta-SBTs must logically piece filters back together 
+/// Standard SBTs search full filters. Delta-SBTs must logically piece filters back together
 /// as they traverse down. Because the sets are strictly disjoint (thanks to `build_delta_tree`),
 /// we can use the distributive property: |Q ∩ (Core ∪ Delta)| = |Q ∩ Core| + |Q ∩ Delta|.
-/// 
+///
 /// We keep a running tally (`accumulated_score`) and never have to decompress or rebuild
 /// the full Bloom Filters in memory!
+///
+/// ## Pruning
+///
+/// At each node all of its children are scored upfront.  The children are sorted by
+/// distance and only those within `best_distance * (1 + uncertainty/100)` of the closest
+/// sibling are enqueued.  This gives logarithmic traversal instead of exhaustive visits.
+///
+/// `theta` (pruning_threshold) is an additional absolute containment floor: any node whose
+/// accumulated containment fraction (accumulated_score / query_len) falls below theta is
+/// pruned together with its entire subtree.
+///
+/// ## Bitmap loading
+///
+/// Each node's bitmap is loaded exactly once — when its parent evaluates all children.
+/// The queue carries the pre-computed accumulated score for the node it points to, so
+/// no bitmap is re-read when a node is popped.
 ///
 /// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files.
 #[pyfunction]
@@ -421,11 +437,10 @@ fn accumulator_search(
     tree_topology: HashMap<String, Vec<(String, String)>>,
     kmer_size: usize,
     theta: f64,
-    _uncertainty: f64,
+    uncertainty: f64,
     mode: &str,
 ) -> PyResult<HashMap<String, HashMap<String, f64>>> {
-    
-    // In AA mode, derive the effective k-mer size from the DNA k-mer size
+
     let eff_kmer = if matches!(mode, "aa" | "AA") {
         std::cmp::max(3, kmer_size / 3)
     } else {
@@ -437,37 +452,83 @@ fn accumulator_search(
 
     let mut profiles: HashMap<String, HashMap<String, f64>> = HashMap::new();
 
-    let mut queue = VecDeque::new();
-    queue.push_back((tree_root.to_string(), 0.0, "db".to_string()));
+    if query_len == 0.0 || !Path::new(tree_root).exists() {
+        return Ok(profiles);
+    }
 
-    while let Some((node_path, mut accumulated_score, level_name)) = queue.pop_front() {
-        if !Path::new(&node_path).exists() { continue; }
+    // Inline helper: accumulated k-mer intersection count → ANI distance in [0, 1]
+    let score_to_distance = |accumulated: f64| -> f64 {
+        let containment = accumulated / query_len;
+        let ani = if containment > 0.0 {
+            1.0 + (1.0 / eff_kmer as f64) * containment.ln()
+        } else {
+            0.0
+        };
+        if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani }
+    };
 
-        let node_bm = select_bitmap(&node_path, mode)?;
+    // Pre-compute the root's accumulated score so every queue entry always carries the
+    // final score for the node it represents (parent score + this node's contribution).
+    let root_bm = select_bitmap(tree_root, mode)?;
+    let root_accumulated = query_bm.intersection_len(&root_bm) as f64;
 
-        let node_intersection = query_bm.intersection_len(&node_bm) as f64;
-        accumulated_score += node_intersection;
+    // Queue: (node_path, accumulated_score_for_this_node, level_name)
+    let mut queue: VecDeque<(String, f64, String)> = VecDeque::new();
+    queue.push_back((tree_root.to_string(), root_accumulated, "db".to_string()));
 
-        let containment = accumulated_score / query_len;
-        if containment < theta {
+    while let Some((node_path, my_accumulated, level_name)) = queue.pop_front() {
+        // Record this node (skip the artificial "db" root above all kingdoms)
+        if level_name != "db" {
+            if my_accumulated / query_len < theta {
+                continue;  // absolute floor — prune this node and don't expand its children
+            }
+            let distance = score_to_distance(my_accumulated);
+            profiles.entry(level_name.clone())
+                .or_insert_with(HashMap::new)
+                .insert(node_path.clone(), distance);
+        }
+
+        let Some(children) = tree_topology.get(&node_path) else { continue; };
+
+        // Score every child to decide which branches are worth pursuing
+        let mut candidates: Vec<(String, String, f64, f64)> = Vec::new(); // (path, level, distance, accumulated)
+
+        for (child_path, next_level) in children {
+            if !Path::new(child_path).exists() {
+                continue;
+            }
+            let child_bm = select_bitmap(child_path, mode)?;
+            let child_accumulated = my_accumulated + query_bm.intersection_len(&child_bm) as f64;
+
+            // Absolute containment floor: prune child and its subtree
+            if child_accumulated / query_len < theta {
+                continue;
+            }
+
+            candidates.push((
+                child_path.clone(),
+                next_level.clone(),
+                score_to_distance(child_accumulated),
+                child_accumulated,
+            ));
+        }
+
+        if candidates.is_empty() {
             continue;
         }
 
-        let ani = if containment > 0.0 {
-            1.0 + (1.0 / eff_kmer as f64) * containment.ln()
-        } else { 
-            0.0
-        };
+        // Sort by distance ascending so candidates[0] is the closest child
+        candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        let distance = if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani };
+        // Uncertainty cutoff: keep every child within best_distance * (1 + uncertainty/100).
+        // This is a relative expansion, so a 50% uncertainty keeps all siblings up to 1.5×
+        // the closest distance — naturally narrower at lower levels where distances are small.
+        let best_distance = candidates[0].2;
+        let cutoff = best_distance * (1.0 + uncertainty / 100.0);
 
-        profiles.entry(level_name.clone())
-            .or_insert_with(HashMap::new)
-            .insert(node_path.clone(), distance);
-
-        if let Some(children) = tree_topology.get(&node_path) {
-            for (child_path, next_level) in children {
-                queue.push_back((child_path.clone(), accumulated_score, next_level.clone()));
+        for (child_path, next_level, child_distance, child_accumulated) in candidates {
+            if child_distance <= cutoff {
+                queue.push_back((child_path, child_accumulated, next_level));
             }
         }
     }
