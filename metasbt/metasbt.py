@@ -206,12 +206,12 @@ class MetaSBT(object):
         parser.add_argument(
             "--download",
             required="--list" not in argv,
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
             "--version",
-            type=os.path.abspath,
+            type=str,
             help="The database version. It automatically select the most recent one if a version is not provided."
         )
         parser.add_argument(
@@ -357,7 +357,7 @@ class MetaSBT(object):
         general_group.add_argument(
             "--database",
             required=True,
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         general_group.add_argument(
@@ -560,7 +560,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
@@ -933,7 +933,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
 
@@ -1033,7 +1033,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
@@ -1166,7 +1166,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
@@ -1253,7 +1253,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
 
@@ -1598,7 +1598,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             default="MetaSBT",
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
@@ -1726,7 +1726,7 @@ class MetaSBT(object):
         parser.add_argument(
             "--database",
             required=True,
-            type=os.path.abspath,
+            type=str,
             help="The database name."
         )
         parser.add_argument(
