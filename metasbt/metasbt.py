@@ -74,6 +74,7 @@ class MetaSBT(object):
 
         The metasbt commands are:
         db          List and retrieve public MetaSBT databases;
+        export      Export a MetaSBT database taxonomy as a Newick phylogenetic tree;
         index       Index a set of reference genomes and build the first baseline of a MetaSBT database;
         kraken      Export a MetaSBT database into a custom kraken database;
         pack        Build a compressed tarball with a MetaSBT database and report its sha256;
@@ -320,6 +321,81 @@ class MetaSBT(object):
 
             else:
                 raise Exception(f"An error has occurred while computing the sha256 hash of {database_filepath}")
+
+    def export(self, argv: List[Any]) -> None:
+        """Export a MetaSBT database taxonomy as a Newick phylogenetic tree.
+
+        Parameters
+        ----------
+        argv : list
+            The list of arguments.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the database directory does not exist.
+        ValueError
+            If the specified taxonomic level is not valid.
+        """
+
+        parser = argparse.ArgumentParser(
+            prog="export",
+            description="Export a MetaSBT database taxonomy as a Newick phylogenetic tree.",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        )
+
+        parser.add_argument(
+            "--workdir",
+            required=True,
+            type=os.path.abspath,
+            help="Path to the working directory."
+        )
+        parser.add_argument(
+            "--database",
+            required=True,
+            type=str,
+            help="The database name."
+        )
+        parser.add_argument(
+            "--level",
+            default="species",
+            choices=["phylum", "class", "order", "family", "genus", "species"],
+            help="Taxonomic resolution of the tree leaves."
+        )
+        parser.add_argument(
+            "--output",
+            type=os.path.abspath,
+            default=None,
+            help=(
+                "Path to the output Newick file.  "
+                "Defaults to {workdir}/{database}-{YYYYMMDD}.nwk."
+            )
+        )
+
+        args = parser.parse_args(argv)
+
+        db_dir = os.path.join(args.workdir, args.database)
+
+        if not os.path.isdir(db_dir):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), db_dir)
+
+        tmp_dir = os.path.join(args.workdir, "tmp")
+
+        if self.database is None:
+            self.database = Database(args.database, db_dir, tmp_dir, flat=True)
+
+        newick_str = self.database.to_newick(level=args.level)
+
+        if args.output:
+            output_path = args.output
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d")
+            output_path = os.path.join(args.workdir, f"{args.database}-{timestamp}.nwk")
+
+        with open(output_path, "w") as nwk_file:
+            nwk_file.write(newick_str + "\n")
+
+        print(f"Newick tree written to: {output_path}")
 
     def index(self, argv: List[Any]) -> None:
         """Build the first baseline of a MetaSBT database by indexing a set of reference genomes.

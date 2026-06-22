@@ -3170,6 +3170,116 @@ class Database(object):
 
         return len(set(metadata.keys()).intersection(required_attributes)) == len(required_attributes)
 
+    def to_newick(self, level: str = "species") -> str:
+        """Export the database taxonomy as a Newick-format tree with branch lengths.
+
+        Branch lengths are derived from the Delta-SBT sketch files.  Each internal
+        node stores its Core bitmap (k-mers shared by all children); each child node
+        stores its Delta bitmap (k-mers unique to that child vs its siblings).  The
+        containment `core / (core + delta)` estimates how much of the child's k-mer
+        set is shared with the parent clade, and is converted to an ANI-based distance
+        via the FracMinHash formula: `distance = 1 - (1 + ln(containment) / kmer_size)`.
+
+        Parameters
+        ----------
+        level : str, default "species"
+            Leaf resolution of the tree.  Must be one of: phylum, class, order,
+            family, genus, species.  Kingdom is not allowed (it would always be a
+            single root with no siblings).
+
+        Returns
+        -------
+        str
+            A Newick string (terminated with `;`) with branch lengths on every edge.
+        """
+
+        allowed = self.__class__.LEVELS[1:]  # phylum through species
+        if level not in allowed:
+            raise ValueError(f"Invalid level '{level}'. Must be one of: {', '.join(allowed)}")
+
+        kmer_size = int(self.metadata.get("kmer_size", 21))
+        level_idx = self.__class__.LEVELS.index(level)
+
+        def _cardinality(sketch_filepath: Optional[str]) -> int:
+            if not sketch_filepath or not os.path.isfile(sketch_filepath):
+                return 0
+            try:
+                return deltatree.sketch_cardinality(sketch_filepath, "dna")
+            except Exception:
+                return 0
+
+        def _branch_length(child_sketch: Optional[str], parent_sketch: Optional[str]) -> float:
+            """Estimate the evolutionary distance from parent to child.
+
+            The parent Core bitmap lives in parent_sketch (DNA slot).
+            The child Delta bitmap lives in child_sketch (DNA slot).
+            containment = core / (core + delta) → ANI → distance.
+            """
+            core  = _cardinality(parent_sketch)
+            delta = _cardinality(child_sketch)
+            total = core + delta
+            if total == 0:
+                return 0.0
+            containment = core / total
+            if containment <= 0.0:
+                return 1.0
+            ani = 1.0 + (1.0 / kmer_size) * math.log(containment)
+            return max(0.0, min(1.0, 1.0 - ani))
+
+        def _newick_label(label: str) -> str:
+            """Sanitize a taxonomic label for unquoted Newick use."""
+            for ch in "(),:;[]":
+                label = label.replace(ch, "_")
+            return label.replace(" ", "_")
+
+        def _subtree(label: str, current_level: str, parent_sketch: Optional[str]) -> str:
+            """Recursively build the Newick subtree for a single cluster."""
+            entry = self.clusters[current_level].get(label)
+            if not entry:
+                return f"{_newick_label(label)}:0.000000"
+
+            dist = _branch_length(entry.sketch_filepath, parent_sketch)
+            node_label = _newick_label(label)
+            current_idx = self.__class__.LEVELS.index(current_level)
+
+            if current_level == level:
+                # Leaf node
+                return f"{node_label}:{dist:.6f}"
+
+            # Recurse into children at the next taxonomic level
+            next_level = self.__class__.LEVELS[current_idx + 1]
+            child_subtrees = [
+                _subtree(child, next_level, entry.sketch_filepath)
+                for child in sorted(entry.children)
+                if child in self.clusters.get(next_level, {})
+            ]
+
+            if not child_subtrees:
+                # No children present at the next level — treat as leaf
+                return f"{node_label}:{dist:.6f}"
+
+            return f"({','.join(child_subtrees)}){node_label}:{dist:.6f}"
+
+        # Kingdom nodes are tree roots; MSBT0 sits above them and provides their
+        # parent Core (k-mers common to all kingdoms).
+        msbt0_sketch = os.path.join(
+            self.root, "clusters", "000000", "MSBT0", "tree", "index.delta"
+        )
+        msbt0_sketch = msbt0_sketch if os.path.isfile(msbt0_sketch) else None
+
+        kingdom_subtrees = [
+            _subtree(k_label, "kingdom", msbt0_sketch)
+            for k_label in sorted(self.clusters.get("kingdom", {}).keys())
+        ]
+
+        if not kingdom_subtrees:
+            raise ValueError("Database contains no kingdom-level clusters.")
+
+        if len(kingdom_subtrees) == 1:
+            return kingdom_subtrees[0] + ";"
+
+        return "(" + ",".join(kingdom_subtrees) + ")root:0.000000;"
+
 
 class Entry(object):
     """Entry object representing an a specific taxonomic level and genomes."""
