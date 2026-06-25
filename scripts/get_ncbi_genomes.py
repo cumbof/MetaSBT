@@ -3,8 +3,8 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.6"
-__date__ = "Sep 17, 2025"
+__version__ = "0.1.7"
+__date__ = "Jun 25, 2026"
 
 import argparse as ap
 import datetime
@@ -403,7 +403,16 @@ def get_assembly_summary(
                 line_split = line.split("\t")
 
                 species_taxid = line_split[header.index("species_taxid")]
-                ftp_path = line_split[header.index("ftp_path")]
+
+                # The "ftp_path" column in the NCBI Assembly Summary table now ends with a trailing slash.
+                # Strip it, otherwise os.path.basename() returns an empty string and both the download URL
+                # and the local file name end up malformed (every genome would collapse to the same name).
+                ftp_path = line_split[header.index("ftp_path")].strip().rstrip("/")
+
+                if not ftp_path or ftp_path == "na":
+                    # No downloadable genome is available for this assembly
+                    continue
+
                 genome_url = os.path.join(ftp_path, "{}_genomic.fna.gz".format(os.path.basename(ftp_path)))
 
                 if species_taxid:
