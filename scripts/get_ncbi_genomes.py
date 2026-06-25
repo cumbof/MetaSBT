@@ -3,7 +3,7 @@
 """
 
 __author__ = "Fabio Cumbo (fabio.cumbo@gmail.com)"
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 __date__ = "Jun 25, 2026"
 
 import argparse as ap
@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import tarfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.request import urlretrieve
@@ -70,6 +71,14 @@ EXCLUDE_TAGS = [
     "mixed culture",
     "untrustworthy as type"
 ]
+
+# NCBI rate-limits concurrent connections and starts returning HTTP 503 errors when too many
+# downloads run in parallel. Cap the number of parallel download workers to a server-friendly value
+# regardless of the requested --nproc, otherwise the vast majority of the downloads silently fail.
+MAX_DOWNLOAD_PROCESSES = 16
+
+# Ordered taxonomic assembly levels, from the most to the least complete
+ASSEMBLY_LEVELS = ["Complete Genome", "Chromosome", "Scaffold", "Contig"]
 
 
 def read_params():
@@ -176,7 +185,22 @@ def read_params():
         action="store_true",
         default=False,
         dest="full_only",
-        help="Retrieve full genomes only"
+        help=(
+            "Retrieve fully-represented genomes only (i.e. \"genome_rep\" is \"Full\" in the NCBI GenBank "
+            "Assembly Summary table). Note that this does not filter on the assembly level: draft genomes "
+            "(Contig, Scaffold) can still be \"Full\". Use \"--assembly-level\" to filter on the assembly level"
+        )
+    )
+    p.add_argument(
+        "--assembly-level",
+        action="append",
+        dest="assembly_level",
+        choices=ASSEMBLY_LEVELS,
+        help=(
+            "Retrieve genomes with a specific assembly level only (repeatable). "
+            "E.g. \"--assembly-level 'Complete Genome' --assembly-level Chromosome\" to exclude draft genomes. "
+            "All assembly levels are retrieved by default"
+        )
     )
     p.add_argument(
         "-v",
@@ -546,7 +570,9 @@ def urlretrieve_wrapper(url: str, filepath: os.path.abspath, retry: int=5) -> Tu
 
     exists_and_passed_integrity = False
 
-    while retry > 0 and not exists_and_passed_integrity:
+    attempt = 0
+
+    while attempt < retry and not exists_and_passed_integrity:
         try:
             if not os.path.isfile(filepath):
                 urlretrieve(url, filepath)
@@ -568,7 +594,13 @@ def urlretrieve_wrapper(url: str, filepath: os.path.abspath, retry: int=5) -> Tu
             if os.path.isfile(filepath):
                 os.unlink(filepath)
 
-            retry -= 1
+            attempt += 1
+
+            if attempt < retry:
+                # NCBI returns HTTP 503 errors under heavy concurrency.
+                # Back off with an exponentially increasing delay (capped at 30 seconds)
+                # so that the retries do not all hit the same throttling window.
+                time.sleep(min(2 ** attempt, 30))
 
     return filepath, exists_and_passed_integrity
 
@@ -656,6 +688,10 @@ def main() -> None:
                 # Exclude unclassified genomes or consider them in case the input --type is "mag"
                 selected = True
 
+            if selected and args.assembly_level and ncbi_genomes[genome]["assembly_level"] not in args.assembly_level:
+                # Discard genomes whose assembly level is not in the requested set
+                selected = False
+
             if selected:
                 taxonomy = ncbi_genomes[genome]["taxonomy"]
 
@@ -668,7 +704,7 @@ def main() -> None:
             # Limit the number of genomes per species
             for sp in species:
                 # Define the priority order for assembly levels
-                priority_order = ["Complete Genome", "Chromosome", "Scaffold", "Contig"]
+                priority_order = ASSEMBLY_LEVELS
 
                 # Group the initial genome IDs by their assembly level
                 grouped_by_level = {level: list() for level in priority_order}
@@ -723,38 +759,69 @@ def main() -> None:
         )
 
         if args.download:
-            if args.nproc > 1:
-                with mp.Pool(processes=args.nproc) as pool:
+            # Keep track of the genomes that could not be downloaded so that they are
+            # reported instead of being silently dropped from the output table
+            failed = list()
+
+            def record_genome(genome: str) -> None:
+                with open(out_file_path, "a+") as genomes_table:
+                    genomes_table.write(
+                        "{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                            genome,
+                            ncbi_genomes[genome]["type"],
+                            ncbi_genomes[genome]["taxonomy"],
+                            ncbi_genomes[genome]["excluded_from_refseq"],
+                            ncbi_genomes[genome]["assembly_level"],
+                            ncbi_genomes[genome]["url"]
+                        )
+                    )
+
+            # Cap the number of parallel downloads, otherwise NCBI throttles the connections
+            # with HTTP 503 errors and most of the downloads fail
+            download_processes = min(args.nproc, MAX_DOWNLOAD_PROCESSES)
+
+            if args.nproc > download_processes:
+                print(
+                    "Warning: capping the number of parallel downloads to {} (out of the requested {}) "
+                    "to avoid NCBI rate-limiting".format(download_processes, args.nproc)
+                )
+
+            if download_processes > 1:
+                with mp.Pool(processes=download_processes) as pool:
                     args_list = [(ncbi_genomes[genome]["url"], os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"]))) for genome in genomes]
                     for filepath, exists in tqdm.tqdm(pool.imap_unordered(_urlretrieve_wrapper_star, args_list), total=len(args_list)):
+                        genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
                         if exists:
-                            genome = os.path.splitext(os.path.splitext(os.path.basename(filepath))[0])[0]
-                            with open(out_file_path, "a+") as genomes_table:
-                                genomes_table.write(
-                                    "{}\t{}\t{}\t{}\t{}\t{}\n".format(
-                                        genome,
-                                        ncbi_genomes[genome]["type"],
-                                        ncbi_genomes[genome]["taxonomy"],
-                                        ncbi_genomes[genome]["excluded_from_refseq"],
-                                        ncbi_genomes[genome]["assembly_level"],
-                                        ncbi_genomes[genome]["url"]
-                                    )
-                                )
+                            record_genome(genome)
+                        else:
+                            failed.append(genome)
             else:
                 for genome in tqdm.tqdm(genomes):
                     filepath, exists = urlretrieve_wrapper(ncbi_genomes[genome]["url"], os.path.join(genomes_dir, os.path.basename(ncbi_genomes[genome]["url"])))
                     if exists:
-                        with open(out_file_path, "a+") as genomes_table:
-                            genomes_table.write(
-                                "{}\t{}\t{}\t{}\t{}\t{}\n".format(
-                                    genome,
-                                    ncbi_genomes[genome]["type"],
-                                    ncbi_genomes[genome]["taxonomy"],
-                                    ncbi_genomes[genome]["excluded_from_refseq"],
-                                    ncbi_genomes[genome]["assembly_level"],
-                                    ncbi_genomes[genome]["url"]
-                                )
-                            )
+                        record_genome(genome)
+                    else:
+                        failed.append(genome)
+
+            if failed:
+                # Dump the list of genomes that could not be retrieved. The same command can be
+                # re-run to retry the missing genomes only (the ones already in the output table are skipped)
+                failed_file_path = os.path.join(args.out_dir, "{}_failed.txt".format(out_file_name))
+
+                with open(failed_file_path, "w+") as failed_file:
+                    for genome in failed:
+                        failed_file.write("{}\t{}\n".format(genome, ncbi_genomes[genome]["url"]))
+
+                print(
+                    "{} out of {} genomes could not be downloaded (NCBI throttling or missing files).\n"
+                    "The list of failed genomes has been written to {}\n"
+                    "Re-run the same command to retry the missing genomes only".format(
+                        len(failed), len(genomes), failed_file_path
+                    )
+                )
+
+            else:
+                print("All {} genomes have been successfully downloaded".format(len(genomes)))
 
         elif genomes:
             with open(out_file_path, "a+") as genomes_table:
