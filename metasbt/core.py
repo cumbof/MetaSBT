@@ -4,6 +4,7 @@
 import copy
 import datetime
 import errno
+import gzip
 import json
 import math
 import multiprocessing as mp
@@ -503,8 +504,8 @@ class Database(object):
                 sketches.append(genome_filepath)
 
             else:
-                # In case of fasta files
-                filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+                # In case of fasta files (optionally gzip-compressed)
+                filename = self.__class__._basename(genome_filepath)
 
                 genome_obj = Entry(self, filename, filename, "genome")
 
@@ -650,7 +651,7 @@ class Database(object):
         if not self.__class__._is_supported(filepath):
             raise ValueError("Input file format is not supported!")
 
-        filename = os.path.splitext(os.path.basename(filepath))[0]
+        filename = self.__class__._basename(filepath)
 
         if filename in self.genomes:
             # In case the input genome already exists in the database return its taxonomic label
@@ -791,7 +792,7 @@ class Database(object):
             Mapping of genome filepath to sketch filepath.
         """
         args_list = [
-            (self, os.path.splitext(os.path.basename(p))[0], p)
+            (self, self.__class__._basename(p), p)
             for p in genomes
         ]
         sketch_map: Dict[str, str] = {}
@@ -853,7 +854,7 @@ class Database(object):
         if not reference and not self.clusters:
             raise Exception("The database does not contain any clusters!")
 
-        filename = os.path.splitext(os.path.basename(filepath))[0]
+        filename = self.__class__._basename(filepath)
 
         if filename in self.genomes:
             raise Exception("A genome with the same name already exists in the database!")
@@ -1868,7 +1869,7 @@ class Database(object):
         aa_level_set = set(self.__class__.LEVELS[:order_idx + 1])   # kingdom → order
         dna_level_set = set(self.__class__.LEVELS[order_idx + 1:])  # family → species
 
-        genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+        genome_filename = self.__class__._basename(genome_filepath)
 
         profiles_dir = os.path.join(self.tmp, "profiles")
         os.makedirs(profiles_dir, exist_ok=True)
@@ -2045,7 +2046,8 @@ class Database(object):
         ----------
         genomes : set
             Set with paths to the input genomes.
-            Compressed files are not allowed here.
+            Gzip-compressed fasta files are allowed and transparently decompressed into `tmp`
+            because the underlying quality-control tools cannot read compressed input.
         kingdom : str
             The genomes' kingdom.
             All genomes in the input set of genomes must belong to the same kingdom.
@@ -2090,6 +2092,33 @@ class Database(object):
             # Use all the available CPUs in case of negative values
             # Otherwise, downscale nproc to the maximum number of CPUs available
             nproc = os.cpu_count()
+
+        # The external quality-control tools (CheckM, CheckV, BUSCO) cannot read gzip-compressed
+        # genomes. Transparently decompress any compressed input into the temporary folder and keep
+        # a mapping from the working (decompressed) path back to the original input path, so that the
+        # returned statistics are still indexed by the paths provided by the caller.
+        working_to_original = dict()
+        working_genomes = set()
+
+        decompressed_dir = os.path.join(tmp, "decompressed")
+
+        for genome in genomes:
+            if cls._is_gzipped(genome):
+                os.makedirs(decompressed_dir, exist_ok=True)
+
+                working_filepath = os.path.join(decompressed_dir, "{}.fna".format(cls._basename(genome)))
+
+                if not os.path.isfile(working_filepath):
+                    with gzip.open(genome, "rb") as compressed, open(working_filepath, "wb") as decompressed:
+                        shutil.copyfileobj(compressed, decompressed)
+
+            else:
+                working_filepath = genome
+
+            working_to_original[working_filepath] = genome
+            working_genomes.add(working_filepath)
+
+        genomes = working_genomes
 
         # Keep track of the quality control statistics of completeness and contamination
         # for each of the input genomes
@@ -2348,7 +2377,8 @@ class Database(object):
         else:
             raise ValueError(f"Invalid kingdom {kingdom}!")
 
-        return quality
+        # Remap the statistics back to the original (possibly gzip-compressed) input paths
+        return {working_to_original[genome]: stats for genome, stats in quality.items()}
 
     def profile_genomes(
         self,
@@ -2455,7 +2485,7 @@ class Database(object):
 
         for genome_filepath in genomes:
             # Define the input file name
-            filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+            filename = self.__class__._basename(genome_filepath)
 
             names[filename] = genome_filepath
 
@@ -2517,7 +2547,7 @@ class Database(object):
                         closest_genome_distance = genome_profile["genome"][closest_genome_key]
 
                         if closest_genome_distance <= threshold:
-                            genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+                            genome_filename = self.__class__._basename(genome_filepath)
 
                             if closest_genome not in replicas:
                                 replicas[closest_genome] = dict()
@@ -2539,7 +2569,7 @@ class Database(object):
 
                     if closest_genome_distance <= threshold:
                         # Define the input file name
-                        genome_filename = os.path.splitext(os.path.basename(genome_filepath))[0]
+                        genome_filename = self.__class__._basename(genome_filepath)
 
                         if closest_genome not in replicas:
                             replicas[closest_genome] = dict()
@@ -3031,9 +3061,60 @@ class Database(object):
 
         return "|".join(formatted)
 
+    # Supported sequence file extensions (a gzip-compressed variant of each fasta extension
+    # is also supported, e.g. .fna.gz) and the sketch file extension
+    FASTA_EXTENSIONS = {".fa", ".fasta", ".fna"}
+    SKETCH_EXTENSION = ".bf"
+
     @staticmethod
-    def _is_supported(filepath: str) -> bool:
-        """Check whether an input file is supported base on its extension.
+    def _is_gzipped(filepath: str) -> bool:
+        """Check whether an input file is gzip-compressed based on its extension.
+
+        Parameters
+        ----------
+        filepath : str
+            The input file path.
+
+        Returns
+        -------
+        bool
+            True if the input file has a .gz extension, False otherwise.
+        """
+
+        return os.path.splitext(filepath)[1] == ".gz"
+
+    @classmethod
+    def _basename(cls, filepath: str) -> str:
+        """Return the file name without its directory and (optionally gzip-compressed) extension.
+
+        E.g. "/path/to/GCF_000001.1_genomic.fna.gz" -> "GCF_000001.1_genomic".
+
+        Parameters
+        ----------
+        filepath : str
+            The input file path.
+
+        Returns
+        -------
+        str
+            The file name stripped of the directory and of its extension. A trailing .gz is
+            stripped first so that gzip-compressed fasta files do not leave a residual extension.
+        """
+
+        name = os.path.basename(filepath)
+
+        if cls._is_gzipped(name):
+            # Strip the .gz suffix so that the underlying fasta extension is stripped next
+            name = os.path.splitext(name)[0]
+
+        return os.path.splitext(name)[0]
+
+    @classmethod
+    def _is_supported(cls, filepath: str) -> bool:
+        """Check whether an input file is supported based on its extension.
+
+        Both plain fasta files (.fa, .fasta, .fna), their gzip-compressed variants
+        (e.g. .fna.gz), and sketch files (.bf) are supported.
 
         Parameters
         ----------
@@ -3054,10 +3135,15 @@ class Database(object):
         if not os.path.isfile(filepath):
             raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
 
-        # Define the set of supported extensions
-        supported = {".fa", ".fasta", ".fna", ".bf"}
+        extension = os.path.splitext(filepath)[1]
 
-        return os.path.splitext(filepath)[1] in supported
+        if extension == ".gz":
+            # Look at the extension underneath the .gz suffix (e.g. ".fna" in "x.fna.gz")
+            extension = os.path.splitext(os.path.splitext(filepath)[0])[1]
+
+            return extension in cls.FASTA_EXTENSIONS
+
+        return extension in cls.FASTA_EXTENSIONS or extension == cls.SKETCH_EXTENSION
 
     @staticmethod
     def _load_report(filepath: str) -> Dict[str, Any]:

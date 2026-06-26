@@ -698,9 +698,9 @@ class MetaSBT(object):
 
         # Load the list of paths to the genome files
         # This is a dict with the paths to the input genomes indexed by their file name
-        # Assume the input files are not compressed
+        # Gzip-compressed fasta files (e.g. .fna.gz) are supported
         with open(args.genomes) as fh:
-            genomes = {os.path.splitext(os.path.basename(line.strip()))[0]: line.strip() for line in fh if line.strip()}
+            genomes = {Database._basename(line.strip()): line.strip() for line in fh if line.strip()}
 
         # Keep track of the current working directory
         curr_workdir = os.getcwd()
@@ -1190,7 +1190,7 @@ class MetaSBT(object):
 
         for genome_filepath in genomes:
             profile = results.get(genome_filepath, {})
-            genome_name = os.path.splitext(os.path.basename(genome_filepath))[0]
+            genome_name = Database._basename(genome_filepath)
             print(f"\n## {genome_name}")
             print(header)
             print(sep)
