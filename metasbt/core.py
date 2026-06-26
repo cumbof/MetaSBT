@@ -622,13 +622,6 @@ class Database(object):
         instance, filepath = args
         return (filepath, instance.is_known(filepath))
 
-    @staticmethod
-    def _sketch_genome(args: Tuple["Database", str, str]) -> Tuple[str, str]:
-        """Wrapper for multiprocessing imap_unordered."""
-        database, genome_name, genome_filepath = args
-        genome_object = Entry(database, genome_name, genome_name, "genome")
-        return genome_filepath, genome_object.sketch(genome_filepath)
-
     def is_known(self, filepath: str) -> Optional[str]:
         """Check whether an input MAG could be characterized to any species in the database.
         This must be run for MAGs only and always before `add()`.
@@ -784,30 +777,59 @@ class Database(object):
         Parameters
         ----------
         genomes : list
-            List of paths to uncompressed genome files.
+            List of paths to genome files (optionally gzip-compressed).
+
+        Raises
+        ------
+        Exception
+            If no database metadata is found.
+        ValueError
+            If any input file format is not supported.
 
         Returns
         -------
         dict
             Mapping of genome filepath to sketch filepath.
         """
-        args_list = [
-            (self, self.__class__._basename(p), p)
-            for p in genomes
-        ]
-        sketch_map: Dict[str, str] = {}
+        if not self.__class__._validate_metadata(self.metadata):
+            raise Exception("No database metadata found!")
 
-        if self.nproc > 1:
-            with mp.Pool(processes=self.nproc) as pool:
-                for g_path, s_path in tqdm.tqdm(
-                    pool.imap_unordered(self.__class__._sketch_genome, args_list, chunksize=1),
-                    total=len(args_list),
-                ):
-                    sketch_map[g_path] = s_path
-        else:
-            for args_tuple in args_list:
-                g_path, s_path = self.__class__._sketch_genome(args_tuple)
-                sketch_map[g_path] = s_path
+        kmer_size = self.metadata["kmer_size"]
+        scaled_factor = self.metadata.get("scaled_factor", 1000)
+
+        sketches_dir = os.path.join(self.root, "sketches")
+        os.makedirs(sketches_dir, exist_ok=True)
+
+        sketch_map: Dict[str, str] = {}
+        jobs: List[Tuple[str, str]] = []  # (genome_filepath, sketch_filepath) still to build
+
+        for genome_filepath in genomes:
+            if not self.__class__._is_supported(genome_filepath):
+                raise ValueError(f"Input file format is not supported: {genome_filepath}")
+
+            sketch_filepath = os.path.join(sketches_dir, f"{self.__class__._basename(genome_filepath)}.bf")
+            sketch_map[genome_filepath] = sketch_filepath
+
+            # Skip genomes that have already been sketched (resume-friendly).
+            if not os.path.isfile(sketch_filepath):
+                jobs.append((genome_filepath, sketch_filepath))
+
+        if jobs:
+            if self.nproc > 1:
+                # Hand the whole batch to the Rust backend, which fans out across genomes
+                # on its own Rayon pool. This avoids spawning one Python worker process per
+                # genome and lets Rayon load-balance the batch with work stealing. Genomes
+                # are submitted in moderate chunks so the progress bar still advances.
+                chunk_size = max(1, self.nproc * 8)
+                with tqdm.tqdm(total=len(jobs)) as progress_bar:
+                    for start in range(0, len(jobs), chunk_size):
+                        batch = jobs[start:start + chunk_size]
+                        deltatree.sketch_many(batch, kmer_size, scaled_factor, self.nproc)
+                        progress_bar.update(len(batch))
+            else:
+                # Single process: let Rayon parallelise within each genome instead.
+                for genome_filepath, sketch_filepath in tqdm.tqdm(jobs):
+                    deltatree.sketch(genome_filepath, sketch_filepath, kmer_size, scaled_factor, os.cpu_count())
 
         return sketch_map
 

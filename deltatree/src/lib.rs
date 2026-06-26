@@ -161,6 +161,107 @@ fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
     }
 }
 
+/// Sketch one sequence, inserting the surviving FracMinHash hashes into the provided
+/// DNA and AA bitmaps. The caller supplies reusable scratch buffers — `upper` for the
+/// uppercased copy ntHash requires, and `ring` (length `aa_kmer_size`) for the amino
+/// acid rolling window — plus the precomputed `aa_high` rolling-hash weight. This is
+/// shared by `sketch` (which fans out across the sequences of a single genome) and
+/// `sketch_many` (which fans out across genomes and walks each genome's sequences
+/// serially).
+fn sketch_sequence_into(
+    seq: &[u8],
+    kmer_size: usize,
+    aa_kmer_size: usize,
+    max_hash: u32,
+    aa_high: u64,
+    dna: &mut RoaringBitmap,
+    aa: &mut RoaringBitmap,
+    upper: &mut Vec<u8>,
+    ring: &mut Vec<u8>,
+) {
+    // DNA k-mer sketching.
+    //
+    // ntHash only accepts A/C/G/T: any other byte (including lowercase a/c/g/t) makes
+    // it panic, and 'N' hashes to a meaningless constant. We therefore uppercase the
+    // sequence and roll ntHash over each maximal A/C/G/T stretch. Any k-mer spanning an
+    // ambiguous base is skipped, mirroring (and extending) the previous "skip k-mers
+    // containing N" behaviour, while soft-masked lowercase bases are folded back in
+    // through the uppercasing.
+    if seq.len() >= kmer_size {
+        upper.clear();
+        upper.extend(seq.iter().map(|b| b.to_ascii_uppercase()));
+        let len = upper.len();
+        let mut start = 0usize;
+        for i in 0..=len {
+            let valid = i < len && matches!(upper[i], b'A' | b'C' | b'G' | b'T');
+            if !valid {
+                if i - start >= kmer_size {
+                    if let Ok(iter) = NtHashIterator::new(&upper[start..i], kmer_size) {
+                        for hash in iter {
+                            let h = hash as u32;
+                            if h <= max_hash {
+                                dna.insert(h);
+                            }
+                        }
+                    }
+                }
+                start = i + 1;
+            }
+        }
+    }
+
+    // AA k-mer sketching via 3-frame translation.
+    //
+    // Translation and hashing are fused: rather than materialising the three translated
+    // frames and re-hashing every window, we roll a polynomial hash over the amino-acid
+    // stream as codons are decoded — O(1) per residue with no allocation. As before,
+    // each frame is translated only up to its first stop codon, and any window containing
+    // an unknown residue (X) is skipped (an X resets the rolling window).
+    if seq.len() >= 3 {
+        for offset in 0..3 {
+            let mut pos = 0usize;    // ring-buffer write cursor
+            let mut filled = 0usize; // residues accumulated since the last reset
+            let mut h: u64 = 0;      // rolling hash of the current window
+            let mut i = offset;
+            while i + 3 <= seq.len() {
+                let residue = dna_to_aa(&seq[i..i + 3]);
+                i += 3;
+                if residue == b'*' {
+                    break; // stop codon ends this frame
+                }
+                if residue == b'X' {
+                    // An unknown residue cannot belong to any emitted k-mer:
+                    // drop the partial window and start fresh after it.
+                    pos = 0;
+                    filled = 0;
+                    h = 0;
+                    continue;
+                }
+                if filled < aa_kmer_size {
+                    h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
+                    ring[pos] = residue;
+                    filled += 1;
+                } else {
+                    let out = ring[pos] as u64;
+                    h = h.wrapping_sub(out.wrapping_mul(aa_high));
+                    h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
+                    ring[pos] = residue;
+                }
+                pos += 1;
+                if pos == aa_kmer_size {
+                    pos = 0;
+                }
+                if filled == aa_kmer_size {
+                    let hh = mix64(h) as u32;
+                    if hh <= max_hash {
+                        aa.insert(hh);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Generate a dual-payload FracMinHash sketch and save it as two compressed
 /// Roaring Bitmaps (DNA + AA translation in 3 forward frames).
 ///
@@ -208,102 +309,64 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
         sequences.par_iter().map_init(
             || (Vec::<u8>::new(), vec![0u8; aa_kmer_size]),
             |(upper, ring), seq| {
-            let mut dna = RoaringBitmap::new();
-            let mut aa  = RoaringBitmap::new();
-
-            // DNA k-mer sketching.
-            //
-            // ntHash only accepts A/C/G/T: any other byte (including lowercase a/c/g/t)
-            // makes it panic, and 'N' hashes to a meaningless constant. We therefore
-            // uppercase the sequence and roll ntHash over each maximal A/C/G/T stretch.
-            // Any k-mer spanning an ambiguous base is skipped, mirroring (and extending)
-            // the previous "skip k-mers containing N" behaviour, while soft-masked
-            // lowercase bases are folded back in through the uppercasing.
-            if seq.len() >= kmer_size {
-                upper.clear();
-                upper.extend(seq.iter().map(|b| b.to_ascii_uppercase()));
-                let len = upper.len();
-                let mut start = 0usize;
-                for i in 0..=len {
-                    let valid = i < len && matches!(upper[i], b'A' | b'C' | b'G' | b'T');
-                    if !valid {
-                        if i - start >= kmer_size {
-                            if let Ok(iter) = NtHashIterator::new(&upper[start..i], kmer_size) {
-                                for hash in iter {
-                                    let h = hash as u32;
-                                    if h <= max_hash {
-                                        dna.insert(h);
-                                    }
-                                }
-                            }
-                        }
-                        start = i + 1;
-                    }
-                }
-            }
-
-            // AA k-mer sketching via 3-frame translation.
-            //
-            // Translation and hashing are fused: rather than materialising the three
-            // translated frames and re-hashing every window, we roll a polynomial hash
-            // over the amino-acid stream as codons are decoded — O(1) per residue with
-            // no per-sequence allocation. As before, each frame is translated only up to
-            // its first stop codon, and any window containing an unknown residue (X) is
-            // skipped (an X resets the rolling window).
-            if seq.len() >= 3 {
-                for offset in 0..3 {
-                    let mut pos = 0usize;    // ring-buffer write cursor
-                    let mut filled = 0usize; // residues accumulated since the last reset
-                    let mut h: u64 = 0;      // rolling hash of the current window
-                    let mut i = offset;
-                    while i + 3 <= seq.len() {
-                        let residue = dna_to_aa(&seq[i..i + 3]);
-                        i += 3;
-                        if residue == b'*' {
-                            break; // stop codon ends this frame
-                        }
-                        if residue == b'X' {
-                            // An unknown residue cannot belong to any emitted k-mer:
-                            // drop the partial window and start fresh after it.
-                            pos = 0;
-                            filled = 0;
-                            h = 0;
-                            continue;
-                        }
-                        if filled < aa_kmer_size {
-                            h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
-                            ring[pos] = residue;
-                            filled += 1;
-                        } else {
-                            let out = ring[pos] as u64;
-                            h = h.wrapping_sub(out.wrapping_mul(high));
-                            h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
-                            ring[pos] = residue;
-                        }
-                        pos += 1;
-                        if pos == aa_kmer_size {
-                            pos = 0;
-                        }
-                        if filled == aa_kmer_size {
-                            let hh = mix64(h) as u32;
-                            if hh <= max_hash {
-                                aa.insert(hh);
-                            }
-                        }
-                    }
-                }
-            }
-
-            (dna, aa)
-        })
+                let mut dna = RoaringBitmap::new();
+                let mut aa = RoaringBitmap::new();
+                sketch_sequence_into(
+                    seq, kmer_size, aa_kmer_size, max_hash, high,
+                    &mut dna, &mut aa, upper, ring,
+                );
+                (dna, aa)
+            })
         .reduce(
             || (RoaringBitmap::new(), RoaringBitmap::new()),
             |(mut d1, mut a1), (d2, a2)| { d1 |= d2; a1 |= a2; (d1, a1) },
         )
     });
 
-
     write_bitmap_pair(out_filepath, &dna_bm, &aa_bm)
+}
+
+/// Sketch a batch of genomes, parallelising across genomes rather than within each one.
+///
+/// `jobs` is a list of `(input_fasta, output_sketch)` pairs. Each genome is read and
+/// sketched independently on the Rayon pool: parallelism is across genomes, while each
+/// genome's own sequences are processed serially (and its scratch buffers reused). For
+/// an `index` run with many genomes this keeps every core busy with far less per-genome
+/// overhead than launching a separate Python worker process per genome, and lets Rayon
+/// load-balance the whole batch with work stealing. Returns the output paths written.
+#[pyfunction]
+fn sketch_many(jobs: Vec<(String, String)>, kmer_size: usize, scaled: u32, nthreads: usize) -> PyResult<Vec<String>> {
+    let aa_kmer_size = std::cmp::max(3, kmer_size / 3);
+    let max_hash = (u32::MAX as f64 / scaled as f64) as u32;
+    let high = AA_HASH_BASE.wrapping_pow((aa_kmer_size - 1) as u32);
+
+    let pool = get_pool(nthreads);
+    pool.install(|| {
+        jobs.par_iter()
+            .map(|(in_path, out_path)| {
+                // Read this genome's sequences (needletail's reader is not Send, but it
+                // lives and dies entirely within this one task, so that is fine here).
+                let mut reader = parse_fastx_file(in_path)
+                    .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", in_path, e)))?;
+
+                let mut dna = RoaringBitmap::new();
+                let mut aa = RoaringBitmap::new();
+                let mut upper: Vec<u8> = Vec::new();
+                let mut ring = vec![0u8; aa_kmer_size];
+
+                while let Some(record) = reader.next() {
+                    let seqrec = record.map_err(|e| PyValueError::new_err(e.to_string()))?;
+                    sketch_sequence_into(
+                        &seqrec.seq(), kmer_size, aa_kmer_size, max_hash, high,
+                        &mut dna, &mut aa, &mut upper, &mut ring,
+                    );
+                }
+
+                write_bitmap_pair(out_path, &dna, &aa)?;
+                Ok(out_path.clone())
+            })
+            .collect()
+    })
 }
 
 /// Compute Containment-based Average Nucleotide/Aminoacid Identity (ANI/AAI)
@@ -659,6 +722,7 @@ fn sketch_cardinality(sketch_path: &str, mode: &str) -> PyResult<u64> {
 #[pymodule]
 fn deltatree(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sketch, m)?)?;
+    m.add_function(wrap_pyfunction!(sketch_many, m)?)?;
     m.add_function(wrap_pyfunction!(sketch_cardinality, m)?)?;
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;
     m.add_function(wrap_pyfunction!(accumulator_search, m)?)?;
