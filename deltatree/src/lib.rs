@@ -24,6 +24,7 @@ use roaring::RoaringBitmap;
 use needletail::parse_fastx_file;
 use twox_hash::XxHash64;
 use std::hash::Hasher;
+use nthash::NtHashIterator;
 
 // One Rayon thread pool per process, sized on first sketch() call.
 // Each mp.Pool worker process initialises its own independent copy.
@@ -36,21 +37,6 @@ fn get_pool(nthreads: usize) -> &'static rayon::ThreadPool {
             .build()
             .expect("Failed to build Rayon thread pool")
     })
-}
-
-/// A simple helper function to compute the reverse complement of a DNA sequence.
-/// It maps A <-> T and C <-> G, defaulting unknown characters to N.
-fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .rev() // Reverse the sequence
-        .map(|&c| match c {
-            b'A' | b'a' => b'T',
-            b'C' | b'c' => b'G',
-            b'G' | b'g' => b'C',
-            b'T' | b't' => b'A',
-            _ => b'N',
-        })
-        .collect()
 }
 
 /// Translate a single DNA codon (3 bases) to an amino acid using the standard
@@ -179,9 +165,13 @@ fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
 /// Generate a dual-payload FracMinHash sketch and save it as two compressed
 /// Roaring Bitmaps (DNA + AA translation in 3 forward frames).
 ///
-/// FracMinHash sub-samples the k-mer space deterministically. Instead of storing 
+/// FracMinHash sub-samples the k-mer space deterministically. Instead of storing
 /// every k-mer in a genome, it only stores hashes that fall below a certain threshold.
 /// This reduces the sketch size by a factor of `scaled` while preserving distance metrics.
+///
+/// DNA k-mers are hashed with ntHash, a rolling hash specialised for nucleotide k-mers:
+/// it derives each k-mer's canonical (strand-independent) hash from the previous one in
+/// O(1) time, which is substantially faster than re-hashing every k-mer byte by byte.
 ///
 /// # Arguments
 /// * `filepath` - Path to the input FASTA file.
@@ -213,20 +203,35 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
         sequences.par_iter().map(|seq| {
             let mut dna = RoaringBitmap::new();
             let mut aa  = RoaringBitmap::new();
+            let mut upper: Vec<u8> = Vec::new(); // reusable uppercased copy for ntHash
 
-            // DNA k-mer sketching
+            // DNA k-mer sketching.
+            //
+            // ntHash only accepts A/C/G/T: any other byte (including lowercase a/c/g/t)
+            // makes it panic, and 'N' hashes to a meaningless constant. We therefore
+            // uppercase the sequence and roll ntHash over each maximal A/C/G/T stretch.
+            // Any k-mer spanning an ambiguous base is skipped, mirroring (and extending)
+            // the previous "skip k-mers containing N" behaviour, while soft-masked
+            // lowercase bases are folded back in through the uppercasing.
             if seq.len() >= kmer_size {
-                for kmer in seq.windows(kmer_size) {
-                    if kmer.iter().any(|&b| b == b'N' || b == b'n') {
-                        continue;
-                    }
-                    let revcomp = reverse_complement(kmer);
-                    let canonical = if kmer < revcomp.as_slice() { kmer } else { revcomp.as_slice() };
-                    let mut hasher = XxHash64::with_seed(0);
-                    hasher.write(canonical);
-                    let h = hasher.finish() as u32;
-                    if h <= max_hash {
-                        dna.insert(h);
+                upper.clear();
+                upper.extend(seq.iter().map(|b| b.to_ascii_uppercase()));
+                let len = upper.len();
+                let mut start = 0usize;
+                for i in 0..=len {
+                    let valid = i < len && matches!(upper[i], b'A' | b'C' | b'G' | b'T');
+                    if !valid {
+                        if i - start >= kmer_size {
+                            if let Ok(iter) = NtHashIterator::new(&upper[start..i], kmer_size) {
+                                for hash in iter {
+                                    let h = hash as u32;
+                                    if h <= max_hash {
+                                        dna.insert(h);
+                                    }
+                                }
+                            }
+                        }
+                        start = i + 1;
                     }
                 }
             }
