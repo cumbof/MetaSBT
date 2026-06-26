@@ -1,6 +1,6 @@
 [package]
 name = "deltatree"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Fabio Cumbo"]
 description = "High-performance Rust backend for MetaSBT v2.0 Delta-SBT architecture"
@@ -21,11 +21,9 @@ roaring = "0.10"
 # Needletail is the fastest FASTA/FASTQ parser in the Rust ecosystem
 needletail = "0.5"
 
-# A fast hashing algorithm for hashing the translated amino acid k-mers
-twox-hash = "1.6"
-
 # ntHash: a rolling hash specialised for nucleotide k-mers, used to sketch DNA k-mers
-# in O(1) per k-mer (canonical, strand-independent) instead of re-hashing every byte
+# in O(1) per k-mer (canonical, strand-independent) instead of re-hashing every byte.
+# Amino-acid k-mers are hashed with an inlined rolling polynomial hash (see lib.rs).
 nthash = "0.5.1"
 
 # Rayon for effortless multithreading in Rust (useful for parallel tree building)

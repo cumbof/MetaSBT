@@ -7,7 +7,8 @@
 //! 
 //! It leverages:
 //! - `needletail` for blazing fast FASTA parsing.
-//! - `twox-hash` for rapid k-mer hashing.
+//! - `nthash` for an O(1) rolling hash over DNA k-mers, plus a fused rolling
+//!   polynomial hash over the 3-frame amino-acid translation.
 //! - `roaring` (Roaring Bitmaps) for highly compressed, bitwise-operable sets.
 //! - `pyo3` to expose these functions as a native Python extension.
 
@@ -22,9 +23,24 @@ use std::sync::OnceLock;
 use rayon::prelude::*;
 use roaring::RoaringBitmap;
 use needletail::parse_fastx_file;
-use twox_hash::XxHash64;
-use std::hash::Hasher;
 use nthash::NtHashIterator;
+
+/// Multiplicative base for the rolling polynomial hash over amino-acid k-mers
+/// (the 64-bit FNV prime; any odd constant works as the polynomial base).
+const AA_HASH_BASE: u64 = 0x0000_0100_0000_01b3;
+
+/// SplitMix64 finalizer. A rolling polynomial hash is cheap but its low bits are
+/// poorly distributed, which would bias FracMinHash sampling (we keep a hash when
+/// its low 32 bits fall under `max_hash`). Running each rolling value through this
+/// avalanche step restores a near-uniform distribution at O(1) cost, so the kept
+/// fraction stays an unbiased ~1/scaled sample — exactly what ANI/AAI estimation
+/// assumes.
+#[inline]
+fn mix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
 
 // One Rayon thread pool per process, sized on first sketch() call.
 // Each mp.Pool worker process initialises its own independent copy.
@@ -73,23 +89,6 @@ fn dna_to_aa(codon: &[u8]) -> u8 {
         (b'G', b'G', b'T') | (b'G', b'G', b'C') | (b'G', b'G', b'A') | (b'G', b'G', b'G') => b'G',
         _ => b'X',
     }
-}
-
-/// Translate a DNA sequence in 3 forward reading frames into amino acid sequences.
-/// Each frame starts at offset 0, 1, or 2 and translates consecutive codons.
-/// Translation stops at the first stop codon (*) in each frame.
-fn translate_3frames(seq: &[u8]) -> [Vec<u8>; 3] {
-    let mut frames: [Vec<u8>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    for offset in 0..3 {
-        let mut i = offset;
-        while i + 3 <= seq.len() {
-            let aa = dna_to_aa(&seq[i..i+3]);
-            if aa == b'*' { break; }
-            frames[offset].push(aa);
-            i += 3;
-        }
-    }
-    frames
 }
 
 /// Write a dual-payload file containing two serialized RoaringBitmaps
@@ -236,22 +235,55 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
                 }
             }
 
-            // AA k-mer sketching via 3-frame translation
+            // AA k-mer sketching via 3-frame translation.
+            //
+            // Translation and hashing are fused: rather than materialising the three
+            // translated frames and re-hashing every window, we roll a polynomial hash
+            // over the amino-acid stream as codons are decoded — O(1) per residue with
+            // no per-sequence allocation. As before, each frame is translated only up to
+            // its first stop codon, and any window containing an unknown residue (X) is
+            // skipped (an X resets the rolling window).
             if seq.len() >= 3 {
-                let frames = translate_3frames(seq);
-                for aa_seq in frames.iter() {
-                    if aa_seq.len() < aa_kmer_size {
-                        continue;
-                    }
-                    for aa_kmer in aa_seq.windows(aa_kmer_size) {
-                        if aa_kmer.iter().any(|&b| b == b'X' || b == b'*') {
+                let high = AA_HASH_BASE.wrapping_pow((aa_kmer_size - 1) as u32);
+                let mut ring = vec![0u8; aa_kmer_size]; // last aa_kmer_size residues
+                for offset in 0..3 {
+                    let mut pos = 0usize;    // ring-buffer write cursor
+                    let mut filled = 0usize; // residues accumulated since the last reset
+                    let mut h: u64 = 0;      // rolling hash of the current window
+                    let mut i = offset;
+                    while i + 3 <= seq.len() {
+                        let residue = dna_to_aa(&seq[i..i + 3]);
+                        i += 3;
+                        if residue == b'*' {
+                            break; // stop codon ends this frame
+                        }
+                        if residue == b'X' {
+                            // An unknown residue cannot belong to any emitted k-mer:
+                            // drop the partial window and start fresh after it.
+                            pos = 0;
+                            filled = 0;
+                            h = 0;
                             continue;
                         }
-                        let mut hasher = XxHash64::with_seed(1);
-                        hasher.write(aa_kmer);
-                        let h = hasher.finish() as u32;
-                        if h <= max_hash {
-                            aa.insert(h);
+                        if filled < aa_kmer_size {
+                            h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
+                            ring[pos] = residue;
+                            filled += 1;
+                        } else {
+                            let out = ring[pos] as u64;
+                            h = h.wrapping_sub(out.wrapping_mul(high));
+                            h = h.wrapping_mul(AA_HASH_BASE).wrapping_add(residue as u64);
+                            ring[pos] = residue;
+                        }
+                        pos += 1;
+                        if pos == aa_kmer_size {
+                            pos = 0;
+                        }
+                        if filled == aa_kmer_size {
+                            let hh = mix64(h) as u32;
+                            if hh <= max_hash {
+                                aa.insert(hh);
+                            }
                         }
                     }
                 }
