@@ -197,12 +197,19 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
 
     // Process sequences in parallel. Each sequence produces its own pair of bitmaps;
     // the reduce step merges them with bitwise OR, which is correct for FracMinHash sets.
+    //
+    // The AA rolling-hash high-order weight depends only on aa_kmer_size, so compute it
+    // once here. Per-worker scratch (the uppercasing buffer and the AA ring buffer) is
+    // allocated once per Rayon thread via map_init and reused across every sequence that
+    // thread processes, instead of being reallocated for each sequence.
     let pool = get_pool(nthreads);
+    let high = AA_HASH_BASE.wrapping_pow((aa_kmer_size - 1) as u32);
     let (dna_bm, aa_bm) = pool.install(|| {
-        sequences.par_iter().map(|seq| {
+        sequences.par_iter().map_init(
+            || (Vec::<u8>::new(), vec![0u8; aa_kmer_size]),
+            |(upper, ring), seq| {
             let mut dna = RoaringBitmap::new();
             let mut aa  = RoaringBitmap::new();
-            let mut upper: Vec<u8> = Vec::new(); // reusable uppercased copy for ntHash
 
             // DNA k-mer sketching.
             //
@@ -244,8 +251,6 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
             // its first stop codon, and any window containing an unknown residue (X) is
             // skipped (an X resets the rolling window).
             if seq.len() >= 3 {
-                let high = AA_HASH_BASE.wrapping_pow((aa_kmer_size - 1) as u32);
-                let mut ring = vec![0u8; aa_kmer_size]; // last aa_kmer_size residues
                 for offset in 0..3 {
                     let mut pos = 0usize;    // ring-buffer write cursor
                     let mut filled = 0usize; // residues accumulated since the last reset
@@ -296,6 +301,7 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
             |(mut d1, mut a1), (d2, a2)| { d1 |= d2; a1 |= a2; (d1, a1) },
         )
     });
+
 
     write_bitmap_pair(out_filepath, &dna_bm, &aa_bm)
 }
