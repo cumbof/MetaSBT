@@ -209,11 +209,11 @@ fn sketch_dna_into(seq: &[u8], kmer_size: usize, max_hash: u32, dna: &mut Roarin
 ///
 /// Translation and hashing are fused: rather than materialising the three translated
 /// frames and re-hashing every window, we roll a polynomial hash over the amino-acid
-/// stream as codons are decoded — O(1) per residue with no allocation. As before, each
-/// frame is translated only up to its first stop codon, and any window containing an
-/// unknown residue (X) is skipped (an X resets the rolling window). Unlike the DNA path
-/// this is position-dependent (frame phase and stop codons), so it must be run over a
-/// whole sequence rather than chunked.
+/// stream as codons are decoded — O(1) per residue with no allocation. Every ORF in each
+/// frame is sketched: a stop codon (*) ends the current ORF and resets the rolling window,
+/// and any window containing an unknown residue (X) is likewise skipped (an X resets the
+/// rolling window). Unlike the DNA path this is position-dependent (frame phase and stop
+/// codons), so it must be run over a whole sequence rather than chunked.
 fn sketch_aa_into(seq: &[u8], aa_kmer_size: usize, max_hash: u32, aa_high: u64, aa: &mut RoaringBitmap, ring: &mut Vec<u8>) {
     if seq.len() >= 3 {
         for offset in 0..3 {
@@ -225,7 +225,14 @@ fn sketch_aa_into(seq: &[u8], aa_kmer_size: usize, max_hash: u32, aa_high: u64, 
                 let residue = dna_to_aa(&seq[i..i + 3]);
                 i += 3;
                 if residue == b'*' {
-                    break; // stop codon ends this frame
+                    // Stop codon: end of the current ORF, not the end of the frame.
+                    // Reset the rolling window and keep translating the next ORF so every
+                    // ORF in the frame is sketched (each emitted k-mer is still
+                    // FracMinHash-subsampled by the `max_hash` gate below).
+                    pos = 0;
+                    filled = 0;
+                    h = 0;
+                    continue;
                 }
                 if residue == b'X' {
                     // An unknown residue cannot belong to any emitted k-mer:
@@ -353,7 +360,7 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
             });
 
         // AA: one task per sequence (the AA pass is position-dependent and cannot be
-        // chunked, but it is cheap — each frame stops at its first stop codon).
+        // chunked because frame phase and ORF boundaries depend on absolute position).
         let aa_bm = sequences
             .par_iter()
             .map_init(|| vec![0u8; aa_kmer_size], |ring, seq| {
