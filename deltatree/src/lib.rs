@@ -62,7 +62,18 @@ fn get_pool(nthreads: usize) -> &'static rayon::ThreadPool {
 }
 
 /// Translate a single DNA codon (3 bases) to an amino acid using the standard
-/// genetic code. Returns b'X' for unknown codons.
+/// genetic code (NCBI translation table 1; identical to the bacterial table 11
+/// for every codon, since 11 differs only in alternative start codons, which we
+/// do not special-case). Returns b'X' for unknown codons.
+///
+/// One table is used for every kingdom on purpose. The amino acid sketch is a
+/// similarity transform, not a biological annotation: as long as the same code
+/// is applied when building the database and when querying, FracMinHash
+/// containment between any two genomes stays self-consistent and comparable.
+/// The standard code is correct for the vast majority of bacteria, archaea,
+/// fungi, other eukaryotes, and host-translated viruses; clades with reassigned
+/// codons (e.g. Mycoplasma TGA=W, ciliate TAA/TAG=Q) are merely sketched a
+/// little more sparsely, not incorrectly relative to each other.
 fn dna_to_aa(codon: &[u8]) -> u8 {
     if codon.len() < 3 { return b'X'; }
     let a = codon[0].to_ascii_uppercase();
@@ -75,7 +86,7 @@ fn dna_to_aa(codon: &[u8]) -> u8 {
         (b'T', b'A', b'T') | (b'T', b'A', b'C') => b'Y',
         (b'T', b'A', b'A') | (b'T', b'A', b'G') => b'*',
         (b'T', b'G', b'T') | (b'T', b'G', b'C') => b'C',
-        (b'T', b'G', b'A') => b'*', // stop (NCBI table 11, standard for bacteria)
+        (b'T', b'G', b'A') => b'*', // stop in the standard genetic code
         (b'T', b'G', b'G') => b'W',
         (b'C', b'T', b'T') | (b'C', b'T', b'C') | (b'C', b'T', b'A') | (b'C', b'T', b'G') => b'L',
         (b'C', b'C', b'T') | (b'C', b'C', b'C') | (b'C', b'C', b'A') | (b'C', b'C', b'G') => b'P',
