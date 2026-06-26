@@ -26,5 +26,13 @@ deploy:
 	$(MAKE) clean
 
 # Uninstall package
+#
+# pip removes the bundled deltatree extension from site-packages, but an
+# editable/dev build also leaves a compiled deltatree*.so in the source tree,
+# which stays importable whenever Python runs from the repo (cwd / PYTHONPATH).
+# Remove that artifact too, then drop build leftovers.
 uninstall:
 	pip uninstall -y metasbt
+	-pip uninstall -y deltatree
+	rm -f deltatree*.so
+	$(MAKE) clean
