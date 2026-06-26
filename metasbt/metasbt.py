@@ -1073,7 +1073,7 @@ class MetaSBT(object):
         else:
             raise Exception(f"An error has occurred while computing the sha256 hash of {output_filepath}")
 
-    def profile(self, argv: List[Any], parse_known_args=False) -> None:
+    def profile(self, argv: List[Any], parse_known_args=False, print_summary=True) -> None:
         """Profile a set of genomes against a specific MetaSBT database.
         Profile tables are stored under a dedicated folder in the workdir temporary directory.
 
@@ -1083,6 +1083,9 @@ class MetaSBT(object):
             The list of arguments.
         parse_known_args : bool, default False
             Parse known arguments only without raising any exceptions for unrecognized arguments.
+        print_summary : bool, default True
+            Print the per-genome human-readable profile table. Disabled when `update` calls
+            this for its side effects (sketching + profiling) so it does not flood the log.
 
         Raises
         ------
@@ -1182,6 +1185,10 @@ class MetaSBT(object):
 
         # Profile genomes in parallel
         results = self.database.profile_genomes(genomes, sketches, uncertainty=args.uncertainty, pruning_threshold=args.pruning_threshold, mode="split")
+
+        if not print_summary:
+            # Called by `update` for its side effects only; skip the per-genome dump.
+            return
 
         # Print human-readable summary with confidence scores
         col_w = 70
@@ -1915,7 +1922,7 @@ class MetaSBT(object):
         # This also produce the bloom filter representation of the input genomes
         # Note that this function and `profile()` have the same set of arguments
         # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
-        self.profile(argv, parse_known_args=True)
+        self.profile(argv, parse_known_args=True, print_summary=False)
 
         if args.dereplicate > 0.0:
             # Dereplicate the input genomes again versus the genomes in the database
