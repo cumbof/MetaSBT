@@ -29,6 +29,12 @@ use nthash::NtHashIterator;
 /// (the 64-bit FNV prime; any odd constant works as the polynomial base).
 const AA_HASH_BASE: u64 = 0x0000_0100_0000_01b3;
 
+/// Target size (in bases) of a DNA sketching chunk. A single-genome `sketch` splits each
+/// sequence into overlapping chunks of about this size so that one long contig can be
+/// hashed across multiple threads. It is large enough that per-chunk overhead is
+/// negligible, yet small enough that a multi-megabase contig still yields many chunks.
+const DNA_CHUNK: usize = 262_144;
+
 /// SplitMix64 finalizer. A rolling polynomial hash is cheap but its low bits are
 /// poorly distributed, which would bias FracMinHash sampling (we keep a hash when
 /// its low 32 bits fall under `max_hash`). Running each rolling value through this
@@ -161,32 +167,19 @@ fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
     }
 }
 
-/// Sketch one sequence, inserting the surviving FracMinHash hashes into the provided
-/// DNA and AA bitmaps. The caller supplies reusable scratch buffers — `upper` for the
-/// uppercased copy ntHash requires, and `ring` (length `aa_kmer_size`) for the amino
-/// acid rolling window — plus the precomputed `aa_high` rolling-hash weight. This is
-/// shared by `sketch` (which fans out across the sequences of a single genome) and
-/// `sketch_many` (which fans out across genomes and walks each genome's sequences
-/// serially).
-fn sketch_sequence_into(
-    seq: &[u8],
-    kmer_size: usize,
-    aa_kmer_size: usize,
-    max_hash: u32,
-    aa_high: u64,
-    dna: &mut RoaringBitmap,
-    aa: &mut RoaringBitmap,
-    upper: &mut Vec<u8>,
-    ring: &mut Vec<u8>,
-) {
-    // DNA k-mer sketching.
-    //
-    // ntHash only accepts A/C/G/T: any other byte (including lowercase a/c/g/t) makes
-    // it panic, and 'N' hashes to a meaningless constant. We therefore uppercase the
-    // sequence and roll ntHash over each maximal A/C/G/T stretch. Any k-mer spanning an
-    // ambiguous base is skipped, mirroring (and extending) the previous "skip k-mers
-    // containing N" behaviour, while soft-masked lowercase bases are folded back in
-    // through the uppercasing.
+/// Sketch the DNA k-mers of `seq` into `dna`, reusing the caller's `upper` buffer.
+///
+/// ntHash only accepts A/C/G/T: any other byte (including lowercase a/c/g/t) makes it
+/// panic, and 'N' hashes to a meaningless constant. We therefore uppercase the sequence
+/// and roll ntHash over each maximal A/C/G/T stretch. Any k-mer spanning an ambiguous
+/// base is skipped, mirroring (and extending) the previous "skip k-mers containing N"
+/// behaviour, while soft-masked lowercase bases are folded back in through uppercasing.
+///
+/// Because each k-mer's ntHash value depends only on the k-mer itself, this is safe to
+/// call on overlapping slices of a longer sequence: as long as consecutive slices overlap
+/// by at least `kmer_size - 1`, the union over the slices equals the result for the whole
+/// sequence. `sketch` exploits this to chunk a long contig across threads.
+fn sketch_dna_into(seq: &[u8], kmer_size: usize, max_hash: u32, dna: &mut RoaringBitmap, upper: &mut Vec<u8>) {
     if seq.len() >= kmer_size {
         upper.clear();
         upper.extend(seq.iter().map(|b| b.to_ascii_uppercase()));
@@ -209,14 +202,19 @@ fn sketch_sequence_into(
             }
         }
     }
+}
 
-    // AA k-mer sketching via 3-frame translation.
-    //
-    // Translation and hashing are fused: rather than materialising the three translated
-    // frames and re-hashing every window, we roll a polynomial hash over the amino-acid
-    // stream as codons are decoded — O(1) per residue with no allocation. As before,
-    // each frame is translated only up to its first stop codon, and any window containing
-    // an unknown residue (X) is skipped (an X resets the rolling window).
+/// Sketch the amino acid k-mers of `seq` into `aa`, reusing the caller's `ring` buffer
+/// (length `aa_kmer_size`) and the precomputed `aa_high` rolling-hash weight.
+///
+/// Translation and hashing are fused: rather than materialising the three translated
+/// frames and re-hashing every window, we roll a polynomial hash over the amino-acid
+/// stream as codons are decoded — O(1) per residue with no allocation. As before, each
+/// frame is translated only up to its first stop codon, and any window containing an
+/// unknown residue (X) is skipped (an X resets the rolling window). Unlike the DNA path
+/// this is position-dependent (frame phase and stop codons), so it must be run over a
+/// whole sequence rather than chunked.
+fn sketch_aa_into(seq: &[u8], aa_kmer_size: usize, max_hash: u32, aa_high: u64, aa: &mut RoaringBitmap, ring: &mut Vec<u8>) {
     if seq.len() >= 3 {
         for offset in 0..3 {
             let mut pos = 0usize;    // ring-buffer write cursor
@@ -262,6 +260,24 @@ fn sketch_sequence_into(
     }
 }
 
+/// Sketch one whole sequence into both the DNA and AA bitmaps. Used by `sketch_many`,
+/// which walks each genome's sequences serially; `sketch` instead calls the DNA and AA
+/// halves separately so it can chunk the DNA pass across threads.
+fn sketch_sequence_into(
+    seq: &[u8],
+    kmer_size: usize,
+    aa_kmer_size: usize,
+    max_hash: u32,
+    aa_high: u64,
+    dna: &mut RoaringBitmap,
+    aa: &mut RoaringBitmap,
+    upper: &mut Vec<u8>,
+    ring: &mut Vec<u8>,
+) {
+    sketch_dna_into(seq, kmer_size, max_hash, dna, upper);
+    sketch_aa_into(seq, aa_kmer_size, max_hash, aa_high, aa, ring);
+}
+
 /// Generate a dual-payload FracMinHash sketch and save it as two compressed
 /// Roaring Bitmaps (DNA + AA translation in 3 forward frames).
 ///
@@ -296,31 +312,61 @@ fn sketch(filepath: &str, out_filepath: &str, kmer_size: usize, scaled: u32, nth
         sequences.push(seqrec.seq().to_vec());
     }
 
-    // Process sequences in parallel. Each sequence produces its own pair of bitmaps;
-    // the reduce step merges them with bitwise OR, which is correct for FracMinHash sets.
-    //
-    // The AA rolling-hash high-order weight depends only on aa_kmer_size, so compute it
-    // once here. Per-worker scratch (the uppercasing buffer and the AA ring buffer) is
-    // allocated once per Rayon thread via map_init and reused across every sequence that
-    // thread processes, instead of being reallocated for each sequence.
     let pool = get_pool(nthreads);
     let high = AA_HASH_BASE.wrapping_pow((aa_kmer_size - 1) as u32);
+
+    // DNA pass. Parallelising over whole sequences leaves a genome that is one huge
+    // contig stuck on a single thread, so we instead fan out over overlapping chunks of
+    // each sequence. Consecutive chunks overlap by kmer_size-1 bases, which guarantees
+    // every k-mer is fully contained in some chunk; since each k-mer's ntHash value
+    // depends only on the k-mer, the union over chunks equals the whole-sequence result.
+    let overlap = kmer_size.saturating_sub(1);
+    let step = DNA_CHUNK.saturating_sub(overlap).max(1);
+    let mut chunks: Vec<(usize, usize, usize)> = Vec::new(); // (seq index, start, end)
+    for (idx, seq) in sequences.iter().enumerate() {
+        if seq.len() < kmer_size {
+            continue;
+        }
+        let mut start = 0usize;
+        loop {
+            let end = std::cmp::min(start + DNA_CHUNK, seq.len());
+            chunks.push((idx, start, end));
+            if end == seq.len() {
+                break;
+            }
+            start += step;
+        }
+    }
+
     let (dna_bm, aa_bm) = pool.install(|| {
-        sequences.par_iter().map_init(
-            || (Vec::<u8>::new(), vec![0u8; aa_kmer_size]),
-            |(upper, ring), seq| {
+        // DNA: one task per overlapping chunk, merged with bitwise OR.
+        let dna_bm = chunks
+            .par_iter()
+            .map_init(Vec::<u8>::new, |upper, &(idx, s, e)| {
                 let mut dna = RoaringBitmap::new();
-                let mut aa = RoaringBitmap::new();
-                sketch_sequence_into(
-                    seq, kmer_size, aa_kmer_size, max_hash, high,
-                    &mut dna, &mut aa, upper, ring,
-                );
-                (dna, aa)
+                sketch_dna_into(&sequences[idx][s..e], kmer_size, max_hash, &mut dna, upper);
+                dna
             })
-        .reduce(
-            || (RoaringBitmap::new(), RoaringBitmap::new()),
-            |(mut d1, mut a1), (d2, a2)| { d1 |= d2; a1 |= a2; (d1, a1) },
-        )
+            .reduce(RoaringBitmap::new, |mut a, b| {
+                a |= b;
+                a
+            });
+
+        // AA: one task per sequence (the AA pass is position-dependent and cannot be
+        // chunked, but it is cheap — each frame stops at its first stop codon).
+        let aa_bm = sequences
+            .par_iter()
+            .map_init(|| vec![0u8; aa_kmer_size], |ring, seq| {
+                let mut aa = RoaringBitmap::new();
+                sketch_aa_into(seq, aa_kmer_size, max_hash, high, &mut aa, ring);
+                aa
+            })
+            .reduce(RoaringBitmap::new, |mut a, b| {
+                a |= b;
+                a
+            });
+
+        (dna_bm, aa_bm)
     });
 
     write_bitmap_pair(out_filepath, &dna_bm, &aa_bm)
