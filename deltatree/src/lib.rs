@@ -75,7 +75,8 @@ fn dna_to_aa(codon: &[u8]) -> u8 {
         (b'T', b'A', b'T') | (b'T', b'A', b'C') => b'Y',
         (b'T', b'A', b'A') | (b'T', b'A', b'G') => b'*',
         (b'T', b'G', b'T') | (b'T', b'G', b'C') => b'C',
-        (b'T', b'G', b'A') | (b'T', b'G', b'G') => b'W',
+        (b'T', b'G', b'A') => b'*', // stop (NCBI table 11, standard for bacteria)
+        (b'T', b'G', b'G') => b'W',
         (b'C', b'T', b'T') | (b'C', b'T', b'C') | (b'C', b'T', b'A') | (b'C', b'T', b'G') => b'L',
         (b'C', b'C', b'T') | (b'C', b'C', b'C') | (b'C', b'C', b'A') | (b'C', b'C', b'G') => b'P',
         (b'C', b'A', b'T') | (b'C', b'A', b'C') => b'H',
