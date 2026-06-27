@@ -382,7 +382,7 @@ class MetaSBT(object):
         tmp_dir = os.path.join(args.workdir, "tmp")
 
         if self.database is None:
-            self.database = Database(args.database, db_dir, tmp_dir, flat=True)
+            self.database = Database(args.database, db_dir, tmp_dir)
 
         newick_str = self.database.to_newick(level=args.level)
 
@@ -536,8 +536,7 @@ class MetaSBT(object):
         tmp_dir = os.path.join(args.workdir, "tmp")
 
         # Initialize the database
-        # Use a flat structure by default
-        self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
+        self.database = Database(args.database, db_dir, tmp_dir, nproc=args.nproc)
 
         # Load the list of reference genomes and their taxonomic labels
         references = dict()
@@ -1168,8 +1167,7 @@ class MetaSBT(object):
 
         if self.database is None:
             # Initialize the database
-            # Use a flat structure by default
-            self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
+                self.database = Database(args.database, db_dir, tmp_dir, nproc=args.nproc)
 
         # Load the list of paths to the input genomes
         if args.genome:
@@ -1290,8 +1288,7 @@ class MetaSBT(object):
 
         if self.database is None:
             # Initialize the database
-            # Use a flat structure by default
-            self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
+                self.database = Database(args.database, db_dir, tmp_dir, nproc=args.nproc)
 
         # Load the list of paths to the input genomes
         if args.genome:
@@ -1822,7 +1819,28 @@ class MetaSBT(object):
             "--genomes",
             required="--genome" not in argv,
             type=os.path.abspath,
-            help="Path to the file with a list of paths to the input genomes."
+            help=(
+                "Path to the file with the list of input genomes. "
+                "With '--type mags' it contains one column with the paths to the genome files. "
+                "With '--type references' it is a two-columns tab-separated-values file, the first "
+                "column with the paths to the genome files and the second with their fully defined "
+                "taxonomic label (k__Kingdom|p__Phylum|c__Class|o__Order|f__Family|g__Genus|s__Species)."
+            )
+        )
+        parser.add_argument(
+            "--type",
+            required=False,
+            type=str.lower,
+            default="mags",
+            choices=["mags", "references"],
+            dest="genomes_type",
+            help=(
+                "The type of the input genomes. "
+                "'mags' are metagenome-assembled genomes with no known taxonomy: they are profiled "
+                "against the database and either assigned to the closest species or clustered into new "
+                "MSBT clusters. 'references' come with a fully defined taxonomic label and are added "
+                "under their own lineage exactly like with the 'index' command."
+            )
         )
         parser.add_argument(
             "--dereplicate",
@@ -1891,57 +1909,100 @@ class MetaSBT(object):
         tmp_dir = os.path.join(args.workdir, "tmp")
 
         # Initialize the database
-        # Use a flat structure by default
-        self.database = Database(args.database, db_dir, tmp_dir, flat=True, nproc=args.nproc)
+        self.database = Database(args.database, db_dir, tmp_dir, nproc=args.nproc)
 
-        # Load the set of paths to the input genomes
-        if args.genome:
-            genomes = {args.genome}
+        if args.genomes_type == "references":
+            # Reference genomes come with a fully defined taxonomic label, so they must be provided
+            # through the two-columns `--genomes` file (path + taxonomy); a single `--genome` would
+            # carry no taxonomy
+            if not args.genomes:
+                raise ValueError("Reference genomes must be provided through the two-columns --genomes file!")
+
+            # Load the list of reference genomes and their taxonomic labels
+            references = dict()
+
+            with open(args.genomes) as input_table:
+                for line in input_table:
+                    line = line.strip()
+
+                    if line and not line.startswith("#"):
+                        line_split = line.split("\t")
+
+                        if len(line_split) < 2:
+                            raise ValueError(
+                                "The --genomes file must contain two columns (path and taxonomy) with --type references!"
+                            )
+
+                        # The path to the genome file is under the first column, the taxonomy under the second
+                        references[os.path.abspath(line_split[0])] = line_split[1]
+
+            genomes = set(references.keys())
+
+            if args.completeness > 0.0 or args.contamination < 100.0:
+                # Retrieve the kingdom from the taxonomic label of the input references
+                kingdom = references[list(references.keys())[0]].split("|")[0][3:]
+
+                quality = Database.qc(genomes, kingdom, nproc=args.nproc, tmp=tmp_dir)
+
+                genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
+
+            if args.dereplicate > 0.0:
+                # Dereplicate references based on their ANI distance (input-vs-input)
+                genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
+
+            # Add the surviving references under their own taxonomic lineage
+            for genome in genomes:
+                self.database.add(genome, reference=True, taxonomy=references[genome])
+
         else:
-            with open(args.genomes) as fh:
-                genomes = {line.strip() for line in fh if line.strip()}
+            # Load the set of paths to the input MAGs
+            if args.genome:
+                genomes = {args.genome}
+            else:
+                with open(args.genomes) as fh:
+                    genomes = {line.strip() for line in fh if line.strip() and not line.startswith("#")}
 
-        if args.completeness > 0.0 or args.contamination < 100.0:
-            # Retrieve the kingdom from the root node of the target database
-            # Assume the input genomes are all under the same kingdom
-            kingdom = list(self.database.clusters["kingdom"].keys())[0].split("|")[0][3:]
+            if args.completeness > 0.0 or args.contamination < 100.0:
+                # Retrieve the kingdom from the root node of the target database
+                # Assume the input genomes are all under the same kingdom
+                kingdom = list(self.database.clusters["kingdom"].keys())[0].split("|")[0][3:]
 
-            # Asses the quality of the input genomes
-            quality = Database.qc(genomes, kingdom, nproc=args.nproc, tmp=tmp_dir)
+                # Asses the quality of the input genomes
+                quality = Database.qc(genomes, kingdom, nproc=args.nproc, tmp=tmp_dir)
 
-            # Filter out genomes according to the completeness and contamination thresholds
-            genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
+                # Filter out genomes according to the completeness and contamination thresholds
+                genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
 
-        if args.dereplicate > 0.0:
-            # Dereplicate genomes based on their ANI distance
-            # Reshape the set of genomes
-            # Consider genomes that passed the dereplication process only (input-vs-input)
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
+            if args.dereplicate > 0.0:
+                # Dereplicate genomes based on their ANI distance
+                # Reshape the set of genomes
+                # Consider genomes that passed the dereplication process only (input-vs-input)
+                genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
 
-        # Profile the input genomes first
-        # This also produce the bloom filter representation of the input genomes
-        # Note that this function and `profile()` have the same set of arguments
-        # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
-        self.profile(argv, parse_known_args=True, print_summary=False)
+            # Profile the input genomes first
+            # This also produce the bloom filter representation of the input genomes
+            # Note that this function and `profile()` have the same set of arguments
+            # Genomes profiles are stored under the dedicated folder in the workdir temporary directory
+            self.profile(argv, parse_known_args=True, print_summary=False)
 
-        if args.dereplicate > 0.0:
-            # Dereplicate the input genomes again versus the genomes in the database
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, compare_with="database")
+            if args.dereplicate > 0.0:
+                # Dereplicate the input genomes again versus the genomes in the database
+                genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, compare_with="database")
 
-        species_assignments = self.database.is_known_batch(genomes)
+            species_assignments = self.database.is_known_batch(genomes)
 
-        for genome_filepath in species_assignments:
-            # Immediately add genomes to their species assignment
-            self.database.add(genome_filepath, reference=False, taxonomy=species_assignments[genome_filepath])
+            for genome_filepath in species_assignments:
+                # Immediately add genomes to their species assignment
+                self.database.add(genome_filepath, reference=False, taxonomy=species_assignments[genome_filepath])
 
-        try:
-            # Cluster all the unassigned genomes together and define new clusters at different taxonomic levels
-            characterized, unassigned = self.database.characterize()
+            try:
+                # Cluster all the unassigned genomes together and define new clusters at different taxonomic levels
+                characterized, unassigned = self.database.characterize()
 
-        except Exception as e:
-            # Only ignore the exception if it is the expected "no unknown genomes" state
-            if "There are no unknown genomes" not in str(e):
-                raise e
+            except Exception as e:
+                # Only ignore the exception if it is the expected "no unknown genomes" state
+                if "There are no unknown genomes" not in str(e):
+                    raise e
 
         # Finally, index the new genomes
         self.database.update()

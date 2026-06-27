@@ -53,7 +53,6 @@ class Database(object):
         name: str,
         folder: str,
         tmp: str,
-        flat: bool=True,
         nproc: int=os.cpu_count(),
     ) -> "Database":
         """Initialize a Database object.
@@ -66,10 +65,6 @@ class Database(object):
             Path to the database folder.
         tmp : str
             Path to the temporary folder.
-        flat : bool, default True
-            Skip the clustering of bloom filters and the definition of the Sequence Bloom Trees.
-            A tree definition file is manually defined with all the leaves as children to the same root node.
-            `flat=False` is advantageous if using a specific threshold for pruning the trees while profiling genomes.
         nproc : int, default os.cpu_count()
             Used to compute in parallel when possible.
             It automatically uses all the available CPU cores if its provided value is <1 or >os.cpu_count().
@@ -139,8 +134,6 @@ class Database(object):
         self._topology_cache: Optional[Dict[str, List[Tuple[str, str]]]] = None
 
         if not os.path.isdir(self.root):
-            self.flat = flat
-
             os.makedirs(self.root)
 
             # Create a folder for keeping track of clusters
@@ -155,8 +148,6 @@ class Database(object):
 
             # There are no clusters yet
             self.metadata["clusters_count"] = 0
-
-            self.metadata["flat"] = self.flat
 
             # Init the database report with the list of clusters, theirs stats, and boundaries
             self.report: Dict[str, Any] = dict()
@@ -187,8 +178,6 @@ class Database(object):
 
             if not self.__class__._validate_metadata(self.metadata):
                 raise Exception("Database metadata did not pass the validation!")
-
-            self.flat = self.metadata["flat"]
 
             # There should also be a report file under the database folder
             report_filepath = os.path.join(self.root, "clusters.tsv")
@@ -900,30 +889,11 @@ class Database(object):
 
             new_clusters = False
 
-            # Delta-SBT Architecture: The Update Phase (Fast Path vs Rebalancing Path)
-            # We offload the dynamic insertion to the core so it can decide:
-            # 1. Fast Path: strictly subtract the accumulated core and append a new Leaf Delta.
-            # 2. Rebalancing Path: push down/pull up core k-mers if the consensus shifts.
-            target_species = taxonomy_split[-1]
-            if target_species in self.clusters["species"]:
-                species_obj = self.clusters["species"][target_species]
-
-                if species_obj.sketch_filepath:
-                    try:
-                        # Gather the sketch paths for all existing siblings to accommodate Rebalancing
-                        sibling_sketches = [
-                            self.genomes[child].sketch_filepath 
-                            for child in species_obj.children 
-                            if child != filename and child in self.genomes and self.genomes[child].sketch_filepath
-                        ]
-
-                        deltatree.update_delta_tree(
-                            genome_sketch_filepath,
-                            species_obj.sketch_filepath,
-                            sibling_sketches
-                        )
-                    except Exception as e:
-                        print(f"Warning: Dynamic Delta-SBT update failed. Will rebuild branch on update(). Error: {e}")
+            # Every species (and the levels above it) that receives this genome is appended to
+            # `self.__clusters` below and rebuilt from scratch by `self.update()`. The node Cores
+            # are recomputed there from the intact genome sketches, so there is no in-place delta
+            # rebalancing here — that would mutate (strip) the canonical genome sketches that
+            # distance, dereplication and centroid computations rely on.
 
             # Start from the species all the way up to the kingdom
             for taxonomic_position, taxonomic_level in reversed(list(enumerate(taxonomy_split))):
@@ -1269,34 +1239,13 @@ class Database(object):
                 # The partial taxonomy must be removed from the bucket of partially characterized labels
                 del partially_characterized[taxonomy]
 
-        # In case of an update with only reference genomes with no force assignment `force=False`
-        # these new clusters should actually be transformed to known clusters based on a majority voting
-        # mechanism on their genomes' taxonomic labels
-        if new_clusters:
-            for cluster_name in list(self.clusters["species"].keys()):
-                cluster_obj = self.clusters["species"][cluster_name]
-
-                if cluster_obj.is_known():
-                    continue
-
-                # Collect taxonomies of all genome children in this cluster
-                genome_taxonomies = [
-                    self.genomes[child].taxonomy
-                    for child in cluster_obj.children
-                    if child in self.genomes and self.genomes[child].taxonomy
-                ]
-
-                if not genome_taxonomies:
-                    continue
-
-                # Majority vote: pick the most common taxonomy
-                taxonomy_votes = Counter(genome_taxonomies)
-                top_taxonomy, top_count = taxonomy_votes.most_common(1)[0]
-
-                if top_count >= len(genome_taxonomies) / 2:
-                    for child in cluster_obj.children:
-                        if child in self.genomes:
-                            self.genomes[child]._Entry__known = True
+        # `characterize()` only ever processes MAGs (the genomes in `self.__unknowns`), and the
+        # clusters it creates here are brand new and carry synthetic `MSBT` taxonomic labels.
+        # A genome is a reference or a MAG strictly according to how it was passed to `add()`
+        # (reference genomes come with a real taxonomy through `update --type references` or
+        # `index`); a cluster is "known" iff it contains at least one reference genome, which
+        # `Entry.is_known()` derives from its children. There is no post-hoc promotion: doing it
+        # on these synthetic labels would wrongly flip every freshly clustered MAG to a reference.
 
         # Reset the list of unknowns
         self.__unknowns = list()
@@ -3274,7 +3223,7 @@ class Database(object):
         """
 
         # Define the set of attributes that a database is required to have
-        required_attributes = {"clusters_count", "kmer_size", "scaled_factor", "flat"}
+        required_attributes = {"clusters_count", "kmer_size", "scaled_factor"}
 
         return len(set(metadata.keys()).intersection(required_attributes)) == len(required_attributes)
 
@@ -3821,7 +3770,6 @@ class Entry(object):
             deltatree.build_delta_tree(
                 sketches_list_filepath,
                 tree_filepath,
-                self.database.flat,
                 mode
             )
         except Exception as e:

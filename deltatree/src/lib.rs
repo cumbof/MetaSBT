@@ -487,20 +487,23 @@ fn containment_ani(focus: &str, targets: Vec<String>, kmer_size: usize, mode: &s
 
 /// Build the Delta-SBT tree structure from a list of children sketches.
 ///
-/// In a Delta-SBT, an internal node (Core) is the mathematical intersection of its children.
-/// The children are then modified to only contain their unique "Delta" (Accessory) genes.
+/// The Delta-SBT is a tree of trees: an internal node (Core) is the mathematical intersection
+/// of its children. Each node is self-contained — it stores the Core of its own subtree — and
+/// the children are left untouched. In particular the canonical genome sketches that feed the
+/// species level are never rewritten, so they stay available (full) for distance, dereplication
+/// and centroid computations elsewhere.
 ///
 /// The `mode` parameter selects which bitmap (dna/aa) to operate on.
 /// In "dna" mode, the parent's AA slot stores the union of children's AA bitmaps
 /// (so AA data propagates upward through DNA-based levels for later AA mode sweeps).
-/// In "aa" mode, only AA bitmaps are intersected/stripped; DNA passes through unchanged.
+/// In "aa" mode, only AA bitmaps are intersected; DNA passes through unchanged.
 #[pyfunction]
-fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &str) -> PyResult<()> {
+fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult<()> {
     let list_file = File::open(sketches_list)
         .map_err(|e| PyIOError::new_err(format!("Cannot open sketches list: {}", e)))?;
     let reader = BufReader::new(list_file);
 
-    // Select which bitmap to use for Core/Delta operations: "dna" or "aa"
+    // Select which bitmap to use for Core operations: "dna" or "aa"
     let primary = match mode {
         "dna" | "DNA" => true,
         "aa" | "AA" => false,
@@ -509,14 +512,11 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &s
         )),
     };
 
-    let mut child_paths: Vec<String> = Vec::new();
-    let mut child_primary: Vec<RoaringBitmap> = Vec::new(); // DNA or AA (depending on mode)
-    let mut child_secondary: Vec<RoaringBitmap> = Vec::new(); // the other bitmap
     let mut core_bitmap = RoaringBitmap::new();
     let mut union_bitmap = RoaringBitmap::new(); // Union of the secondary bitmap (used in DNA mode)
     let mut first = true;
 
-    // PASS 1 (Bottom-Up Step): Load children and compute Core/Union
+    // Bottom-Up Step: Load children and compute Core (intersection) / Union
     for line in reader.lines() {
         let filepath = line.map_err(|e| PyIOError::new_err(e.to_string()))?;
         let filepath = filepath.trim().to_string();
@@ -526,37 +526,16 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &s
         let (p_bm, s_bm) = if primary { (dna, aa) } else { (aa, dna) };
 
         if first {
-            core_bitmap = p_bm.clone();
+            core_bitmap = p_bm;
             first = false;
         } else {
             core_bitmap &= &p_bm;
         }
         // Union of the secondary bitmap (meaningful in DNA mode)
         union_bitmap |= &s_bm;
-
-        child_paths.push(filepath);
-        child_primary.push(p_bm);
-        child_secondary.push(s_bm);
     }
 
-    // PASS 2 (Top-Down Step): Strip Core from children's primary bitmap
-    if !is_flat {
-        for (i, path) in child_paths.iter().enumerate() {
-            let mut p_bm = child_primary[i].clone();
-            p_bm -= &core_bitmap;
-
-            let s_bm = &child_secondary[i];
-
-            // Write back: primary is stripped, secondary is unchanged
-            if primary {
-                write_bitmap_pair(path, &p_bm, s_bm)?;
-            } else {
-                write_bitmap_pair(path, s_bm, &p_bm)?;
-            }
-        }
-    }
-
-    // PASS 3: Save the parent node
+    // Save the parent node
     // For DNA mode: Core in DNA slot, Union in AA slot
     // For AA mode: read existing parent (if any) for DNA, use Core for AA
     if primary {
@@ -575,30 +554,37 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, is_flat: bool, mode: &s
     Ok(())
 }
 
-/// The Accumulator Search Algorithm for Delta-SBT traversal.
+/// The Tree-of-Trees Search Algorithm for Delta-SBT traversal.
 ///
-/// Standard SBTs search full filters. Delta-SBTs must logically piece filters back together
-/// as they traverse down. Because the sets are strictly disjoint (thanks to `build_delta_tree`),
-/// we can use the distributive property: |Q ∩ (Core ∪ Delta)| = |Q ∩ Core| + |Q ∩ Delta|.
+/// The Delta-SBT is a tree of trees: every node stores the Core of its own subtree
+/// (the intersection of its children — see `build_delta_tree`). A species node holds the
+/// k-mers shared by all its genomes, a genus node the k-mers shared across its species
+/// Cores, and so on up to the kingdom. Genome leaves hold their full sketch.
 ///
-/// We keep a running tally (`accumulated_score`) and never have to decompress or rebuild
-/// the full Bloom Filters in memory!
+/// Each node is therefore self-contained: we score the query against a node directly as the
+/// containment of the query in that node's Core, `|Q ∩ Core| / |Q|`. There is no path
+/// accumulation — summing nested Cores down a path would double-count the shared k-mers and,
+/// because amino-acid Cores are large and highly conserved, saturate every internal score to
+/// containment ≥ 1 (distance 0), which collapses the AA phase and erases kingdom resolution.
 ///
 /// ## Pruning
 ///
 /// At each node all of its children are scored upfront.  The children are sorted by
 /// distance and only those within `best_distance * (1 + uncertainty/100)` of the closest
 /// sibling are enqueued.  This gives logarithmic traversal instead of exhaustive visits.
+/// When the closest sibling is an exact match (`best_distance == 0`) the relative window
+/// would collapse to zero and prune every alternative branch, so an absolute fallback of
+/// `uncertainty/100` is used instead to keep near matches in play.
 ///
 /// `theta` (pruning_threshold) is an additional absolute containment floor: any node whose
-/// accumulated containment fraction (accumulated_score / query_len) falls below theta is
-/// pruned together with its entire subtree.
+/// containment fraction (score / query_len) falls below theta is pruned together with its
+/// entire subtree.
 ///
 /// ## Bitmap loading
 ///
 /// Each node's bitmap is loaded exactly once — when its parent evaluates all children.
-/// The queue carries the pre-computed accumulated score for the node it points to, so
-/// no bitmap is re-read when a node is popped.
+/// The queue carries the pre-computed score for the node it points to, so no bitmap is
+/// re-read when a node is popped.
 ///
 /// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files.
 #[pyfunction]
@@ -627,9 +613,9 @@ fn accumulator_search(
         return Ok(profiles);
     }
 
-    // Inline helper: accumulated k-mer intersection count → ANI distance in [0, 1]
-    let score_to_distance = |accumulated: f64| -> f64 {
-        let containment = accumulated / query_len;
+    // Inline helper: per-node k-mer intersection count → ANI distance in [0, 1]
+    let score_to_distance = |score: f64| -> f64 {
+        let containment = score / query_len;
         let ani = if containment > 0.0 {
             1.0 + (1.0 / eff_kmer as f64) * containment.ln()
         } else {
@@ -638,22 +624,22 @@ fn accumulator_search(
         if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani }
     };
 
-    // Pre-compute the root's accumulated score so every queue entry always carries the
-    // final score for the node it represents (parent score + this node's contribution).
+    // Pre-compute the root's own score so every queue entry always carries the score for
+    // the node it represents (the containment of the query in that node's own Core).
     let root_bm = select_bitmap(tree_root, mode)?;
-    let root_accumulated = query_bm.intersection_len(&root_bm) as f64;
+    let root_score = query_bm.intersection_len(&root_bm) as f64;
 
-    // Queue: (node_path, accumulated_score_for_this_node, level_name)
+    // Queue: (node_path, score_for_this_node, level_name)
     let mut queue: VecDeque<(String, f64, String)> = VecDeque::new();
-    queue.push_back((tree_root.to_string(), root_accumulated, "db".to_string()));
+    queue.push_back((tree_root.to_string(), root_score, "db".to_string()));
 
-    while let Some((node_path, my_accumulated, level_name)) = queue.pop_front() {
+    while let Some((node_path, my_score, level_name)) = queue.pop_front() {
         // Record this node (skip the artificial "db" root above all kingdoms)
         if level_name != "db" {
-            if my_accumulated / query_len < theta {
+            if my_score / query_len < theta {
                 continue;  // absolute floor — prune this node and don't expand its children
             }
-            let distance = score_to_distance(my_accumulated);
+            let distance = score_to_distance(my_score);
             profiles.entry(level_name.clone())
                 .or_insert_with(HashMap::new)
                 .insert(node_path.clone(), distance);
@@ -661,26 +647,26 @@ fn accumulator_search(
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
 
-        // Score every child to decide which branches are worth pursuing
-        let mut candidates: Vec<(String, String, f64, f64)> = Vec::new(); // (path, level, distance, accumulated)
+        // Score every child against its own Core to decide which branches are worth pursuing
+        let mut candidates: Vec<(String, String, f64, f64)> = Vec::new(); // (path, level, distance, score)
 
         for (child_path, next_level) in children {
             if !Path::new(child_path).exists() {
                 continue;
             }
             let child_bm = select_bitmap(child_path, mode)?;
-            let child_accumulated = my_accumulated + query_bm.intersection_len(&child_bm) as f64;
+            let child_score = query_bm.intersection_len(&child_bm) as f64;
 
             // Absolute containment floor: prune child and its subtree
-            if child_accumulated / query_len < theta {
+            if child_score / query_len < theta {
                 continue;
             }
 
             candidates.push((
                 child_path.clone(),
                 next_level.clone(),
-                score_to_distance(child_accumulated),
-                child_accumulated,
+                score_to_distance(child_score),
+                child_score,
             ));
         }
 
@@ -694,76 +680,23 @@ fn accumulator_search(
         // Uncertainty cutoff: keep every child within best_distance * (1 + uncertainty/100).
         // This is a relative expansion, so a 50% uncertainty keeps all siblings up to 1.5×
         // the closest distance — naturally narrower at lower levels where distances are small.
+        // If the best sibling is an exact match the relative window collapses to zero, so fall
+        // back to an absolute window of uncertainty/100 to avoid pruning every alternative.
         let best_distance = candidates[0].2;
-        let cutoff = best_distance * (1.0 + uncertainty / 100.0);
+        let cutoff = if best_distance > 0.0 {
+            best_distance * (1.0 + uncertainty / 100.0)
+        } else {
+            uncertainty / 100.0
+        };
 
-        for (child_path, next_level, child_distance, child_accumulated) in candidates {
+        for (child_path, next_level, child_distance, child_score) in candidates {
             if child_distance <= cutoff {
-                queue.push_back((child_path, child_accumulated, next_level));
+                queue.push_back((child_path, child_score, next_level));
             }
         }
     }
 
     Ok(profiles)
-}
-
-/// Dynamic Rebalancing / Delta update for a new genome insertion.
-///
-/// Inserting a new genome into a disjoint Delta tree requires shifting the consensus.
-/// If the new genome is missing a "Core" gene, that gene is no longer core! It must be
-/// evicted from the parent node and pushed down into the Deltas of the existing siblings.
-///
-/// The `mode` parameter selects the bitmap (dna/aa) for rebalancing.
-/// The other bitmap passes through unchanged.
-#[pyfunction]
-fn update_delta_tree(new_sketch: &str, species_node_path: &str, sibling_sketches: Vec<String>, mode: &str) -> PyResult<()> {
-    let primary = matches!(mode, "dna" | "DNA");
-    let (new_dna, new_aa) = read_bitmap_pair(new_sketch)?;
-    let (species_dna, species_aa) = read_bitmap_pair(species_node_path)?;
-
-    let (mut new_primary, species_primary, species_other, new_other) = if primary {
-        (new_dna, species_dna, species_aa, new_aa)
-    } else {
-        (new_aa, species_aa, species_dna, new_dna)
-    };
-
-    let mut new_core = species_primary.clone();
-    new_core &= &new_primary;
-
-    let mut lost_core = species_primary.clone();
-    lost_core -= &new_core;
-
-    if !lost_core.is_empty() {
-        for sibling_path in &sibling_sketches {
-            let (sib_dna, sib_aa) = read_bitmap_pair(sibling_path)?;
-            let (mut sib_bm, sib_other) = if primary {
-                (sib_dna, sib_aa)
-            } else {
-                (sib_aa, sib_dna)
-            };
-            sib_bm |= &lost_core;
-            if primary {
-                write_bitmap_pair(sibling_path, &sib_bm, &sib_other)?;
-            } else {
-                write_bitmap_pair(sibling_path, &sib_other, &sib_bm)?;
-            }
-        }
-        if primary {
-            write_bitmap_pair(species_node_path, &new_core, &species_other)?;
-        } else {
-            write_bitmap_pair(species_node_path, &species_other, &new_core)?;
-        }
-    }
-
-    new_primary -= &new_core;
-
-    if primary {
-        write_bitmap_pair(new_sketch, &new_primary, &new_other)?;
-    } else {
-        write_bitmap_pair(new_sketch, &new_other, &new_primary)?;
-    }
-
-    Ok(())
 }
 
 /// Read a serialized dual-payload sketch file and return the cardinality of the
@@ -792,6 +725,5 @@ fn deltatree(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;
     m.add_function(wrap_pyfunction!(accumulator_search, m)?)?;
     m.add_function(wrap_pyfunction!(build_delta_tree, m)?)?;
-    m.add_function(wrap_pyfunction!(update_delta_tree, m)?)?;
     Ok(())
 }
