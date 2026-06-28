@@ -590,7 +590,11 @@ class MetaSBT(object):
         # Consider genomes that passed the dereplication process only
         references = {genome: references[genome] for genome in genomes}
 
-        # Add references to the database
+        # Cluster the references into ANI-coherent species clusters without a fixed threshold
+        # and relabel each cluster by majority vote of its members' taxonomy
+        references = self.database.cluster_references(references)
+
+        # Add references to the database under their refined lineage
         for genome in references:
             self.database.add(genome, reference=True, taxonomy=references[genome])
 
@@ -1950,8 +1954,13 @@ class MetaSBT(object):
                 # Dereplicate references based on their ANI distance (input-vs-input)
                 genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
 
-            # Add the surviving references under their own taxonomic lineage
-            for genome in genomes:
+            # Cluster the surviving references into ANI-coherent species clusters (reusing the
+            # species radius learned at index time) and relabel each cluster by majority vote;
+            # a cluster whose label matches an existing species merges into it through add()
+            references = self.database.cluster_references({genome: references[genome] for genome in genomes})
+
+            # Add the references under their refined lineage
+            for genome in references:
                 self.database.add(genome, reference=True, taxonomy=references[genome])
 
         else:

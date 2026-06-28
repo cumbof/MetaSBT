@@ -451,159 +451,289 @@ class Database(object):
         self.metadata["scaled_factor"] = scaled_factor
         self._dump_metadata()
 
-    def cluster(self, genomes: Dict[str, str], threshold: float=0.05) -> Dict[str, str]:
-        """Cluster group of genomes based on a specific threshold on the ANI distance.
+    def _condensed_distances(self, sketches: List[str]) -> List[float]:
+        """Return the condensed (upper-triangular, row-major) ANI distance vector for an
+        ordered list of sketch files, suitable for `scipy.cluster.hierarchy.linkage`.
 
         Parameters
         ----------
-        genomes : dict
-            A dictionary with genomes and their taxonomic label.
-            Genomes could be defined with paths to their fasta file or paths to their bloom filter sketch representation.
-        threshold : float, default 0.05
-            Threshold on the ANI distance used to cut the dendrogram and reshape clusters.
+        sketches : list
+            Ordered list of paths to the genome sketch files.
 
-        Raises
-        ------
-        FileNotFoundError
-            In case an input file does not exist.
-        ValueError
-            In case the extension of an input file is not supported.
-            See `_is_supported` for additional information.
+        Returns
+        -------
+        list
+            The condensed distance vector: d(0,1), d(0,2), ..., d(0,n-1), d(1,2), ...
+        """
+
+        condensed: List[float] = []
+
+        if len(sketches) < 2:
+            return condensed
+
+        kmer_size = self.metadata["kmer_size"]
+
+        # Parallelise only for clades large enough to amortise the process-pool overhead;
+        # most genera are small and run faster serially (each `dist` call is a single Rust call).
+        if self.nproc > 1 and len(sketches) > 64:
+            args_list = [
+                (sketches[i], sketches[i + 1:], kmer_size, self.tmp, "dna")
+                for i in range(len(sketches) - 1)
+            ]
+
+            with mp.Pool(processes=min(self.nproc, len(args_list))) as pool:
+                partial = dict(pool.imap_unordered(self.__class__._dist, args_list, chunksize=1))
+
+            for i in range(len(sketches) - 1):
+                row = partial[sketches[i]]
+                condensed.extend(row[sketches[j]] for j in range(i + 1, len(sketches)))
+
+        else:
+            for i in range(len(sketches) - 1):
+                _, row = self.__class__.dist(
+                    sketches[i], sketches[i + 1:], kmer_size, tmp=self.tmp, resume=False
+                )
+                condensed.extend(row[sketches[j]] for j in range(i + 1, len(sketches)))
+
+        return condensed
+
+    def _learn_species_radius(
+        self,
+        by_genus: Dict[str, Dict[str, str]],
+        genus_paths: Dict[str, List[str]],
+        genus_condensed: Dict[str, Optional[List[float]]],
+    ) -> Tuple[float, float]:
+        """Learn the species-level ANI distance boundary from the reference data instead of
+        hard-coding it.
+
+        Within each genus, the pairwise distances between genomes that share the same input
+        species label (within-species) and between genomes with different input species labels
+        (between-species) form two distributions. The boundary is the distance that best
+        separates them, i.e. the threshold maximising Youden's J (`TPR - FPR`). This is the
+        empirical average-nucleotide-identity discontinuity of *this* reference set, so no
+        fixed value is assumed.
+
+        Parameters
+        ----------
+        by_genus : dict
+            Mapping of genus lineage to its {genome filepath: formatted taxonomy}.
+        genus_paths : dict
+            Mapping of genus lineage to its ordered list of genome filepaths.
+        genus_condensed : dict
+            Mapping of genus lineage to its condensed distance vector (or None for singletons).
+
+        Returns
+        -------
+        tuple
+            The learned species radius and a robust upper bound (95th percentile) on the
+            within-species spread used by `_gap_cut`. Falls back to 0.05 (95% ANI) for both
+            when the data cannot inform the estimate (e.g. every species is a singleton).
+        """
+
+        default = 0.05
+
+        within: List[float] = []
+        between: List[float] = []
+
+        for genus_lineage, condensed in genus_condensed.items():
+            if not condensed:
+                continue
+
+            paths = genus_paths[genus_lineage]
+            members = by_genus[genus_lineage]
+            species = [members[p].split("|")[-1] for p in paths]
+
+            k = 0
+            n = len(paths)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    (within if species[i] == species[j] else between).append(condensed[k])
+                    k += 1
+
+        if not within or not between:
+            return default, default
+
+        within_arr = np.sort(np.array(within, dtype=float))
+        between_arr = np.sort(np.array(between, dtype=float))
+
+        # Evaluate every observed distance as a candidate threshold and keep the one that
+        # best tells the two distributions apart (maximum true-positive minus false-positive
+        # rate). searchsorted gives the cumulative counts in a single vectorised pass.
+        candidates = np.unique(np.concatenate([within_arr, between_arr]))
+        tpr = np.searchsorted(within_arr, candidates, side="right") / within_arr.size
+        fpr = np.searchsorted(between_arr, candidates, side="right") / between_arr.size
+        radius = float(candidates[int(np.argmax(tpr - fpr))])
+
+        # Typical within-species spread, used by `_gap_cut`. Restrict to within-species pairs at
+        # or below the radius so input labels that lump two ANI-distinct species into one (whose
+        # distance lands above the radius) do not inflate it.
+        coherent = within_arr[within_arr <= radius]
+        within_hi = float(np.percentile(coherent, 95)) if coherent.size else radius
+
+        return round(radius, 5), round(within_hi, 5)
+
+    @staticmethod
+    def _gap_cut(heights: List[float], radius: float, within_hi: float) -> float:
+        """Choose a dendrogram cut height without a fixed threshold.
+
+        The default cut is the learned species `radius`. If the clade shows a clearer natural
+        valley *below* the radius (a gap between consecutive merge heights at least as wide as
+        the typical within-species spread `within_hi`), the cut snaps to that valley instead.
+        This lets genera with tighter species spreads be split more finely while never lumping
+        genomes farther apart than the species radius.
+
+        Parameters
+        ----------
+        heights : list
+            The sorted merge heights of the clade's average-linkage dendrogram.
+        radius : float
+            The learned species radius (an upper bound on a species cluster's spread).
+        within_hi : float
+            The learned typical upper bound on within-species spread (gap significance scale).
+
+        Returns
+        -------
+        float
+            The distance at which to cut the dendrogram.
+        """
+
+        if not heights:
+            return radius
+
+        best_gap = 0.0
+        best_cut = radius
+
+        prev = heights[0]
+        for height in heights[1:]:
+            if prev >= radius:
+                # Merges at or above the species radius separate different species, not
+                # members of one species, so they are irrelevant to the species cut.
+                break
+
+            gap = height - prev
+            if gap > best_gap:
+                best_gap = gap
+                best_cut = min((prev + height) / 2.0, radius)
+
+            prev = height
+
+        # Honour the valley only if it is at least as wide as the typical within-species
+        # spread, so a cohesive (unimodal) species is not over-split.
+        if best_gap > 0.0 and best_gap >= within_hi:
+            return best_cut
+
+        return radius
+
+    def cluster_references(self, references: Dict[str, str]) -> Dict[str, str]:
+        """Cluster reference genomes into ANI-coherent species clusters without a fixed
+        distance threshold, then label each cluster by majority vote of its members' input
+        (e.g. NCBI) taxonomy.
+
+        Reference genomes carry a fully-defined taxonomic label. Rather than trusting the input
+        species delineation verbatim, genomes are grouped by their input lineage down to the
+        genus level (ranks above the species are taken as given — the ANI discontinuity that
+        delineates species is not informative at higher ranks) and, within each genus, clustered
+        at the species level by cutting the average-linkage dendrogram. The cut height is the
+        species radius learned from the data (`_learn_species_radius`), optionally tightened to a
+        clearer natural valley in the genus (`_gap_cut`), so no fixed threshold is hard-coded.
+        Each resulting cluster is named by the majority input species label of its members (ties
+        broken alphabetically); when the cut splits one input species into several clusters they
+        are disambiguated with a `__clade_N` suffix. A cluster whose majority label matches an
+        existing species in the database merges into it through `add()`.
+
+        Note: clustering happens within a genus, so a genus over-represented by thousands of
+        genomes pays an O(n^2) distance cost; this is acceptable for the one-off index build.
+
+        Parameters
+        ----------
+        references : dict
+            Mapping of genome filepath to its fully-defined input taxonomic label.
 
         Returns
         -------
         dict
-            A new dictionary with genomes and their new taxonomic label.
+            Mapping of genome filepath to its refined fully-defined taxonomic label.
         """
 
-        # Check whether the genomes exist
-        for genome_filepath in genomes:
-            if not os.path.isfile(genome_filepath):
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), genome_filepath)
+        if not references:
+            return {}
 
-            elif not self.__class__._is_supported(genome_filepath):
-                raise ValueError(f"This file type is not supported: {genome_filepath}")
+        genus_idx = self.__class__.LEVELS.index("genus")
 
-        assignments = dict()
+        # Normalise the input labels and group genomes by their lineage down to the genus
+        by_genus: "OrderedDict[str, Dict[str, str]]" = OrderedDict()
+        for genome_filepath, taxonomy in references.items():
+            taxonomy = self.__class__._format_taxonomy(taxonomy)
+            genus_lineage = "|".join(taxonomy.split("|")[:genus_idx + 1])
+            by_genus.setdefault(genus_lineage, dict())[genome_filepath] = taxonomy
 
-        sketches = list()
+        # Build the sketches once (resume-friendly) and a per-genus condensed distance matrix
+        sketch_map = self.sketch_genomes(list(references.keys()))
 
-        for genome_filepath in genomes:
-            if os.path.splitext(genome_filepath)[1] == ".bf":
-                sketches.append(genome_filepath)
+        genus_paths: Dict[str, List[str]] = {}
+        genus_condensed: Dict[str, Optional[List[float]]] = {}
+        for genus_lineage, members in by_genus.items():
+            paths = sorted(members.keys())
+            genus_paths[genus_lineage] = paths
+            genus_condensed[genus_lineage] = (
+                self._condensed_distances([sketch_map[p] for p in paths]) if len(paths) > 1 else None
+            )
 
+        # Reuse the species radius learned for the baseline; learn it only the first time so
+        # later reference updates remain consistent with the original index.
+        if "species_radius" in self.metadata:
+            radius = self.metadata["species_radius"]
+            within_hi = self.metadata.get("species_within_hi", radius)
+        else:
+            radius, within_hi = self._learn_species_radius(by_genus, genus_paths, genus_condensed)
+            self.metadata["species_radius"] = radius
+            self.metadata["species_within_hi"] = within_hi
+            self._dump_metadata()
+
+        refined: Dict[str, str] = {}
+
+        for genus_lineage, members in by_genus.items():
+            paths = genus_paths[genus_lineage]
+            condensed = genus_condensed[genus_lineage]
+
+            if condensed is None:
+                # A single genome in this genus: one species cluster
+                labels = [0] * len(paths)
             else:
-                # In case of fasta files (optionally gzip-compressed)
-                filename = self.__class__._basename(genome_filepath)
+                linkage = hier.linkage(condensed, method="average")
+                heights = sorted(float(height) for height in linkage[:, 2])
+                cut = self.__class__._gap_cut(heights, radius, within_hi)
+                labels = hier.fcluster(linkage, cut, criterion="distance")
 
-                genome_obj = Entry(self, filename, filename, "genome")
+            # Group genomes by their assigned cluster id (preserve a deterministic order)
+            groups: "OrderedDict[Any, List[str]]" = OrderedDict()
+            for path, label in zip(paths, labels):
+                groups.setdefault(label, list()).append(path)
 
-                # Build their bloom filter sketch representation
-                genome_sketch_filepath = genome_obj.sketch(genome_filepath)
+            # Majority-vote a species label for each cluster (ties broken alphabetically)
+            voted: Dict[Any, str] = {}
+            for label, group_paths in groups.items():
+                counts = Counter(members[p].split("|")[-1] for p in group_paths)
+                top_count = max(counts.values())
+                voted[label] = sorted(name for name, count in counts.items() if count == top_count)[0]
 
-                sketches.append(genome_sketch_filepath)
+            # Disambiguate clusters that voted the same species label (a split species)
+            name_shared = Counter(voted.values())
+            clade_counter: Dict[str, int] = {}
+            for label, group_paths in groups.items():
+                base = voted[label]
 
-        # Build a condensed ANI distance matrix
-        condensed_distance_matrix = list()
-
-        # Rescale nproc
-        nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
-
-        if nproc > 1:
-            # Keep track of the ANI distances
-            dists = dict()
-
-            with mp.Pool(processes=nproc) as pool:
-                args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
-
-                for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list, chunksize=1), total=len(args_list)):
-                    dists[sketch_filepath] = list(sketch_dists.values())
-
-            for sketch_filepath in sketches:
-                condensed_distance_matrix.extend(dists[sketch_filepath])
-
-        else:
-            # Avoid using multiprocessing if `nproc` is 1
-            for pos, sketch_filepath in enumerate(sketches):
-                _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                condensed_distance_matrix.extend(list(sketch_dists.values()))
-
-        # Build a dendrogram based on the ANI distances between unknown genomes
-        # Method: average-linkage
-        dendro = hier.linkage(condensed_distance_matrix, method="average")
-
-        # Finally, cut the dendrogram on the input threshold
-        if len(sketches) > 1:
-            # The dendrogram exists in case of >1 sketches
-            clusters = hier.fcluster(dendro, threshold, criterion="distance")
-
-        else:
-            # There is only one sketch here
-            clusters = [1]
-
-        if len(set(clusters)) == 1:
-            # Define the cluster label by majority voting
-            # Count the number of occurrences for each of the taxonomic labels first
-            counts = Counter(genomes.values())
-
-            # Get the most occurring one
-            max_count = max(counts.values())
-
-            most_frequent = [label for label, count in counts.items() if count == max_count]
-
-            # Get the first one in alphabetical order
-            # This is required in case of equally occurring taxonomic labels
-            label = sorted(most_frequent)[0]
-
-            # Apply the assignment
-            assignments[label] = set(genomes.keys())
-
-        else:
-            # Group genomes according to the new clustering
-            clusters_map = {cluster: set() for cluster in set(clusters)}
-
-            for genome_filepath, cluster in zip(genomes.keys(), clusters):
-                clusters_map[cluster].add(genome_filepath)
-
-            # Keep track of the label occurrences in different clusters
-            labels_count = dict()
-
-            for cluster in clusters_map:
-                # Assign a taxonomic label to the new clusters based on the majority voting
-                # Count the number of occurrences for each of the taxonomic labels first
-                counts = Counter(genomes[genome_filepath] for genome_filepath in clusters_map[cluster])
-
-                # Get the most occurring one
-                max_count = max(counts.values())
-
-                most_frequent = [label for label, count in counts.items() if count == max_count]
-
-                # Get the first one in alphabetical order
-                # This is required in case of equally occurring taxonomic labels
-                label = sorted(most_frequent)[0]
-
-                # Check whether a cluster with this taxonomic label already exists
-                if label not in labels_count:
-                    labels_count[label] = 1
-
+                if name_shared[base] > 1:
+                    clade_counter[base] = clade_counter.get(base, 0) + 1
+                    species_label = f"{base}__clade_{clade_counter[base]}"
                 else:
-                    if label in assignments:
-                        # There are more than 1 clusters with the same label
-                        # Rename the first one as clade 1
-                        clade_1 = f"{label}__clade_1"
+                    species_label = base
 
-                        assignments[clade_1] = assignments.pop(label)
+                full_taxonomy = f"{genus_lineage}|{species_label}"
+                for path in group_paths:
+                    refined[path] = full_taxonomy
 
-                    labels_count[label] += 1
-
-                    # Add an incremental number
-                    label += f"__clade_{labels_count[label]}"
-
-                # Apply the assignment
-                assignments[label] = clusters_map[cluster]
-
-        return {genome: label for label in assignments for genome in assignments[label]}
+        return refined
 
     @staticmethod
     def _is_known(args: Tuple["Database", str]) -> Tuple[str, Optional[str]]:
@@ -1273,8 +1403,9 @@ class Database(object):
         taxonomy : str
             A taxonomic label.
         species_threshold : float, default 0.05
-            Maximum genetic distance used as the radius for species-level clusters.
-            Corresponds to 1 - ANI (e.g. 0.05 = 95% ANI).
+            Fallback maximum genetic distance used as the radius for species-level clusters,
+            corresponding to 1 - ANI (e.g. 0.05 = 95% ANI). Used only when the database has no
+            `species_radius` learned from the reference data (see `cluster_references`).
 
         Raises
         ------
@@ -1295,7 +1426,8 @@ class Database(object):
         cluster_level = self.__class__.LEVELS[taxonomy.count("|")]
 
         if cluster_level == "species":
-            return (0.0, species_threshold)
+            # Prefer the species radius learned from the reference data over the fixed fallback
+            return (0.0, self.metadata.get("species_radius", species_threshold))
 
         cluster_name = taxonomy.split("|")[-1]
 
