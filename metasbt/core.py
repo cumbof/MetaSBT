@@ -1584,21 +1584,11 @@ class Database(object):
 
                     processed.add(partial_taxonomy)
 
-        # Sweep 2: Rebuild AA Core at order+ levels.
-        # The first sweep built DNA Core at all levels (with AA union passed upward).
-        # Now we rebuild order, class, phylum, and kingdom using AA Core intersection.
-        # Uses a separate tracking set so Sweep 1's `processed` entries do not block it.
-        aa_levels = self.__class__.LEVELS[self.__class__.LEVELS.index("order"):]
-        aa_processed = set()
-        for level in reversed(aa_levels):
-            pos = self.__class__.LEVELS.index(level)
-            for taxonomy in self.__clusters:
-                partial_taxonomy = "|".join(taxonomy.split("|")[:pos+1])
-                if partial_taxonomy not in aa_processed:
-                    cluster = partial_taxonomy.split("|")[-1]
-                    cluster_obj = self.clusters[level][cluster]
-                    cluster_obj.index(mode="aa")
-                    aa_processed.add(partial_taxonomy)
+        # A single bottom-up sweep is sufficient: every node stores the union of its subtree
+        # for both payloads, and unions compose associatively, so each level already carries
+        # the full DNA and AA subtree union built from its children's unions. There is no
+        # separate AA sweep to run (the old intersection-based design needed one to rebuild
+        # AA Cores at the upper levels; unions make that redundant).
 
         # Retrieve the set of kingdoms in the database
         kingdoms = set(self.clusters["kingdom"].keys())
@@ -1617,8 +1607,8 @@ class Database(object):
         # It must stay out of the clusters folder
         db_obj = Entry(self, "MSBT0", "db", None, folder=db_folder, parent=None, children=kingdoms)
 
-        # Index the kingdom entries (AA mode for the kingdom-level root as well)
-        db_obj.index(mode="aa")
+        # Index the kingdom entries: a single union sweep fills both the DNA and AA slots
+        db_obj.index()
 
         # Dump the report
         self._dump_report()
@@ -1947,10 +1937,10 @@ class Database(object):
             Minimum containment score below which a branch is pruned during the accumulator search.
             Must be between 0.0 and 1.0.
         mode : str, default "split"
-            Search mode.  "split" (default) mirrors the two-sweep tree layout: AA bitmaps are
-            queried at kingdom/phylum/class/order levels (where Sweep 2 built AA Cores), then DNA
-            bitmaps are queried at family/genus/species/genome levels (where Sweep 1 built DNA
-            Cores).  Pass "dna" or "aa" for a single-mode search across all levels.
+            Search mode.  "split" (default) queries the AA subtree unions at the
+            kingdom/phylum/class/order levels (more conserved, better for deep relationships)
+            and the DNA subtree unions at the family/genus/species/genome levels (finer
+            resolution).  Pass "dna" or "aa" for a single-payload search across all levels.
 
         Raises
         ------
@@ -1967,7 +1957,7 @@ class Database(object):
         levels = ["db"] + self.__class__.LEVELS + ["genome"]
         profiles = {level: dict() for level in levels[1:]}
 
-        # Levels where the tree stores AA Cores (Sweep 2) vs DNA Cores (Sweep 1)
+        # Levels searched against the AA subtree union vs the DNA subtree union
         order_idx = self.__class__.LEVELS.index("order")
         aa_level_set = set(self.__class__.LEVELS[:order_idx + 1])   # kingdom → order
         dna_level_set = set(self.__class__.LEVELS[order_idx + 1:])  # family → species
@@ -2009,8 +1999,8 @@ class Database(object):
 
         if mode == "split":
             # Phase 1 — AA accumulator search (kingdom / phylum / class / order).
-            # These levels carry AA Cores built by Sweep 2 of update(), so querying the AA
-            # bitmap here is both correct and more informative than DNA at this evolutionary scale.
+            # AA k-mers are more conserved, so querying the AA subtree unions is more
+            # informative than DNA at this evolutionary scale.
             try:
                 raw_aa = deltatree.accumulator_search(
                     sketch_filepath, tree_root_filepath, tree_topology,
@@ -2020,10 +2010,9 @@ class Database(object):
                 raise Exception(f"AA accumulator search failed: {e}")
 
             # Phase 2 — DNA accumulator search (family / genus / species / genome).
-            # These levels carry DNA Cores/Deltas from Sweep 1; DNA resolution is appropriate here.
-            # Running from the same root is necessary to correctly accumulate DNA Core contributions
-            # from every level (MSBT0 → kingdom → … → order) before entering the lower subtree —
-            # mixing AA scores with DNA scores in a single pass is not mathematically valid.
+            # DNA resolution is appropriate at these levels. It runs from the same root as the
+            # AA phase because each phase navigates a single payload's unions top-down; mixing
+            # AA and DNA scores within one traversal is not mathematically valid.
             try:
                 raw_dna = deltatree.accumulator_search(
                     sketch_filepath, tree_root_filepath, tree_topology,
@@ -3846,9 +3835,10 @@ class Entry(object):
         ----------
         mode : str, default "dna"
             The bitmap mode to index: "dna" or "aa".
-            In "dna" mode, children DNA bitmaps are intersected for the Core
-            and the AA bitmaps are unioned into the parent. In "aa" mode,
-            AA bitmaps are intersected and the parent's DNA slot is preserved.
+            In "dna" mode the children's DNA and AA bitmaps are each unioned into the
+            parent's DNA and AA slots. In "aa" mode only the AA union is rebuilt and the
+            parent's DNA slot is preserved. A single "dna" sweep fills both slots, so the
+            "aa" mode is normally not needed.
 
         Raises
         ------

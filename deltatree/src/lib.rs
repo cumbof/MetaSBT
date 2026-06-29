@@ -1,9 +1,9 @@
 //! DeltaTree: High-performance Rust backend for MetaSBT v2.0
 //! 
-//! This module implements the core algorithms for the Delta-SBT architecture,
-//! which drastically reduces the disk footprint of Sequence Bloom Trees by 
-//! vertically stripping redundant "Core" k-mers from child nodes, storing
-//! only strictly disjoint "Delta" (accessory) k-mers at the leaves.
+//! This module implements the core algorithms for the MetaSBT Sequence Bloom Tree:
+//! every internal node stores the union of its subtree's sub-sampled k-mers, so a query
+//! is navigated top-down by its containment in each node's union. FracMinHash bounds the
+//! hash space, keeping even the root union compact as a Roaring bitmap.
 //! 
 //! It leverages:
 //! - `needletail` for blazing fast FASTA parsing.
@@ -485,25 +485,39 @@ fn containment_ani(focus: &str, targets: Vec<String>, kmer_size: usize, mode: &s
     Ok(results)
 }
 
-/// Build the Delta-SBT tree structure from a list of children sketches.
+/// Build the Sequence Bloom Tree structure from a list of children sketches.
 ///
-/// The Delta-SBT is a tree of trees: an internal node (Core) is the mathematical intersection
-/// of its children. Each node is self-contained — it stores the Core of its own subtree — and
-/// the children are left untouched. In particular the canonical genome sketches that feed the
-/// species level are never rewritten, so they stay available (full) for distance, dereplication
-/// and centroid computations elsewhere.
+/// Every internal node stores the **union** of its subtree — the set of all sub-sampled
+/// k-mer hashes carried by any descendant — exactly as a classic Sequence Bloom Tree does.
+/// Because a FracMinHash sketch is a bottom/mod sketch, the union of children sketches is
+/// itself a valid FracMinHash sketch of the combined k-mer set, so containment-ANI math
+/// stays exact when the node is queried. Unions compose associatively, so a single bottom-up
+/// sweep yields the full subtree union at every level: a genus node's union is the union of
+/// its species' unions, which are the unions of their genomes, and so on.
 ///
-/// The `mode` parameter selects which bitmap (dna/aa) to operate on.
-/// In "dna" mode, the parent's AA slot stores the union of children's AA bitmaps
-/// (so AA data propagates upward through DNA-based levels for later AA mode sweeps).
-/// In "aa" mode, only AA bitmaps are intersected; DNA passes through unchanged.
+/// The union (never the intersection) is the correct primitive for membership search. The
+/// intersection — the k-mers common to *all* members — shrinks as a clade grows and balloons
+/// for singleton clades, which makes `|Q ∩ node| / |Q|` systematically favour singleton/rare
+/// lineages and funnels unrelated queries into them. The union has no such cardinality bias:
+/// a larger union does not inflate an unrelated query's containment, because FracMinHash only
+/// counts shared hashes.
+///
+/// Storage is bounded and cheap: FracMinHash caps the hash space at `u32::MAX / scaled`, so
+/// even the root union (all DB k-mers) fits in a few MB as a Roaring bitmap. There is no need
+/// to delta-encode the unions; an "OR down the path" delta only reconstructs a quantity that
+/// *grows* toward the leaves (an intersection/Core), and a subtree union shrinks toward the
+/// leaves, so that scheme does not apply here.
+///
+/// The `mode` parameter selects which bitmap (dna/aa) to operate on. In "dna" mode both the
+/// DNA and AA unions of the children are written (the AA union propagates upward for the
+/// AA-phase search). In "aa" mode only the AA union is (re)written; the DNA slot is preserved.
 #[pyfunction]
 fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult<()> {
     let list_file = File::open(sketches_list)
         .map_err(|e| PyIOError::new_err(format!("Cannot open sketches list: {}", e)))?;
     let reader = BufReader::new(list_file);
 
-    // Select which bitmap to use for Core operations: "dna" or "aa"
+    // Select which bitmap is the primary union target for this sweep: "dna" or "aa"
     let primary = match mode {
         "dna" | "DNA" => true,
         "aa" | "AA" => false,
@@ -512,11 +526,10 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
         )),
     };
 
-    let mut core_bitmap = RoaringBitmap::new();
-    let mut union_bitmap = RoaringBitmap::new(); // Union of the secondary bitmap (used in DNA mode)
-    let mut first = true;
+    let mut primary_union = RoaringBitmap::new();   // union of the primary bitmap
+    let mut secondary_union = RoaringBitmap::new();  // union of the secondary bitmap
 
-    // Bottom-Up Step: Load children and compute Core (intersection) / Union
+    // Bottom-up step: load children and accumulate the union of both payloads
     for line in reader.lines() {
         let filepath = line.map_err(|e| PyIOError::new_err(e.to_string()))?;
         let filepath = filepath.trim().to_string();
@@ -525,47 +538,42 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
         let (dna, aa) = read_bitmap_pair(&filepath)?;
         let (p_bm, s_bm) = if primary { (dna, aa) } else { (aa, dna) };
 
-        if first {
-            core_bitmap = p_bm;
-            first = false;
-        } else {
-            core_bitmap &= &p_bm;
-        }
-        // Union of the secondary bitmap (meaningful in DNA mode)
-        union_bitmap |= &s_bm;
+        primary_union |= &p_bm;
+        secondary_union |= &s_bm;
     }
 
-    // Save the parent node
-    // For DNA mode: Core in DNA slot, Union in AA slot
-    // For AA mode: read existing parent (if any) for DNA, use Core for AA
+    // Save the parent node.
+    // DNA mode: DNA union in the DNA slot, AA union in the AA slot.
+    // AA mode: rewrite only the AA union; preserve the existing DNA slot.
     if primary {
-        write_bitmap_pair(out_tree, &core_bitmap, &union_bitmap)?;
+        write_bitmap_pair(out_tree, &primary_union, &secondary_union)?;
     } else {
-        // Preserve existing DNA bitmap if the parent file already exists
         let dna_bitmap = if Path::new(out_tree).exists() {
             let (existing_dna, _) = read_bitmap_pair(out_tree)?;
             existing_dna
         } else {
             RoaringBitmap::new()
         };
-        write_bitmap_pair(out_tree, &dna_bitmap, &core_bitmap)?;
+        write_bitmap_pair(out_tree, &dna_bitmap, &primary_union)?;
     }
 
     Ok(())
 }
 
-/// The Tree-of-Trees Search Algorithm for Delta-SBT traversal.
+/// The Sequence Bloom Tree search algorithm.
 ///
-/// The Delta-SBT is a tree of trees: every node stores the Core of its own subtree
-/// (the intersection of its children — see `build_delta_tree`). A species node holds the
-/// k-mers shared by all its genomes, a genus node the k-mers shared across its species
-/// Cores, and so on up to the kingdom. Genome leaves hold their full sketch.
+/// Every node stores the union of its subtree (see `build_delta_tree`): a species node holds
+/// the k-mers of all its genomes, a genus node the k-mers of all its species, and so on up to
+/// the kingdom. Genome leaves hold their own full sketch.
 ///
 /// Each node is therefore self-contained: we score the query against a node directly as the
-/// containment of the query in that node's Core, `|Q ∩ Core| / |Q|`. There is no path
-/// accumulation — summing nested Cores down a path would double-count the shared k-mers and,
-/// because amino-acid Cores are large and highly conserved, saturate every internal score to
-/// containment ≥ 1 (distance 0), which collapses the AA phase and erases kingdom resolution.
+/// containment of the query in that node's union, `|Q ∩ union| / |Q|` — the fraction of the
+/// query's k-mers that occur anywhere in the subtree. There is no path accumulation: each node
+/// already stores its complete subtree union, so a single intersection with it is exact. The
+/// union is the correct primitive — a query belonging to a clade is largely contained in that
+/// clade's union, while an unrelated query is not, regardless of how many (or few) genomes the
+/// clade holds. (The intersection/Core that earlier versions stored is biased by clade size and
+/// funnels unrelated queries into singleton lineages.)
 ///
 /// ## Pruning
 ///
@@ -625,7 +633,7 @@ fn accumulator_search(
     };
 
     // Pre-compute the root's own score so every queue entry always carries the score for
-    // the node it represents (the containment of the query in that node's own Core).
+    // the node it represents (the containment of the query in that node's subtree union).
     let root_bm = select_bitmap(tree_root, mode)?;
     let root_score = query_bm.intersection_len(&root_bm) as f64;
 
@@ -647,7 +655,7 @@ fn accumulator_search(
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
 
-        // Score every child against its own Core to decide which branches are worth pursuing
+        // Score every child against its own subtree union to decide which branches to pursue
         let mut candidates: Vec<(String, String, f64, f64)> = Vec::new(); // (path, level, distance, score)
 
         for (child_path, next_level) in children {
