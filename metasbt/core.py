@@ -1938,9 +1938,11 @@ class Database(object):
             Must be between 0.0 and 1.0.
         mode : str, default "split"
             Search mode.  "split" (default) queries the AA subtree unions at the
-            kingdom/phylum/class/order levels (more conserved, better for deep relationships)
-            and the DNA subtree unions at the family/genus/species/genome levels (finer
-            resolution).  Pass "dna" or "aa" for a single-payload search across all levels.
+            kingdom/phylum/class/order levels (more conserved, better for deep relationships),
+            then seeds a DNA descent from the AA-selected order node(s) and continues down the
+            family/genus/species/genome levels within those subtrees only (finer resolution,
+            coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-payload
+            search across all levels from the root.
 
         Raises
         ------
@@ -2009,19 +2011,45 @@ class Database(object):
             except Exception as e:
                 raise Exception(f"AA accumulator search failed: {e}")
 
-            # Phase 2 — DNA accumulator search (family / genus / species / genome).
-            # DNA resolution is appropriate at these levels. It runs from the same root as the
-            # AA phase because each phase navigates a single payload's unions top-down; mixing
-            # AA and DNA scores within one traversal is not mathematically valid.
-            try:
-                raw_dna = deltatree.accumulator_search(
-                    sketch_filepath, tree_root_filepath, tree_topology,
-                    self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna"
-                )
-            except Exception as e:
-                raise Exception(f"DNA accumulator search failed: {e}")
+            # Phase 2 — DNA accumulator search (family / genus / species / genome),
+            # ANCHORED to the order nodes selected by the AA phase.
+            #
+            # The DNA phase does NOT restart at the root. Doing so produced two defects:
+            # (1) the reported lineage was incoherent — the family-level hits came from a
+            # second, independent root-to-leaf walk and were not descendants of the order
+            # reported by the AA walk; (2) DNA union containment is monotone in clade size,
+            # so the unconstrained walk drifted into the largest families (e.g. a
+            # Streptococcus query landing in Enterobacteriaceae) regardless of relatedness.
+            #
+            # Seeding the DNA descent from every order node retained by the AA phase and
+            # confining it to those subtrees fixes both: the lineage stays continuous, and
+            # each family comparison is restricted to size-comparable siblings within the
+            # same order, which removes the cross-tree union-size bias.
+            seed_nodes = list(raw_aa.get("order", {}).keys())
+            if not seed_nodes:
+                # Fall back to the deepest AA level that produced hits, else the root.
+                for fallback_level in ("class", "phylum", "kingdom"):
+                    seed_nodes = list(raw_aa.get(fallback_level, {}).keys())
+                    if seed_nodes:
+                        break
+            if not seed_nodes:
+                seed_nodes = [tree_root_filepath]
 
-            # Merge: take AA results for upper levels, DNA results for lower levels
+            # Each seeded search treats its order node as the (unrecorded) root and records
+            # its descendants at family/genus/species/genome. Merge the per-order results.
+            raw_dna: Dict[str, Dict[str, float]] = {}
+            for seed_node in seed_nodes:
+                try:
+                    partial = deltatree.accumulator_search(
+                        sketch_filepath, seed_node, tree_topology,
+                        self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna"
+                    )
+                except Exception as e:
+                    raise Exception(f"DNA accumulator search failed: {e}")
+                for lvl, matches in partial.items():
+                    raw_dna.setdefault(lvl, {}).update(matches)
+
+            # Merge: take AA results for upper levels, anchored DNA results for lower levels
             raw_profiles = {}
             for lvl, matches in raw_aa.items():
                 if lvl in aa_level_set:
