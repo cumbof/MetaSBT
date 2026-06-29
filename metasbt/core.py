@@ -48,6 +48,19 @@ class Database(object):
     # Define the list of taxonomic levels
     LEVELS = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
+    # Deep, conserved levels are searched and bounded against the AA payload (AAI);
+    # finer levels use the DNA payload (ANI). This split is the single source of truth
+    # shared by the search (profile), the cluster boundaries (get_boundaries), and the
+    # characterization gating/dendrograms (characterize).
+    AA_LEVELS = {"kingdom", "phylum", "class", "order"}
+
+    @classmethod
+    def _payload_mode(cls, level: str) -> str:
+        """Return the sketch payload used at a taxonomic level: "aa" (AAI) for the deep,
+        conserved levels (kingdom..order) and "dna" (ANI) for the finer levels
+        (family..species, and genomes)."""
+        return "aa" if level in cls.AA_LEVELS else "dna"
+
     def __init__(
         self,
         name: str,
@@ -451,14 +464,16 @@ class Database(object):
         self.metadata["scaled_factor"] = scaled_factor
         self._dump_metadata()
 
-    def _condensed_distances(self, sketches: List[str]) -> List[float]:
-        """Return the condensed (upper-triangular, row-major) ANI distance vector for an
+    def _condensed_distances(self, sketches: List[str], mode: str="dna") -> List[float]:
+        """Return the condensed (upper-triangular, row-major) distance vector for an
         ordered list of sketch files, suitable for `scipy.cluster.hierarchy.linkage`.
 
         Parameters
         ----------
         sketches : list
             Ordered list of paths to the genome sketch files.
+        mode : str, default "dna"
+            Sketch payload to compare: "dna" for ANI distances, "aa" for AAI distances.
 
         Returns
         -------
@@ -477,7 +492,7 @@ class Database(object):
         # most genera are small and run faster serially (each `dist` call is a single Rust call).
         if self.nproc > 1 and len(sketches) > 64:
             args_list = [
-                (sketches[i], sketches[i + 1:], kmer_size, self.tmp, "dna")
+                (sketches[i], sketches[i + 1:], kmer_size, self.tmp, mode)
                 for i in range(len(sketches) - 1)
             ]
 
@@ -491,7 +506,7 @@ class Database(object):
         else:
             for i in range(len(sketches) - 1):
                 _, row = self.__class__.dist(
-                    sketches[i], sketches[i + 1:], kmer_size, tmp=self.tmp, resume=False
+                    sketches[i], sketches[i + 1:], kmer_size, tmp=self.tmp, resume=False, mode=mode
                 )
                 condensed.extend(row[sketches[j]] for j in range(i + 1, len(sketches)))
 
@@ -1120,40 +1135,20 @@ class Database(object):
         # Retrieve the paths to the genome sketches
         sketches = [genome.sketch_filepath for genome in self.__unknowns]
 
-        if len(sketches) > 1:
-            # Build a condensed ANI distance matrix
-            condensed_distance_matrix = list()
+        # One dendrogram per payload: AA (AAI) drives clustering at the deep levels
+        # (kingdom..order), DNA (ANI) at the finer levels (family, genus). Each level cuts the
+        # dendrogram built in the same payload it is searched and bounded in, so the membership
+        # gate stays self-consistent. Built lazily and reused across the level loop below.
+        dendrograms: Dict[str, Any] = {}
 
+        if len(sketches) > 1:
             print(f"Computing pair-wise distances between {len(sketches)} uncharacterized genomes")
 
-            # Rescale nproc
-            nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
+            for payload in ("dna", "aa"):
+                # Build a condensed distance matrix for this payload (average-linkage dendrogram)
+                condensed_distance_matrix = self._condensed_distances(sketches, mode=payload)
 
-            if nproc > 1:
-                # Keep track of the ANI distances
-                dists = dict()
-
-                with mp.Pool(processes=nproc) as pool:
-                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
-
-                    for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list, chunksize=1), total=len(args_list)):
-                        dists[sketch_filepath] = list(sketch_dists.values())
-
-                for sketch_filepath in sketches:
-                    condensed_distance_matrix.extend(dists[sketch_filepath])
-
-            else:
-                # Avoid using multiprocessing if `nproc` is 1
-                for pos, sketch_filepath in enumerate(sketches):
-                    print(f"Computing distance: {os.path.splitext(os.path.basename(sketch_filepath))[0]} [{pos+1}/{len(sketches)}]")
-
-                    _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                    condensed_distance_matrix.extend(list(sketch_dists.values()))
-
-            # Build a dendrogram based on the ANI distances between unknown genomes
-            # Method: average-linkage
-            dendro = hier.linkage(condensed_distance_matrix, method="average")
+                dendrograms[payload] = hier.linkage(condensed_distance_matrix, method="average")
 
         # Assignments map
         assignments = dict()
@@ -1173,6 +1168,9 @@ class Database(object):
                 break
 
             print(f"Clustering at the {level} level")
+
+            # Payload (AAI vs ANI) used to gate and cluster at this level
+            level_mode = self.__class__._payload_mode(level)
 
             for outer_pos, genome_obj in enumerate(self.__unknowns):
                 if genome_obj.sketch_filepath not in processed:
@@ -1208,7 +1206,8 @@ class Database(object):
                         centroid_sketches.append(closest_cluster_centroid_sketch)
 
                     # Compute the distance between the unknown genome and the closest cluster centroids
-                    _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False)
+                    # in the payload (AAI/ANI) used at this level, matching the stored boundary
+                    _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode=level_mode)
 
                     for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
                         distance_from_centroid = dists[centroid_sketches[inner_pos]]
@@ -1228,7 +1227,8 @@ class Database(object):
                                 # The dendrogram exists in case of >1 sketches
                                 # The current genome must be assigned to the closest cluster
                                 # We should cut the dendrogram using the closest cluster boundaries to check for other assignments
-                                clusters = hier.fcluster(dendro, max_boundary, criterion="distance")
+                                # Cut the dendrogram built in the same payload (AAI/ANI) used at this level
+                                clusters = hier.fcluster(dendrograms[level_mode], max_boundary, criterion="distance")
 
                             else:
                                 # There is only one sketch here
@@ -1306,16 +1306,23 @@ class Database(object):
                 # We should now start from the kingdom level down to the species level to finish characterizing genomes
                 # If a genome has not been characterized, it means that it is not close enough to its closest cluster according to its boundaries
                 # We can now create new clusters and estimate their boundaries, then cut the dendrogram to see how many genomes fall in them
-                tmp_taxonomy = f"{taxonomy}|{self.__class__.LEVELS[taxonomy.count('|')+1][0]}__tmp"
+                tmp_level = self.__class__.LEVELS[taxonomy.count("|")+1]
+
+                tmp_taxonomy = f"{taxonomy}|{tmp_level[0]}__tmp"
 
                 # Estimate the boundaries for the temporary cluster
                 # This is a totally new cluster. There is no need to search for a centroid here
+                # The borrowed boundary is in the payload (AAI/ANI) of the new cluster's level
                 _, max_boundary = self._estimate_boundaries(tmp_taxonomy)
+
+                # Payload (AAI vs ANI) of the level the new cluster is being created at
+                tmp_mode = self.__class__._payload_mode(tmp_level)
 
                 if len(sketches) > 1:
                     # The dendrogram exists in case of >1 sketches
-                    # Cluster genomes according to the temporary cluster's boundaries
-                    clusters = hier.fcluster(dendro, max_boundary, criterion="distance")
+                    # Cluster genomes according to the temporary cluster's boundaries,
+                    # cutting the dendrogram built in the same payload used at this level
+                    clusters = hier.fcluster(dendrograms[tmp_mode], max_boundary, criterion="distance")
 
                 else:
                     # There is only one sketch here
@@ -2089,15 +2096,13 @@ class Database(object):
             for match_path, ani in raw_profiles[lvl].items():
                 profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
 
-        # Confidence: clamp(1 - ani / max_boundary, 0.0, 1.0).
-        # Only meaningful for DNA-mode levels where stored boundaries are DNA-based.
-        # AA-mode levels (kingdom → order) in split mode are skipped to avoid comparing
-        # AA distances against DNA boundaries.
+        # Confidence: clamp(1 - distance / max_boundary, 0.0, 1.0).
+        # The stored boundaries are now in the same payload as the search at every level
+        # (AAI for kingdom..order, ANI for family..species), so the search distance and the
+        # boundary are always comparable and confidence is reported at all levels.
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
             if level not in profiles or not profiles[level]:
-                continue
-            if mode == "split" and level in aa_level_set:
                 continue
             label, ani = min(profiles[level].items(), key=lambda x: x[1])
             try:
@@ -3991,8 +3996,13 @@ class Entry(object):
         return self.sketch_filepath
 
     def get_boundaries(self, limit_number: int=0, limit_percentage: float=100.0) -> str:
-        """Search for the cluster boundaries as the minimum and maximum ANI distance
-        from the centroid versus all the other genomes in the same cluster.
+        """Search for the cluster boundaries as the minimum and maximum distance from the
+        centroid versus all the other genomes in the same cluster.
+
+        The distance payload depends on the cluster level: AAI for the deep, conserved levels
+        (kingdom..order) and ANI for the finer levels (family, genus, species). This mirrors
+        the split-mode search so an upper-level cluster is bounded in the same space it is
+        searched and gated in.
 
         WARNING: boundaries can be computed with a minimum of 3 entries.
 
@@ -4019,6 +4029,12 @@ class Entry(object):
 
         if self.level == "genome":
             raise Exception("Cannot compute boundaries over a genome entry!")
+
+        # Bound the cluster in the payload used at its level: AAI for the deep, conserved
+        # levels (kingdom..order) and ANI for the finer levels (family, genus, species).
+        # This keeps the stored boundary consistent with the split-mode search and with the
+        # centroid-distance gate applied during characterization at the same level.
+        mode = self.database.__class__._payload_mode(self.level)
 
         if self.level == "species":
             # Use `get_children()` if the current cluster is a species
@@ -4079,7 +4095,7 @@ class Entry(object):
 
         if nproc > 1:
             with mp.Pool(processes=nproc) as pool:
-                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp, "dna") for pos, source in enumerate(children) if pos < len(children)-1]
+                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp, mode) for pos, source in enumerate(children) if pos < len(children)-1]
 
                 for source_sketch, sketch_dists in pool.imap_unordered(self.database.__class__._dist, args_list, chunksize=1):
                     source = os.path.splitext(os.path.basename(source_sketch))[0]
@@ -4099,8 +4115,8 @@ class Entry(object):
                     # Retrieve the target sketch filepaths
                     target_sketches = [search_in[target].sketch_filepath for target in children[pos+1:]]
 
-                    # Compute the ANI distance between source and targets
-                    _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.database.tmp, resume=False)
+                    # Compute the ANI/AAI distance between source and targets
+                    _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.database.tmp, resume=False, mode=mode)
 
                     # Keep track of the ANI distances
                     for target_sketch in dists:
