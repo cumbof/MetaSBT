@@ -1,9 +1,11 @@
 //! DeltaTree: High-performance Rust backend for MetaSBT v2.0
 //! 
 //! This module implements the core algorithms for the MetaSBT Sequence Bloom Tree:
-//! every internal node stores the union of its subtree's sub-sampled k-mers, so a query
-//! is navigated top-down by its containment in each node's union. FracMinHash bounds the
-//! hash space, keeping even the root union compact as a Roaring bitmap.
+//! every internal node stores the union of its subtree's sub-sampled k-mers. The union bounds
+//! which subtrees can contain a query (reachability), while the conserved upper levels are ranked
+//! by the query's nearest clade representative (a medoid genome) so a query is not funnelled into
+//! the largest clade. FracMinHash bounds the hash space, keeping even the root union compact as a
+//! Roaring bitmap.
 //! 
 //! It leverages:
 //! - `needletail` for blazing fast FASTA parsing.
@@ -560,46 +562,58 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
     Ok(())
 }
 
-/// The Sequence Bloom Tree search algorithm.
+/// The Sequence Bloom Tree search algorithm with representative-based ranking.
 ///
 /// Every node stores the union of its subtree (see `build_delta_tree`): a species node holds
 /// the k-mers of all its genomes, a genus node the k-mers of all its species, and so on up to
 /// the kingdom. Genome leaves hold their own full sketch.
 ///
-/// Each node is therefore self-contained: we score the query against a node directly as the
-/// containment of the query in that node's union, `|Q ∩ union| / |Q|` — the fraction of the
-/// query's k-mers that occur anywhere in the subtree. There is no path accumulation: each node
-/// already stores its complete subtree union, so a single intersection with it is exact. The
-/// union is the correct primitive — a query belonging to a clade is largely contained in that
-/// clade's union, while an unrelated query is not, regardless of how many (or few) genomes the
-/// clade holds. (The intersection/Core that earlier versions stored is biased by clade size and
-/// funnels unrelated queries into singleton lineages.)
+/// ## Two roles for two quantities
 ///
-/// ## Pruning
+/// A subtree union is the right primitive for *reachability* but the wrong one for *ranking*.
+/// Union containment `|Q ∩ union| / |Q|` is monotone in clade size: a larger union can only add
+/// k-mers, so at the deep, conserved (AA) levels — where every large clade's union saturates the
+/// universal k-mer space — the biggest clade tends to win regardless of true membership, and an
+/// unrelated query is funnelled into it. This search therefore separates the two roles:
 ///
-/// At each node all of its children are scored upfront.  The children are sorted by
-/// distance and only those within `best_distance * (1 + uncertainty/100)` of the closest
-/// sibling are enqueued.  This gives logarithmic traversal instead of exhaustive visits.
-/// When the closest sibling is an exact match (`best_distance == 0`) the relative window
-/// would collapse to zero and prune every alternative branch, so an absolute fallback of
-/// `uncertainty/100` is used instead to keep near matches in play.
+/// * **Ranking** (which child the query is most *like*): when a child has an entry in
+///   `representatives`, it is scored by the query's nearest representative — the minimum
+///   containment distance over a panel of that child's own children's medoid genomes. A single
+///   genome's overlap with the query does not grow with clade size, so this is size-invariant and
+///   restores discrimination at the conserved levels. The recorded distance for the node is this
+///   representative distance. When a child has no panel (e.g. the DNA phase passes an empty map),
+///   it falls back to ranking by union containment, exactly as a classic SBT does.
 ///
-/// `theta` (pruning_threshold) is an additional absolute containment floor: any node whose
-/// containment fraction (score / query_len) falls below theta is pruned together with its
-/// entire subtree.
+/// * **Reachability / pruning** (could the query be in this subtree at all): the union is kept as
+///   an optimistic upper bound. Because every member's k-mers are a subset of the union, the
+///   containment of the query in any single member can never exceed its containment in the union;
+///   a union whose containment falls below `theta` therefore cannot hold a good match, so the
+///   child and its whole subtree are pruned. This keeps the traversal logarithmic.
+///
+/// ## Pruning / beam
+///
+/// Surviving children are sorted by their ranking distance and only those within
+/// `best_distance * (1 + uncertainty/100)` of the closest sibling are enqueued. When the closest
+/// sibling is an exact match (`best_distance == 0`) the relative window would collapse to zero, so
+/// an absolute fallback of `uncertainty/100` keeps near matches in play.
+///
+/// `theta` (pruning_threshold) is the absolute union-containment floor described above.
 ///
 /// ## Bitmap loading
 ///
-/// Each node's bitmap is loaded exactly once — when its parent evaluates all children.
-/// The queue carries the pre-computed score for the node it points to, so no bitmap is
-/// re-read when a node is popped.
+/// Each child union is loaded once, when its parent evaluates it. Representative (medoid) bitmaps
+/// are cached across the traversal: a singleton lineage reuses the same medoid genome at several
+/// levels, so caching avoids re-deserializing it.
 ///
-/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files.
+/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files (both the union
+/// bound and the representative distances are computed in that payload).
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 fn accumulator_search(
     query_sketch: &str,
     tree_root: &str,
     tree_topology: HashMap<String, Vec<(String, String)>>,
+    representatives: HashMap<String, Vec<String>>,
     kmer_size: usize,
     theta: f64,
     uncertainty: f64,
@@ -632,57 +646,76 @@ fn accumulator_search(
         if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani }
     };
 
-    // Pre-compute the root's own score so every queue entry always carries the score for
-    // the node it represents (the containment of the query in that node's subtree union).
-    let root_bm = select_bitmap(tree_root, mode)?;
-    let root_score = query_bm.intersection_len(&root_bm) as f64;
+    // Cache for representative (medoid) bitmaps, reused across the traversal.
+    let mut rep_cache: HashMap<String, RoaringBitmap> = HashMap::new();
 
-    // Queue: (node_path, score_for_this_node, level_name)
+    // Queue: (node_path, recorded_distance_for_this_node, level_name). The entry node (the
+    // search root, or an anchored seed) carries the artificial level "db" and is never recorded;
+    // its distance is unused, so a placeholder is pushed for it.
     let mut queue: VecDeque<(String, f64, String)> = VecDeque::new();
-    queue.push_back((tree_root.to_string(), root_score, "db".to_string()));
+    queue.push_back((tree_root.to_string(), 0.0, "db".to_string()));
 
-    while let Some((node_path, my_score, level_name)) = queue.pop_front() {
-        // Record this node (skip the artificial "db" root above all kingdoms)
+    while let Some((node_path, node_distance, level_name)) = queue.pop_front() {
+        // Record this node (skip the artificial entry root above the first scored level).
+        // The distance was already computed (and theta-checked) by the parent that enqueued it.
         if level_name != "db" {
-            if my_score / query_len < theta {
-                continue;  // absolute floor — prune this node and don't expand its children
-            }
-            let distance = score_to_distance(my_score);
             profiles.entry(level_name.clone())
                 .or_insert_with(HashMap::new)
-                .insert(node_path.clone(), distance);
+                .insert(node_path.clone(), node_distance);
         }
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
 
-        // Score every child against its own subtree union to decide which branches to pursue
-        let mut candidates: Vec<(String, String, f64, f64)> = Vec::new(); // (path, level, distance, score)
+        // Score every child to decide which branches to pursue: (path, level, ranking distance).
+        let mut candidates: Vec<(String, String, f64)> = Vec::new();
 
         for (child_path, next_level) in children {
             if !Path::new(child_path).exists() {
                 continue;
             }
-            let child_bm = select_bitmap(child_path, mode)?;
-            let child_score = query_bm.intersection_len(&child_bm) as f64;
 
-            // Absolute containment floor: prune child and its subtree
-            if child_score / query_len < theta {
+            // Reachability bound: the subtree union is an optimistic upper bound on the
+            // containment achievable by any single member, so a union below theta cannot hold a
+            // good match — prune the child and its whole subtree.
+            let child_union_bm = select_bitmap(child_path, mode)?;
+            let union_score = query_bm.intersection_len(&child_union_bm) as f64;
+            if union_score / query_len < theta {
                 continue;
             }
 
-            candidates.push((
-                child_path.clone(),
-                next_level.clone(),
-                score_to_distance(child_score),
-                child_score,
-            ));
+            // Ranking distance: the query's nearest representative in the child's panel (minimum
+            // containment distance over that child's children's medoids), or the union distance
+            // when no panel is supplied for this child (e.g. the DNA phase passes an empty map).
+            let rank_distance = {
+                let mut best_rep: Option<f64> = None;
+                if let Some(panel) = representatives.get(child_path) {
+                    for rep_path in panel {
+                        if !Path::new(rep_path).exists() {
+                            continue;
+                        }
+                        if !rep_cache.contains_key(rep_path) {
+                            let rep_bm = select_bitmap(rep_path, mode)?;
+                            rep_cache.insert(rep_path.clone(), rep_bm);
+                        }
+                        let inter = query_bm.intersection_len(&rep_cache[rep_path]) as f64;
+                        let d = score_to_distance(inter);
+                        best_rep = Some(match best_rep {
+                            Some(b) if b <= d => b,
+                            _ => d,
+                        });
+                    }
+                }
+                best_rep.unwrap_or_else(|| score_to_distance(union_score))
+            };
+
+            candidates.push((child_path.clone(), next_level.clone(), rank_distance));
         }
 
         if candidates.is_empty() {
             continue;
         }
 
-        // Sort by distance ascending so candidates[0] is the closest child
+        // Sort by ranking distance ascending so candidates[0] is the closest child.
         candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Uncertainty cutoff: keep every child within best_distance * (1 + uncertainty/100).
@@ -697,9 +730,9 @@ fn accumulator_search(
             uncertainty / 100.0
         };
 
-        for (child_path, next_level, child_distance, child_score) in candidates {
-            if child_distance <= cutoff {
-                queue.push_back((child_path, child_score, next_level));
+        for (child_path, next_level, rank_distance) in candidates {
+            if rank_distance <= cutoff {
+                queue.push_back((child_path, rank_distance, next_level));
             }
         }
     }

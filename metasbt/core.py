@@ -143,8 +143,10 @@ class Database(object):
         # Also define a dictionary to keep track of the genomes in the database indexed by their id.
         self.genomes: Dict[str, "Entry"] = dict()
 
-        # Cache for _build_tree_topology(); invalidated at the end of update()
+        # Caches for _build_tree_topology() and _build_node_representatives();
+        # both invalidated at the end of update()
         self._topology_cache: Optional[Dict[str, List[Tuple[str, str]]]] = None
+        self._representatives_cache: Optional[Dict[str, List[str]]] = None
 
         if not os.path.isdir(self.root):
             os.makedirs(self.root)
@@ -1550,6 +1552,68 @@ class Database(object):
         self._topology_cache = topology
         return topology
 
+    def _build_node_representatives(self) -> Dict[str, List[str]]:
+        """Build the panel of representative genome sketches used to rank each conserved-level
+        node during the AA phase of the split search.
+
+        Union containment is monotone in clade size, so at the deep, conserved (AA) levels it
+        funnels a query into the largest clade. To rank a node in a size-invariant way we instead
+        score it by the query's nearest representative: for every kingdom..order node we collect
+        the medoid genome of each of its children (a phylum node gets its classes' medoids, a class
+        node its orders' medoids, an order node its families' medoids). The accumulator search then
+        scores that node as the minimum containment distance over this panel — the closest
+        sub-lineage — which does not grow with the number of genomes in the clade.
+
+        Each child's medoid is `self.report[child.identifier]["centroid"]`, which `get_boundaries`
+        always resolves to an actual genome (every level picks its centroid among the genome-level
+        species centroids beneath it), so it maps directly to `genomes[centroid].sketch_filepath`.
+
+        Only the AA levels (kingdom..order) are populated; the DNA phase is passed an empty map and
+        keeps ranking by union containment, which is already confined to size-comparable siblings
+        within one order by the anchored descent. Nodes without a resolvable panel are simply
+        omitted, so the search falls back to union ranking for them.
+
+        Returns
+        -------
+        dict
+            A dictionary mapping a node's sketch path to the list of its children's medoid genome
+            sketch paths.
+        """
+        if self._representatives_cache is not None:
+            return self._representatives_cache
+
+        representatives: Dict[str, List[str]] = {}
+
+        for level in self.__class__.LEVELS:
+            if level not in self.__class__.AA_LEVELS:
+                # Below the order level the DNA phase ranks by union containment.
+                continue
+
+            next_level = self.__class__.LEVELS[self.__class__.LEVELS.index(level) + 1]
+
+            for cluster_obj in self.clusters[level].values():
+                node_path = cluster_obj.sketch_filepath
+                if not node_path:
+                    continue
+
+                panel: List[str] = []
+                for child_name in cluster_obj.children:
+                    child_obj = self.clusters[next_level].get(child_name)
+                    if child_obj is None:
+                        continue
+
+                    centroid_name = self.report.get(child_obj.identifier, {}).get("centroid")
+                    if centroid_name and centroid_name in self.genomes:
+                        centroid_sketch = self.genomes[centroid_name].sketch_filepath
+                        if centroid_sketch:
+                            panel.append(centroid_sketch)
+
+                if panel:
+                    representatives[node_path] = panel
+
+        self._representatives_cache = representatives
+        return representatives
+
     def update(self) -> None:
         """Process all the clusters created or modified during the `self.add()` run, and build Sequence Bloom Trees (step 3).
 
@@ -1629,8 +1693,9 @@ class Database(object):
         # Reset the list of clusters
         self.__clusters = list()
 
-        # The tree structure changed; discard the cached topology
+        # The tree structure changed; discard the cached topology and representative panels
         self._topology_cache = None
+        self._representatives_cache = None
 
     def _dump_genomes(self) -> None:
         """Dump the list of reference genomes and mags with their assignments.
@@ -1944,12 +2009,14 @@ class Database(object):
             Minimum containment score below which a branch is pruned during the accumulator search.
             Must be between 0.0 and 1.0.
         mode : str, default "split"
-            Search mode.  "split" (default) queries the AA subtree unions at the
-            kingdom/phylum/class/order levels (more conserved, better for deep relationships),
-            then seeds a DNA descent from the AA-selected order node(s) and continues down the
-            family/genus/species/genome levels within those subtrees only (finer resolution,
-            coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-payload
-            search across all levels from the root.
+            Search mode.  "split" (default) ranks the kingdom/phylum/class/order levels in the
+            conserved AA payload by the query's nearest clade representative (the medoid genome of
+            each candidate's children), using the subtree union only as a reachability bound — this
+            avoids funnelling the query into the largest clade.  It then seeds a DNA descent from
+            the AA-selected order node(s) and continues down the family/genus/species/genome levels
+            within those subtrees only (finer resolution, coherent lineage, no cross-tree size
+            bias).  Pass "dna" or "aa" for a single-payload search across all levels from the root;
+            "aa" also uses representative ranking, "dna" ranks by union containment.
 
         Raises
         ------
@@ -2006,13 +2073,22 @@ class Database(object):
         tree_root_filepath = os.path.join(self.root, "clusters", "000000", "MSBT0", "tree", "index.delta")
         tree_topology = self._build_tree_topology()
 
+        # Per-node representative panels (medoid genomes of each conserved-level node's children).
+        # The AA phase ranks by the query's nearest representative to avoid the union-size funnel;
+        # the DNA phase is passed an empty map and keeps ranking by union containment.
+        node_representatives = self._build_node_representatives()
+
         if mode == "split":
-            # Phase 1 — AA accumulator search (kingdom / phylum / class / order).
-            # AA k-mers are more conserved, so querying the AA subtree unions is more
-            # informative than DNA at this evolutionary scale.
+            # Phase 1 — AA accumulator search (kingdom / phylum / class / order), ranked by the
+            # query's nearest clade representative (a medoid genome) rather than by union
+            # containment. AA k-mers are conserved, so at this evolutionary scale every large
+            # clade's union saturates the universal k-mer space; union containment is then monotone
+            # in clade size and would pick the biggest clade regardless of true membership. Ranking
+            # by a size-invariant representative restores discrimination, while the union is kept as
+            # the reachability bound that prunes subtrees that cannot contain the query.
             try:
                 raw_aa = deltatree.accumulator_search(
-                    sketch_filepath, tree_root_filepath, tree_topology,
+                    sketch_filepath, tree_root_filepath, tree_topology, node_representatives,
                     self.metadata["kmer_size"], pruning_threshold, uncertainty, "aa"
                 )
             except Exception as e:
@@ -2048,7 +2124,7 @@ class Database(object):
             for seed_node in seed_nodes:
                 try:
                     partial = deltatree.accumulator_search(
-                        sketch_filepath, seed_node, tree_topology,
+                        sketch_filepath, seed_node, tree_topology, {},
                         self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna"
                     )
                 except Exception as e:
@@ -2069,6 +2145,7 @@ class Database(object):
             try:
                 raw_profiles = deltatree.accumulator_search(
                     sketch_filepath, tree_root_filepath, tree_topology,
+                    node_representatives if mode == "aa" else {},
                     self.metadata["kmer_size"], pruning_threshold, uncertainty, mode
                 )
             except Exception as e:
