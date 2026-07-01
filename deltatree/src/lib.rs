@@ -2,10 +2,11 @@
 //! 
 //! This module implements the core algorithms for the MetaSBT Sequence Bloom Tree:
 //! every internal node stores the union of its subtree's sub-sampled k-mers. The union bounds
-//! which subtrees can contain a query (reachability), while the conserved upper levels are ranked
-//! by the query's nearest clade representative (a medoid genome) so a query is not funnelled into
-//! the largest clade. FracMinHash bounds the hash space, keeping even the root union compact as a
-//! Roaring bitmap.
+//! which subtrees can contain a query (reachability), while sibling clades are ranked by the query's
+//! IDF-weighted (discriminative) union containment: k-mers shared by every sibling carry no signal
+//! and are down-weighted to nothing, so a query is not funnelled into the largest clade merely
+//! because its union is a denser sample of the universal k-mer space. FracMinHash bounds the hash
+//! space, keeping even the root union compact as a Roaring bitmap.
 //! 
 //! It leverages:
 //! - `needletail` for blazing fast FASTA parsing.
@@ -562,7 +563,7 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
     Ok(())
 }
 
-/// The Sequence Bloom Tree search algorithm with representative-based ranking.
+/// The Sequence Bloom Tree search algorithm with IDF-weighted (discriminative) ranking.
 ///
 /// Every node stores the union of its subtree (see `build_delta_tree`): a species node holds
 /// the k-mers of all its genomes, a genus node the k-mers of all its species, and so on up to
@@ -570,50 +571,52 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
 ///
 /// ## Two roles for two quantities
 ///
-/// A subtree union is the right primitive for *reachability* but the wrong one for *ranking*.
-/// Union containment `|Q ∩ union| / |Q|` is monotone in clade size: a larger union can only add
+/// A subtree union is the right primitive for *reachability* but a biased one for *ranking*.
+/// Raw union containment `|Q ∩ union| / |Q|` is monotone in clade size: a larger union can only add
 /// k-mers, so at the deep, conserved (AA) levels — where every large clade's union saturates the
 /// universal k-mer space — the biggest clade tends to win regardless of true membership, and an
 /// unrelated query is funnelled into it. This search therefore separates the two roles:
 ///
-/// * **Ranking** (which child the query is most *like*): when a child has an entry in
-///   `representatives`, it is scored by the query's nearest representative — the minimum
-///   containment distance over a panel of that child's own children's medoid genomes. A single
-///   genome's overlap with the query does not grow with clade size, so this is size-invariant and
-///   restores discrimination at the conserved levels. The recorded distance for the node is this
-///   representative distance. When a child has no panel (e.g. the DNA phase passes an empty map),
-///   it falls back to ranking by union containment, exactly as a classic SBT does.
-///
-/// * **Reachability / pruning** (could the query be in this subtree at all): the union is kept as
-///   an optimistic upper bound. Because every member's k-mers are a subset of the union, the
+/// * **Reachability / pruning** (could the query be in this subtree at all): the raw union is kept
+///   as an optimistic upper bound. Because every member's k-mers are a subset of the union, the
 ///   containment of the query in any single member can never exceed its containment in the union;
 ///   a union whose containment falls below `theta` therefore cannot hold a good match, so the
 ///   child and its whole subtree are pruned. This keeps the traversal logarithmic.
 ///
+/// * **Ranking** (which child the query is most *like*): the surviving siblings are ranked by the
+///   query's *IDF-weighted* union containment. For the current node's children, each query k-mer `h`
+///   is weighted by `idf(h) = ln(N / df(h))`, where `N` is the number of surviving children and
+///   `df(h)` is how many of their unions contain `h`. A k-mer shared by every sibling (a universal,
+///   conserved k-mer) gets `idf = ln(1) = 0` and contributes nothing; a k-mer specific to one clade
+///   gets full weight. A child's score is the sum of `idf` over the query k-mers it contains, divided
+///   by the total `idf` mass the query could reach across all siblings. This is size-invariant: a big
+///   clade's union wins raw containment only through the universal k-mers, which now weigh nothing, so
+///   ranking follows the query's *discriminative* overlap. When there is no signal to separate the
+///   siblings (a single survivor, or every shared k-mer is universal so the total mass is zero), the
+///   ranking falls back to raw union containment.
+///
+/// ## Recorded distance
+///
+/// The distance recorded for each retained node is its *raw* union-containment ANI/AAI (query-to-union),
+/// the same quantity as before, so it stays comparable to the cluster boundary for confidence scoring.
+/// The IDF weighting only decides *which* siblings are pursued, not the magnitude that is reported.
+///
 /// ## Pruning / beam
 ///
-/// Surviving children are sorted by their ranking distance and only those within
+/// Surviving children are sorted by their IDF-weighted ranking distance and only those within
 /// `best_distance * (1 + uncertainty/100)` of the closest sibling are enqueued. When the closest
 /// sibling is an exact match (`best_distance == 0`) the relative window would collapse to zero, so
 /// an absolute fallback of `uncertainty/100` keeps near matches in play.
 ///
-/// `theta` (pruning_threshold) is the absolute union-containment floor described above.
+/// `theta` (pruning_threshold) is the absolute raw-union-containment floor described above.
 ///
-/// ## Bitmap loading
-///
-/// Each child union is loaded once, when its parent evaluates it. Representative (medoid) bitmaps
-/// are cached across the traversal: a singleton lineage reuses the same medoid genome at several
-/// levels, so caching avoids re-deserializing it.
-///
-/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files (both the union
-/// bound and the representative distances are computed in that payload).
+/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files (union bound,
+/// IDF weighting and recorded distances are all computed in that payload).
 #[pyfunction]
-#[allow(clippy::too_many_arguments)]
 fn accumulator_search(
     query_sketch: &str,
     tree_root: &str,
     tree_topology: HashMap<String, Vec<(String, String)>>,
-    representatives: HashMap<String, Vec<String>>,
     kmer_size: usize,
     theta: f64,
     uncertainty: f64,
@@ -635,9 +638,8 @@ fn accumulator_search(
         return Ok(profiles);
     }
 
-    // Inline helper: per-node k-mer intersection count → ANI distance in [0, 1]
-    let score_to_distance = |score: f64| -> f64 {
-        let containment = score / query_len;
+    // Inline helper: containment in [0, 1] → ANI/AAI distance in [0, 1]
+    let dist_from_containment = |containment: f64| -> f64 {
         let ani = if containment > 0.0 {
             1.0 + (1.0 / eff_kmer as f64) * containment.ln()
         } else {
@@ -646,8 +648,14 @@ fn accumulator_search(
         if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani }
     };
 
-    // Cache for representative (medoid) bitmaps, reused across the traversal.
-    let mut rep_cache: HashMap<String, RoaringBitmap> = HashMap::new();
+    // A surviving child of the node currently being expanded: its query∩union bitmap (reused for
+    // the IDF pass) plus the raw union-containment distance that will be reported if it is retained.
+    struct Cand {
+        path: String,
+        level: String,
+        inter: RoaringBitmap, // query ∩ child union
+        plain_distance: f64,  // raw union-containment ANI/AAI distance (reported)
+    }
 
     // Queue: (node_path, recorded_distance_for_this_node, level_name). The entry node (the
     // search root, or an anchored seed) carries the artificial level "db" and is never recorded;
@@ -666,73 +674,91 @@ fn accumulator_search(
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
 
-        // Score every child to decide which branches to pursue: (path, level, ranking distance).
-        let mut candidates: Vec<(String, String, f64)> = Vec::new();
-
+        // First pass: load each child's union, keep the query∩union bitmap, and apply the
+        // reachability bound. The subtree union is an optimistic upper bound on the containment
+        // achievable by any single member, so a union below theta cannot hold a good match — prune
+        // the child and its whole subtree.
+        let mut cands: Vec<Cand> = Vec::new();
         for (child_path, next_level) in children {
             if !Path::new(child_path).exists() {
                 continue;
             }
-
-            // Reachability bound: the subtree union is an optimistic upper bound on the
-            // containment achievable by any single member, so a union below theta cannot hold a
-            // good match — prune the child and its whole subtree.
             let child_union_bm = select_bitmap(child_path, mode)?;
-            let union_score = query_bm.intersection_len(&child_union_bm) as f64;
+            let inter = &query_bm & &child_union_bm;
+            let union_score = inter.len() as f64;
             if union_score / query_len < theta {
                 continue;
             }
-
-            // Ranking distance: the query's nearest representative in the child's panel (minimum
-            // containment distance over that child's children's medoids), or the union distance
-            // when no panel is supplied for this child (e.g. the DNA phase passes an empty map).
-            let rank_distance = {
-                let mut best_rep: Option<f64> = None;
-                if let Some(panel) = representatives.get(child_path) {
-                    for rep_path in panel {
-                        if !Path::new(rep_path).exists() {
-                            continue;
-                        }
-                        if !rep_cache.contains_key(rep_path) {
-                            let rep_bm = select_bitmap(rep_path, mode)?;
-                            rep_cache.insert(rep_path.clone(), rep_bm);
-                        }
-                        let inter = query_bm.intersection_len(&rep_cache[rep_path]) as f64;
-                        let d = score_to_distance(inter);
-                        best_rep = Some(match best_rep {
-                            Some(b) if b <= d => b,
-                            _ => d,
-                        });
-                    }
-                }
-                best_rep.unwrap_or_else(|| score_to_distance(union_score))
-            };
-
-            candidates.push((child_path.clone(), next_level.clone(), rank_distance));
+            cands.push(Cand {
+                path: child_path.clone(),
+                level: next_level.clone(),
+                plain_distance: dist_from_containment(union_score / query_len),
+                inter,
+            });
         }
 
-        if candidates.is_empty() {
+        if cands.is_empty() {
             continue;
         }
 
-        // Sort by ranking distance ascending so candidates[0] is the closest child.
-        candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        // Second pass: inverse-document-frequency weighting over the surviving siblings.
+        // df(h) = number of surviving children whose union contains query k-mer h. A k-mer shared
+        // by every sibling (universal / conserved) cannot tell them apart, so idf = ln(N/df) sends
+        // it to ~0; a k-mer specific to one clade keeps full weight. This strips the clade-size bias
+        // out of union containment — a big clade's union wins raw containment only through the
+        // universal k-mers, which now weigh nothing — so ranking follows the discriminative overlap.
+        let n = cands.len() as f64;
+        let mut df: HashMap<u32, u32> = HashMap::new();
+        for c in &cands {
+            for h in &c.inter {
+                *df.entry(h).or_insert(0) += 1;
+            }
+        }
+        let mut idf: HashMap<u32, f64> = HashMap::with_capacity(df.len());
+        let mut weighted_total = 0.0f64; // idf mass the query could reach across all siblings
+        for (&h, &d) in &df {
+            let w = (n / d as f64).ln();
+            idf.insert(h, w);
+            weighted_total += w;
+        }
+
+        // Ranking distance per child. With no discriminative signal (a single survivor, or every
+        // shared k-mer is universal so weighted_total is 0) fall back to raw union containment.
+        // (path, level, rank_distance, plain_distance)
+        let mut ranked: Vec<(String, String, f64, f64)> = Vec::with_capacity(cands.len());
+        for c in &cands {
+            let rank_distance = if weighted_total > 0.0 {
+                let mut w = 0.0f64;
+                for h in &c.inter {
+                    w += idf[&h];
+                }
+                dist_from_containment(w / weighted_total)
+            } else {
+                c.plain_distance
+            };
+            ranked.push((c.path.clone(), c.level.clone(), rank_distance, c.plain_distance));
+        }
+
+        // Sort by ranking distance ascending so ranked[0] is the most discriminative child.
+        ranked.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
         // Uncertainty cutoff: keep every child within best_distance * (1 + uncertainty/100).
         // This is a relative expansion, so a 50% uncertainty keeps all siblings up to 1.5×
         // the closest distance — naturally narrower at lower levels where distances are small.
         // If the best sibling is an exact match the relative window collapses to zero, so fall
         // back to an absolute window of uncertainty/100 to avoid pruning every alternative.
-        let best_distance = candidates[0].2;
+        let best_distance = ranked[0].2;
         let cutoff = if best_distance > 0.0 {
             best_distance * (1.0 + uncertainty / 100.0)
         } else {
             uncertainty / 100.0
         };
 
-        for (child_path, next_level, rank_distance) in candidates {
+        for (child_path, next_level, rank_distance, plain_distance) in ranked {
             if rank_distance <= cutoff {
-                queue.push_back((child_path, rank_distance, next_level));
+                // Rank/beam by the discriminative distance, but record the raw union-containment
+                // distance so the reported value stays comparable to the level's boundary.
+                queue.push_back((child_path, plain_distance, next_level));
             }
         }
     }
