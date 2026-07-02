@@ -48,19 +48,6 @@ class Database(object):
     # Define the list of taxonomic levels
     LEVELS = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
-    # Deep, conserved levels are searched and bounded against the AA payload (AAI);
-    # finer levels use the DNA payload (ANI). This split is the single source of truth
-    # shared by the search (profile), the cluster boundaries (get_boundaries), and the
-    # characterization gating/dendrograms (characterize).
-    AA_LEVELS = {"kingdom", "phylum", "class", "order"}
-
-    @classmethod
-    def _payload_mode(cls, level: str) -> str:
-        """Return the sketch payload used at a taxonomic level: "aa" (AAI) for the deep,
-        conserved levels (kingdom..order) and "dna" (ANI) for the finer levels
-        (family..species, and genomes)."""
-        return "aa" if level in cls.AA_LEVELS else "dna"
-
     def __init__(
         self,
         name: str,
@@ -518,15 +505,16 @@ class Database(object):
         genus_paths: Dict[str, List[str]],
         genus_condensed: Dict[str, Optional[List[float]]],
     ) -> Tuple[float, float]:
-        """Learn the species-level ANI distance boundary from the reference data instead of
+        """Learn the species-level distance boundary from the reference data instead of
         hard-coding it.
 
-        Within each genus, the pairwise distances between genomes that share the same input
-        species label (within-species) and between genomes with different input species labels
-        (between-species) form two distributions. The boundary is the distance that best
-        separates them, i.e. the threshold maximising Youden's J (`TPR - FPR`). This is the
-        empirical average-nucleotide-identity discontinuity of *this* reference set, so no
-        fixed value is assumed.
+        Distances are the FUSED metric (mean of ANI and AAI), the same one the profiler ranks and
+        records and the boundaries are stored in. Within each genus, the pairwise distances between
+        genomes that share the same input species label (within-species) and between genomes with
+        different input species labels (between-species) form two distributions. The boundary is the
+        distance that best separates them, i.e. the threshold maximising Youden's J (`TPR - FPR`).
+        This is the empirical species discontinuity of *this* reference set, so no fixed value is
+        assumed.
 
         Parameters
         ----------
@@ -691,7 +679,7 @@ class Database(object):
             paths = sorted(members.keys())
             genus_paths[genus_lineage] = paths
             genus_condensed[genus_lineage] = (
-                self._condensed_distances([sketch_map[p] for p in paths]) if len(paths) > 1 else None
+                self._condensed_distances([sketch_map[p] for p in paths], mode="fused") if len(paths) > 1 else None
             )
 
         # Reuse the species radius learned for the baseline; learn it only the first time so
@@ -849,8 +837,10 @@ class Database(object):
 
                 centroid_sketches.append(closest_species_centroid_sketch)
 
-            # Compute the distance between the input genome and the closest cluster centroids
-            _, dists = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False)
+            # Compute the distance between the input genome and the closest cluster centroids in the
+            # fused metric (mean of ANI and AAI), matching the split-mode profile ranking and the
+            # fused boundary the assignment is gated against.
+            _, dists = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="fused")
 
             for pos, closest_species_taxonomy in enumerate(taxonomies):
                 closest_species_id = species_ids[pos]
@@ -1135,20 +1125,18 @@ class Database(object):
         # Retrieve the paths to the genome sketches
         sketches = [genome.sketch_filepath for genome in self.__unknowns]
 
-        # One dendrogram per payload: AA (AAI) drives clustering at the deep levels
-        # (kingdom..order), DNA (ANI) at the finer levels (family, genus). Each level cuts the
-        # dendrogram built in the same payload it is searched and bounded in, so the membership
-        # gate stays self-consistent. Built lazily and reused across the level loop below.
-        dendrograms: Dict[str, Any] = {}
+        # A single average-linkage dendrogram in the FUSED metric (mean of ANI and AAI), the same
+        # distance the split-mode search ranks and records and the cluster boundaries are computed
+        # in. Cutting the fused dendrogram at a fused boundary keeps the membership gate consistent
+        # with how the closest cluster was selected at every level.
+        dendrogram: Any = None
 
         if len(sketches) > 1:
             print(f"Computing pair-wise distances between {len(sketches)} uncharacterized genomes")
 
-            for payload in ("dna", "aa"):
-                # Build a condensed distance matrix for this payload (average-linkage dendrogram)
-                condensed_distance_matrix = self._condensed_distances(sketches, mode=payload)
+            condensed_distance_matrix = self._condensed_distances(sketches, mode="fused")
 
-                dendrograms[payload] = hier.linkage(condensed_distance_matrix, method="average")
+            dendrogram = hier.linkage(condensed_distance_matrix, method="average")
 
         # Assignments map
         assignments = dict()
@@ -1168,9 +1156,6 @@ class Database(object):
                 break
 
             print(f"Clustering at the {level} level")
-
-            # Payload (AAI vs ANI) used to gate and cluster at this level
-            level_mode = self.__class__._payload_mode(level)
 
             for outer_pos, genome_obj in enumerate(self.__unknowns):
                 if genome_obj.sketch_filepath not in processed:
@@ -1206,8 +1191,8 @@ class Database(object):
                         centroid_sketches.append(closest_cluster_centroid_sketch)
 
                     # Compute the distance between the unknown genome and the closest cluster centroids
-                    # in the payload (AAI/ANI) used at this level, matching the stored boundary
-                    _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode=level_mode)
+                    # in the fused metric (mean of ANI and AAI), matching the stored fused boundary
+                    _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="fused")
 
                     for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
                         distance_from_centroid = dists[centroid_sketches[inner_pos]]
@@ -1227,8 +1212,8 @@ class Database(object):
                                 # The dendrogram exists in case of >1 sketches
                                 # The current genome must be assigned to the closest cluster
                                 # We should cut the dendrogram using the closest cluster boundaries to check for other assignments
-                                # Cut the dendrogram built in the same payload (AAI/ANI) used at this level
-                                clusters = hier.fcluster(dendrograms[level_mode], max_boundary, criterion="distance")
+                                # Cut the fused-metric dendrogram at the fused boundary used at this level
+                                clusters = hier.fcluster(dendrogram, max_boundary, criterion="distance")
 
                             else:
                                 # There is only one sketch here
@@ -1312,17 +1297,14 @@ class Database(object):
 
                 # Estimate the boundaries for the temporary cluster
                 # This is a totally new cluster. There is no need to search for a centroid here
-                # The borrowed boundary is in the payload (AAI/ANI) of the new cluster's level
+                # The borrowed boundary is the fused (mean ANI/AAI) boundary of the new cluster's level
                 _, max_boundary = self._estimate_boundaries(tmp_taxonomy)
-
-                # Payload (AAI vs ANI) of the level the new cluster is being created at
-                tmp_mode = self.__class__._payload_mode(tmp_level)
 
                 if len(sketches) > 1:
                     # The dendrogram exists in case of >1 sketches
                     # Cluster genomes according to the temporary cluster's boundaries,
-                    # cutting the dendrogram built in the same payload used at this level
-                    clusters = hier.fcluster(dendrograms[tmp_mode], max_boundary, criterion="distance")
+                    # cutting the single fused-metric dendrogram
+                    clusters = hier.fcluster(dendrogram, max_boundary, criterion="distance")
 
                 else:
                     # There is only one sketch here
@@ -1861,7 +1843,9 @@ class Database(object):
             If True, load a distance table if it already exists.
             Otherwise, overwrite the results.
         mode : str, default "dna"
-            The bitmap mode: "dna" for ANI or "aa" for AAI.
+            The bitmap mode: "dna" for ANI, "aa" for AAI, or "fused" for the mean of the two.
+            The fused distance is the metric the split-mode profiler ranks and records in, so
+            cluster boundaries and the membership gate use it to stay consistent with the profile.
 
         Raises
         ------
@@ -1894,12 +1878,23 @@ class Database(object):
         sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
 
         try:
-            ani_results = deltatree.containment_ani(
-                sketch_filepath, 
-                sketches, 
-                kmer_size,
-                mode
-            )
+            if mode in ("fused", "FUSED"):
+                # Fuse both measures: the mean of the ANI (DNA) and AAI (AA) containment distances,
+                # exactly as the split-mode profiler ranks and records. A missing target is max
+                # distance (1.0) on that axis.
+                dna_results = deltatree.containment_ani(sketch_filepath, sketches, kmer_size, "dna")
+                aa_results = deltatree.containment_ani(sketch_filepath, sketches, kmer_size, "aa")
+                ani_results = {
+                    target: 0.5 * (dna_results.get(target, 1.0) + aa_results.get(target, 1.0))
+                    for target in sketches
+                }
+            else:
+                ani_results = deltatree.containment_ani(
+                    sketch_filepath,
+                    sketches,
+                    kmer_size,
+                    mode
+                )
         except Exception as e:
             raise Exception(f"An error occurred while computing FracMinHash ANI distances: {e}")
 
@@ -1924,7 +1919,7 @@ class Database(object):
         self,
         genome_filepath: str,
         sketch_filepath: str,
-        uncertainty: float=5.0,
+        uncertainty: float=50.0,
         pruning_threshold: float=0.0,
         mode: str = "split",
     ) -> Dict[str, Dict[str, float]]:
@@ -1938,27 +1933,28 @@ class Database(object):
             Path to the input genome file in fasta format.
         sketch_filepath : str
             Path to the sketch representation of the input genome.
-        uncertainty : float, default 5.0
-            Additive beam margin, in ANI/AAI distance points (uncertainty / 100 of the [0, 1]
-            distance range).  A sibling clade is kept if its ranking distance is within
-            best_distance + uncertainty/100 of the closest sibling.  The margin is absolute rather
-            than a fraction of the best distance so it does not collapse when the closest match is
-            exact (distance 0): a query can be distance 0 to a clade it does not belong to (horizontal
-            gene transfer, a shared mobile element, contamination), and an absolute margin still keeps
-            the true clade — which sits a little further out — in play.
+        uncertainty : float, default 50.0
+            Percentage by which the beam is expanded around the closest sibling: a sibling clade is
+            kept if its ranking distance is within best_distance * (1 + uncertainty/100).  The one
+            special case is an exact match (best distance 0), where a relative window would collapse
+            to zero: a query can be distance 0 to a clade it does not belong to (horizontal gene
+            transfer, a shared mobile element, contamination), so there the expansion is anchored to
+            the nearest non-zero competitor instead, keeping the true clade — which sits a little
+            further out — in play.
         pruning_threshold : float, default 0.0
             Minimum containment score below which a branch is pruned during the accumulator search.
             Must be between 0.0 and 1.0.
         mode : str, default "split"
-            Search mode.  "split" (default) searches the kingdom/phylum/class/order levels reporting
-            the conserved AA (AAI) distance and the family/genus/species/genome levels reporting the
-            DNA (ANI) distance, but at every level it *ranks* sibling clades by the mean of their
+            Search mode.  "split" (default) ranks sibling clades at every level by the mean of their
             IDF-weighted (discriminative) ANI and AAI distances — a clade must look right in both
             nucleotide and protein space to be pursued, which keeps the descent on the correct lineage
-            where either measure alone would drift.  Raw union containment is only a reachability
-            bound.  The DNA descent is seeded from the AA-selected order node(s) and confined to those
-            subtrees (finer resolution, coherent lineage, no cross-tree size bias).  Pass "dna" or "aa"
-            for a single-measure search across all levels from the root.
+            where either measure alone would drift — and records the same FUSED distance (the mean of
+            the raw ANI and AAI union containments) at every level, so the reported value is directly
+            comparable to the fused cluster boundaries.  Raw union containment is only a reachability
+            bound.  The kingdom..order levels are searched in the AA subtree, then the DNA descent is
+            seeded from the AA-selected order node(s) and confined to those subtrees (finer resolution,
+            coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-measure search
+            (raw ANI or AAI recorded, no fusion) across all levels from the root.
 
         Raises
         ------
@@ -2115,9 +2111,9 @@ class Database(object):
                 profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
 
         # Confidence: clamp(1 - distance / max_boundary, 0.0, 1.0).
-        # The stored boundaries are now in the same payload as the search at every level
-        # (AAI for kingdom..order, ANI for family..species), so the search distance and the
-        # boundary are always comparable and confidence is reported at all levels.
+        # The recorded search distance and the stored boundary are both the FUSED metric (mean of
+        # ANI and AAI) at every level, so they are always comparable and confidence is reported at
+        # all levels.
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
             if level not in profiles or not profiles[level]:
@@ -2527,7 +2523,7 @@ class Database(object):
         self,
         genomes: List[str],
         sketches: List[str],
-        uncertainty: float=5.0,
+        uncertainty: float=50.0,
         pruning_threshold: float=0.0,
         mode: str="split",
     ) -> Dict[str, Dict]:
@@ -2539,9 +2535,9 @@ class Database(object):
             List of paths to uncompressed genome files.
         sketches : list
             List of paths to corresponding genome sketches (same order as genomes).
-        uncertainty : float, default 5.0
-            Additive beam margin in ANI/AAI distance points (uncertainty / 100 of the [0, 1]
-            distance range); see MetaSBT.profile for the full semantics.
+        uncertainty : float, default 50.0
+            Percentage by which the beam is expanded around the closest sibling; see MetaSBT.profile
+            for the full semantics (including the exact-match special case).
         pruning_threshold : float, default 0.0
             Minimum containment ANI threshold for pruning the tree during search.
         mode : str, default "dna"
@@ -4018,10 +4014,10 @@ class Entry(object):
         """Search for the cluster boundaries as the minimum and maximum distance from the
         centroid versus all the other genomes in the same cluster.
 
-        The distance payload depends on the cluster level: AAI for the deep, conserved levels
-        (kingdom..order) and ANI for the finer levels (family, genus, species). This mirrors
-        the split-mode search so an upper-level cluster is bounded in the same space it is
-        searched and gated in.
+        The distance is the FUSED metric — the mean of the ANI (DNA) and AAI (AA) containment
+        distances — at every level. This mirrors the split-mode search, which ranks and records
+        the same fused distance, so a cluster is bounded in the exact space it is searched and
+        gated in and the membership decision stays consistent with how the cluster was selected.
 
         WARNING: boundaries can be computed with a minimum of 3 entries.
 
@@ -4049,11 +4045,11 @@ class Entry(object):
         if self.level == "genome":
             raise Exception("Cannot compute boundaries over a genome entry!")
 
-        # Bound the cluster in the payload used at its level: AAI for the deep, conserved
-        # levels (kingdom..order) and ANI for the finer levels (family, genus, species).
-        # This keeps the stored boundary consistent with the split-mode search and with the
-        # centroid-distance gate applied during characterization at the same level.
-        mode = self.database.__class__._payload_mode(self.level)
+        # Bound the cluster in the FUSED metric (mean of ANI and AAI) at every level. This keeps
+        # the stored boundary consistent with the split-mode search — which ranks and records the
+        # same fused distance — and with the fused centroid-distance gate applied during
+        # characterization and assignment.
+        mode = "fused"
 
         if self.level == "species":
             # Use `get_children()` if the current cluster is a species

@@ -1134,12 +1134,12 @@ class MetaSBT(object):
             "--uncertainty",
             required=False,
             type=float,
-            default=5.0,
+            default=20.0,
             help=(
-                "Additive beam margin, in ANI/AAI distance points, for keeping multiple best hits: "
-                "a sibling clade is kept when its ranking distance is within best + uncertainty/100 "
-                "of the closest (e.g. 5.0 keeps every sibling within 0.05). Absolute rather than "
-                "relative so it still admits close alternatives when the best match is exact."
+                "Percentage by which the beam is expanded around the closest hit when keeping "
+                "multiple best hits: a sibling is kept within best * (1 + uncertainty/100). On an "
+                "exact match (best distance 0) the expansion is anchored to the nearest non-zero "
+                "competitor instead, so close alternatives are still admitted."
             )
         )
         parser.add_argument(
@@ -1893,13 +1893,12 @@ class MetaSBT(object):
             "--uncertainty",
             required=False,
             type=float,
-            default=5.0,
+            default=20.0,
             help=(
-                "Additive beam margin, in ANI/AAI distance points, for keeping multiple best hits "
-                "while profiling input genomes: a sibling clade is kept when its ranking distance is "
-                "within best + uncertainty/100 of the closest (e.g. 5.0 keeps every sibling within "
-                "0.05). Absolute rather than relative so it still admits close alternatives when the "
-                "best match is exact."
+                "Percentage by which the beam is expanded around the closest hit when profiling "
+                "input genomes: a sibling is kept within best * (1 + uncertainty/100). On an exact "
+                "match (best distance 0) the expansion is anchored to the nearest non-zero competitor "
+                "instead, so close alternatives are still admitted."
             )
         )
         parser.add_argument(

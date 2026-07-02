@@ -616,20 +616,23 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
 ///
 /// ## Recorded distance
 ///
-/// The distance recorded for each retained node is its *raw* union-containment ANI/AAI (query-to-union)
-/// in the `mode` payload — AAI for the kingdom..order phase, ANI for the family..species phase — so it
-/// stays comparable to that level's cluster boundary for confidence scoring. Neither the IDF weighting
-/// nor the fusion changes the magnitude that is reported; they only decide *which* siblings are pursued.
+/// The distance recorded for each retained node mirrors the ranking metric so that it stays comparable
+/// to the cluster boundary (which is computed the same way) for both confidence scoring and the
+/// membership gate. When fusing it is the *raw* (non-IDF) mean of the query-to-union ANI and AAI
+/// containment distances; otherwise it is the single `mode` payload's raw containment distance. The IDF
+/// weighting never changes the recorded magnitude — it only decides *which* siblings are pursued.
 ///
 /// ## Pruning / beam
 ///
-/// Surviving children are sorted by their ranking distance and only those within an **additive** margin
-/// `best_distance + uncertainty/100` of the closest sibling are enqueued. The margin is absolute (a span
-/// of ANI/AAI distance, i.e. `uncertainty` points of identity) rather than a fraction of `best_distance`.
-/// This is deliberate: a query can be an *exact* (distance 0) match to a clade it does not belong to —
-/// horizontal gene transfer, a shared mobile element, a contaminant — and a *relative* window collapses
-/// to zero there, pruning the true clade that sits a hair further out. An additive window keeps every
-/// genuinely close alternative in play regardless of whether the best sibling is a perfect match.
+/// Surviving children are sorted by their ranking distance and only those within a **relative**
+/// expansion `best_distance * (1 + uncertainty/100)` of the closest sibling are enqueued. A relative
+/// window auto-scales with depth — the small distances deep in the tree get a proportionally small
+/// window — so `uncertainty` behaves the same at every level. The one degenerate case is an *exact*
+/// match (`best_distance == 0`): a query can be distance 0 to a clade it does not belong to (horizontal
+/// gene transfer, a shared mobile element, a contaminant), and a relative window around 0 would
+/// collapse and prune the true clade that sits a hair further out. There the expansion is anchored to
+/// the nearest NON-ZERO competitor instead, so the window still scales with the local spread of sibling
+/// distances (and every exact tie is always kept); if every survivor is an exact match, all are kept.
 ///
 /// `theta` (pruning_threshold) is the absolute raw-union-containment floor described above; in fused
 /// mode a child is reachable if *either* payload's containment clears it.
@@ -800,9 +803,12 @@ fn accumulator_search(
             cands.iter().map(|c| c.plain_aa).collect()
         };
 
-        // Fuse the two axes (mean) when requested, else rank by the single reported axis. Record the
-        // reported payload's raw union-containment distance so the reported value stays comparable to
-        // the level's boundary. (path, level, rank_distance, recorded_distance)
+        // Fuse the two axes (mean) when requested, else rank by the single reported axis. The
+        // RECORDED distance mirrors the ranking metric: the mean of the raw ANI and AAI union
+        // containments when fusing, else the single reported payload's raw containment. Recording
+        // the same (fused) quantity the cluster boundaries are computed in keeps the reported value
+        // comparable to the boundary for confidence and for the membership gate.
+        // (path, level, rank_distance, recorded_distance)
         let mut ranked: Vec<(String, String, f64, f64)> = Vec::with_capacity(cands.len());
         for (i, c) in cands.iter().enumerate() {
             let rank_distance = if fuse {
@@ -812,20 +818,34 @@ fn accumulator_search(
             } else {
                 rank_dna[i]
             };
-            let recorded = if report_aa { c.plain_aa } else { c.plain_dna };
+            let recorded = if fuse {
+                0.5 * (c.plain_dna + c.plain_aa)
+            } else if report_aa {
+                c.plain_aa
+            } else {
+                c.plain_dna
+            };
             ranked.push((c.path.clone(), c.level.clone(), rank_distance, recorded));
         }
 
         // Sort by ranking distance ascending so ranked[0] is the closest child.
         ranked.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Uncertainty cutoff: keep every child within an ADDITIVE margin of the closest sibling,
-        // best_distance + uncertainty/100. The margin is an absolute span of ANI/AAI distance, so it
-        // does not collapse when the best sibling is an exact match (distance 0) — a query that is
-        // distance 0 to a wrong clade (HGT, mobile element, contamination) still keeps the true clade,
-        // which sits a small distance further out, in the beam.
+        // Uncertainty cutoff: keep every child within a RELATIVE expansion of the closest sibling,
+        // best_distance * (1 + uncertainty/100). This auto-scales with depth (small distances low in
+        // the tree get a proportionally small window). The one degenerate case is an exact match
+        // (best_distance == 0): a query can be distance 0 to a clade it does not belong to (horizontal
+        // gene transfer, a shared mobile element, a contaminant), and a relative window around 0 would
+        // collapse and prune the true clade. There we anchor the expansion to the nearest NON-ZERO
+        // competitor instead, so the window still scales with the local spread of sibling distances
+        // (and every exact tie is always kept). If every surviving sibling is an exact match, keep them all.
         let best_distance = ranked[0].2;
-        let cutoff = best_distance + uncertainty / 100.0;
+        let cutoff = if best_distance > 0.0 {
+            best_distance * (1.0 + uncertainty / 100.0)
+        } else {
+            let runner_up = ranked.iter().map(|r| r.2).find(|&d| d > 0.0).unwrap_or(0.0);
+            runner_up * (1.0 + uncertainty / 100.0)
+        };
 
         for (child_path, next_level, rank_distance, recorded) in ranked {
             if rank_distance <= cutoff {
