@@ -1134,8 +1134,13 @@ class MetaSBT(object):
             "--uncertainty",
             required=False,
             type=float,
-            default=20.0,
-            help="Uncertainty percentage for considering multiple best hits."
+            default=5.0,
+            help=(
+                "Additive beam margin, in ANI/AAI distance points, for keeping multiple best hits: "
+                "a sibling clade is kept when its ranking distance is within best + uncertainty/100 "
+                "of the closest (e.g. 5.0 keeps every sibling within 0.05). Absolute rather than "
+                "relative so it still admits close alternatives when the best match is exact."
+            )
         )
         parser.add_argument(
             "--pruning-threshold",
@@ -1888,8 +1893,14 @@ class MetaSBT(object):
             "--uncertainty",
             required=False,
             type=float,
-            default=20.0,
-            help="Uncertainty percentage for considering multiple best hits while profiling input genomes."
+            default=5.0,
+            help=(
+                "Additive beam margin, in ANI/AAI distance points, for keeping multiple best hits "
+                "while profiling input genomes: a sibling clade is kept when its ranking distance is "
+                "within best + uncertainty/100 of the closest (e.g. 5.0 keeps every sibling within "
+                "0.05). Absolute rather than relative so it still admits close alternatives when the "
+                "best match is exact."
+            )
         )
         parser.add_argument(
             "--pruning-threshold",

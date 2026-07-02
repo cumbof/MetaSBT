@@ -5,8 +5,11 @@
 //! which subtrees can contain a query (reachability), while sibling clades are ranked by the query's
 //! IDF-weighted (discriminative) union containment: k-mers shared by every sibling carry no signal
 //! and are down-weighted to nothing, so a query is not funnelled into the largest clade merely
-//! because its union is a denser sample of the universal k-mer space. FracMinHash bounds the hash
-//! space, keeping even the root union compact as a Roaring bitmap.
+//! because its union is a denser sample of the universal k-mer space. Ranking can additionally *fuse*
+//! the two payloads — the mean of the DNA (ANI) and amino-acid (AAI) discriminative distances — so a
+//! sibling must look right in both nucleotide and protein space to be pursued, which keeps the descent
+//! on the correct lineage where a single measure alone would drift. FracMinHash bounds the hash space,
+//! keeping even the root union compact as a Roaring bitmap.
 //! 
 //! It leverages:
 //! - `needletail` for blazing fast FASTA parsing.
@@ -563,11 +566,13 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
     Ok(())
 }
 
-/// The Sequence Bloom Tree search algorithm with IDF-weighted (discriminative) ranking.
+/// The Sequence Bloom Tree search algorithm with IDF-weighted (discriminative), optionally
+/// dual-measure (ANI + AAI) ranking.
 ///
 /// Every node stores the union of its subtree (see `build_delta_tree`): a species node holds
 /// the k-mers of all its genomes, a genus node the k-mers of all its species, and so on up to
-/// the kingdom. Genome leaves hold their own full sketch.
+/// the kingdom. Genome leaves hold their own full sketch. Each node carries *both* a DNA and an
+/// amino-acid union, so both an ANI and an AAI containment can be measured at every level.
 ///
 /// ## Two roles for two quantities
 ///
@@ -595,24 +600,44 @@ fn build_delta_tree(sketches_list: &str, out_tree: &str, mode: &str) -> PyResult
 ///   siblings (a single survivor, or every shared k-mer is universal so the total mass is zero), the
 ///   ranking falls back to raw union containment.
 ///
+/// ## Fused (dual-measure) ranking
+///
+/// The IDF discriminative distance is computed independently in each payload — an ANI distance from
+/// the DNA union and an AAI distance from the AA union. When `fuse` is true the ranking distance is
+/// their **mean**, so a sibling has to look right in *both* nucleotide and protein space to be
+/// pursued. This is what keeps the descent on the correct lineage: a single measure can be fooled
+/// (an amino-acid signal that is conserved across a wrong kingdom, or a nucleotide signal inflated by
+/// a horizontally transferred block), but it is far less likely that the *same wrong* clade wins on
+/// both axes at once. Where one axis carries no signal at a given depth — DNA k-mers do not survive
+/// kingdom-level divergence, AA k-mers are saturated within a genus — that axis contributes a near
+/// constant to every sibling and the discriminating axis drives the order, exactly as the old
+/// single-measure phases did. When `fuse` is false a single payload (`mode`) ranks, as before; that
+/// is used for the pure-DNA/pure-AA searches and for near-identical replica detection.
+///
 /// ## Recorded distance
 ///
-/// The distance recorded for each retained node is its *raw* union-containment ANI/AAI (query-to-union),
-/// the same quantity as before, so it stays comparable to the cluster boundary for confidence scoring.
-/// The IDF weighting only decides *which* siblings are pursued, not the magnitude that is reported.
+/// The distance recorded for each retained node is its *raw* union-containment ANI/AAI (query-to-union)
+/// in the `mode` payload — AAI for the kingdom..order phase, ANI for the family..species phase — so it
+/// stays comparable to that level's cluster boundary for confidence scoring. Neither the IDF weighting
+/// nor the fusion changes the magnitude that is reported; they only decide *which* siblings are pursued.
 ///
 /// ## Pruning / beam
 ///
-/// Surviving children are sorted by their IDF-weighted ranking distance and only those within
-/// `best_distance * (1 + uncertainty/100)` of the closest sibling are enqueued. When the closest
-/// sibling is an exact match (`best_distance == 0`) the relative window would collapse to zero, so
-/// an absolute fallback of `uncertainty/100` keeps near matches in play.
+/// Surviving children are sorted by their ranking distance and only those within an **additive** margin
+/// `best_distance + uncertainty/100` of the closest sibling are enqueued. The margin is absolute (a span
+/// of ANI/AAI distance, i.e. `uncertainty` points of identity) rather than a fraction of `best_distance`.
+/// This is deliberate: a query can be an *exact* (distance 0) match to a clade it does not belong to —
+/// horizontal gene transfer, a shared mobile element, a contaminant — and a *relative* window collapses
+/// to zero there, pruning the true clade that sits a hair further out. An additive window keeps every
+/// genuinely close alternative in play regardless of whether the best sibling is a perfect match.
 ///
-/// `theta` (pruning_threshold) is the absolute raw-union-containment floor described above.
+/// `theta` (pruning_threshold) is the absolute raw-union-containment floor described above; in fused
+/// mode a child is reachable if *either* payload's containment clears it.
 ///
-/// The `mode` parameter selects the DNA or AA bitmap from the dual-payload files (union bound,
-/// IDF weighting and recorded distances are all computed in that payload).
+/// `mode` selects which payload's raw containment is recorded (and, when `fuse` is false, which one
+/// ranks). `fuse` turns on the dual-measure mean ranking.
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 fn accumulator_search(
     query_sketch: &str,
     tree_root: &str,
@@ -621,40 +646,84 @@ fn accumulator_search(
     theta: f64,
     uncertainty: f64,
     mode: &str,
+    fuse: bool,
 ) -> PyResult<HashMap<String, HashMap<String, f64>>> {
 
-    let eff_kmer = if matches!(mode, "aa" | "AA") {
-        std::cmp::max(3, kmer_size / 3)
-    } else {
-        kmer_size
-    };
+    let report_aa = matches!(mode, "aa" | "AA");
+    let aa_kmer = std::cmp::max(3, kmer_size / 3);
 
-    let query_bm = select_bitmap(query_sketch, mode)?;
-    let query_len = query_bm.len() as f64;
+    // The query's DNA and AA sketches. Both are needed when fusing; when ranking a single measure
+    // only the reported payload carries a query, but reading both is one file read either way.
+    let (query_dna, query_aa) = read_bitmap_pair(query_sketch)?;
+    let query_dna_len = query_dna.len() as f64;
+    let query_aa_len = query_aa.len() as f64;
+    // The reported payload must carry query k-mers for the recorded distance to be meaningful.
+    let report_len = if report_aa { query_aa_len } else { query_dna_len };
 
     let mut profiles: HashMap<String, HashMap<String, f64>> = HashMap::new();
 
-    if query_len == 0.0 || !Path::new(tree_root).exists() {
+    if report_len == 0.0 || !Path::new(tree_root).exists() {
         return Ok(profiles);
     }
 
-    // Inline helper: containment in [0, 1] → ANI/AAI distance in [0, 1]
-    let dist_from_containment = |containment: f64| -> f64 {
+    // Whether each axis participates in ranking: the reported axis always does; the other only when
+    // fusing. An axis with no query k-mers cannot rank (it would divide by zero), so it drops out.
+    let use_dna = (!report_aa || fuse) && query_dna_len > 0.0;
+    let use_aa = (report_aa || fuse) && query_aa_len > 0.0;
+
+    // Containment in [0, 1] → ANI/AAI distance in [0, 1], at the axis's effective k-mer size
+    // (DNA k-mers are `kmer_size` bp; an AA k-mer spans `kmer_size / 3` residues).
+    fn dist_from_containment(containment: f64, eff_kmer: usize) -> f64 {
         let ani = if containment > 0.0 {
             1.0 + (1.0 / eff_kmer as f64) * containment.ln()
         } else {
             0.0
         };
         if ani <= 0.0 { 1.0 } else if ani >= 1.0 { 0.0 } else { 1.0 - ani }
+    }
+    let dist_dna = |c: f64| dist_from_containment(c, kmer_size);
+    let dist_aa = |c: f64| dist_from_containment(c, aa_kmer);
+
+    // IDF-weighted discriminative distance for one axis over the surviving siblings.
+    // `inters` holds each survivor's query∩union bitmap on that axis and `plains` its raw-containment
+    // distance (the fallback when no k-mer discriminates). Returns one distance per survivor in order.
+    let idf_rank = |inters: &[RoaringBitmap], plains: &[f64], eff_kmer: usize| -> Vec<f64> {
+        let n = inters.len() as f64;
+        let mut df: HashMap<u32, u32> = HashMap::new();
+        for bm in inters {
+            for h in bm {
+                *df.entry(h).or_insert(0) += 1;
+            }
+        }
+        let mut idf: HashMap<u32, f64> = HashMap::with_capacity(df.len());
+        let mut weighted_total = 0.0f64; // idf mass the query could reach across all siblings
+        for (&h, &d) in &df {
+            let w = (n / d as f64).ln();
+            idf.insert(h, w);
+            weighted_total += w;
+        }
+        inters.iter().enumerate().map(|(i, bm)| {
+            if weighted_total > 0.0 {
+                let mut w = 0.0f64;
+                for h in bm { w += idf[&h]; }
+                dist_from_containment(w / weighted_total, eff_kmer)
+            } else {
+                // No discriminative signal (single survivor, or every shared k-mer is universal):
+                // fall back to this axis's raw union containment.
+                plains[i]
+            }
+        }).collect()
     };
 
-    // A surviving child of the node currently being expanded: its query∩union bitmap (reused for
-    // the IDF pass) plus the raw union-containment distance that will be reported if it is retained.
+    // A surviving child of the node currently being expanded: its per-axis query∩union bitmaps and
+    // raw-containment distances, plus the level it sits at.
     struct Cand {
         path: String,
         level: String,
-        inter: RoaringBitmap, // query ∩ child union
-        plain_distance: f64,  // raw union-containment ANI/AAI distance (reported)
+        inter_dna: RoaringBitmap,
+        inter_aa: RoaringBitmap,
+        plain_dna: f64,
+        plain_aa: f64,
     }
 
     // Queue: (node_path, recorded_distance_for_this_node, level_name). The entry node (the
@@ -674,26 +743,40 @@ fn accumulator_search(
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
 
-        // First pass: load each child's union, keep the query∩union bitmap, and apply the
-        // reachability bound. The subtree union is an optimistic upper bound on the containment
+        // First pass: load each child's DNA and AA unions, keep the query∩union bitmaps, and apply
+        // the reachability bound. The subtree union is an optimistic upper bound on the containment
         // achievable by any single member, so a union below theta cannot hold a good match — prune
-        // the child and its whole subtree.
+        // the child and its whole subtree. In fused mode a child is reachable if *either* axis clears
+        // theta, so a level where one axis has decayed to noise cannot prune a true subtree.
         let mut cands: Vec<Cand> = Vec::new();
         for (child_path, next_level) in children {
             if !Path::new(child_path).exists() {
                 continue;
             }
-            let child_union_bm = select_bitmap(child_path, mode)?;
-            let inter = &query_bm & &child_union_bm;
-            let union_score = inter.len() as f64;
-            if union_score / query_len < theta {
+            let (child_dna, child_aa) = read_bitmap_pair(child_path)?;
+            let inter_dna = if use_dna { &query_dna & &child_dna } else { RoaringBitmap::new() };
+            let inter_aa = if use_aa { &query_aa & &child_aa } else { RoaringBitmap::new() };
+            let cont_dna = if query_dna_len > 0.0 { inter_dna.len() as f64 / query_dna_len } else { 0.0 };
+            let cont_aa = if query_aa_len > 0.0 { inter_aa.len() as f64 / query_aa_len } else { 0.0 };
+
+            let reach = if fuse {
+                cont_dna.max(cont_aa)
+            } else if report_aa {
+                cont_aa
+            } else {
+                cont_dna
+            };
+            if reach < theta {
                 continue;
             }
+
             cands.push(Cand {
                 path: child_path.clone(),
                 level: next_level.clone(),
-                plain_distance: dist_from_containment(union_score / query_len),
-                inter,
+                plain_dna: dist_dna(cont_dna),
+                plain_aa: dist_aa(cont_aa),
+                inter_dna,
+                inter_aa,
             });
         }
 
@@ -701,64 +784,54 @@ fn accumulator_search(
             continue;
         }
 
-        // Second pass: inverse-document-frequency weighting over the surviving siblings.
-        // df(h) = number of surviving children whose union contains query k-mer h. A k-mer shared
-        // by every sibling (universal / conserved) cannot tell them apart, so idf = ln(N/df) sends
-        // it to ~0; a k-mer specific to one clade keeps full weight. This strips the clade-size bias
-        // out of union containment — a big clade's union wins raw containment only through the
-        // universal k-mers, which now weigh nothing — so ranking follows the discriminative overlap.
-        let n = cands.len() as f64;
-        let mut df: HashMap<u32, u32> = HashMap::new();
-        for c in &cands {
-            for h in &c.inter {
-                *df.entry(h).or_insert(0) += 1;
-            }
-        }
-        let mut idf: HashMap<u32, f64> = HashMap::with_capacity(df.len());
-        let mut weighted_total = 0.0f64; // idf mass the query could reach across all siblings
-        for (&h, &d) in &df {
-            let w = (n / d as f64).ln();
-            idf.insert(h, w);
-            weighted_total += w;
-        }
-
-        // Ranking distance per child. With no discriminative signal (a single survivor, or every
-        // shared k-mer is universal so weighted_total is 0) fall back to raw union containment.
-        // (path, level, rank_distance, plain_distance)
-        let mut ranked: Vec<(String, String, f64, f64)> = Vec::with_capacity(cands.len());
-        for c in &cands {
-            let rank_distance = if weighted_total > 0.0 {
-                let mut w = 0.0f64;
-                for h in &c.inter {
-                    w += idf[&h];
-                }
-                dist_from_containment(w / weighted_total)
-            } else {
-                c.plain_distance
-            };
-            ranked.push((c.path.clone(), c.level.clone(), rank_distance, c.plain_distance));
-        }
-
-        // Sort by ranking distance ascending so ranked[0] is the most discriminative child.
-        ranked.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Uncertainty cutoff: keep every child within best_distance * (1 + uncertainty/100).
-        // This is a relative expansion, so a 50% uncertainty keeps all siblings up to 1.5×
-        // the closest distance — naturally narrower at lower levels where distances are small.
-        // If the best sibling is an exact match the relative window collapses to zero, so fall
-        // back to an absolute window of uncertainty/100 to avoid pruning every alternative.
-        let best_distance = ranked[0].2;
-        let cutoff = if best_distance > 0.0 {
-            best_distance * (1.0 + uncertainty / 100.0)
+        // Second pass: per-axis IDF discriminative distances, then fuse.
+        let rank_dna: Vec<f64> = if use_dna {
+            let inters: Vec<RoaringBitmap> = cands.iter().map(|c| c.inter_dna.clone()).collect();
+            let plains: Vec<f64> = cands.iter().map(|c| c.plain_dna).collect();
+            idf_rank(&inters, &plains, kmer_size)
         } else {
-            uncertainty / 100.0
+            cands.iter().map(|c| c.plain_dna).collect()
+        };
+        let rank_aa: Vec<f64> = if use_aa {
+            let inters: Vec<RoaringBitmap> = cands.iter().map(|c| c.inter_aa.clone()).collect();
+            let plains: Vec<f64> = cands.iter().map(|c| c.plain_aa).collect();
+            idf_rank(&inters, &plains, aa_kmer)
+        } else {
+            cands.iter().map(|c| c.plain_aa).collect()
         };
 
-        for (child_path, next_level, rank_distance, plain_distance) in ranked {
+        // Fuse the two axes (mean) when requested, else rank by the single reported axis. Record the
+        // reported payload's raw union-containment distance so the reported value stays comparable to
+        // the level's boundary. (path, level, rank_distance, recorded_distance)
+        let mut ranked: Vec<(String, String, f64, f64)> = Vec::with_capacity(cands.len());
+        for (i, c) in cands.iter().enumerate() {
+            let rank_distance = if fuse {
+                0.5 * (rank_dna[i] + rank_aa[i])
+            } else if report_aa {
+                rank_aa[i]
+            } else {
+                rank_dna[i]
+            };
+            let recorded = if report_aa { c.plain_aa } else { c.plain_dna };
+            ranked.push((c.path.clone(), c.level.clone(), rank_distance, recorded));
+        }
+
+        // Sort by ranking distance ascending so ranked[0] is the closest child.
+        ranked.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Uncertainty cutoff: keep every child within an ADDITIVE margin of the closest sibling,
+        // best_distance + uncertainty/100. The margin is an absolute span of ANI/AAI distance, so it
+        // does not collapse when the best sibling is an exact match (distance 0) — a query that is
+        // distance 0 to a wrong clade (HGT, mobile element, contamination) still keeps the true clade,
+        // which sits a small distance further out, in the beam.
+        let best_distance = ranked[0].2;
+        let cutoff = best_distance + uncertainty / 100.0;
+
+        for (child_path, next_level, rank_distance, recorded) in ranked {
             if rank_distance <= cutoff {
-                // Rank/beam by the discriminative distance, but record the raw union-containment
-                // distance so the reported value stays comparable to the level's boundary.
-                queue.push_back((child_path, plain_distance, next_level));
+                // Rank/beam by the (possibly fused) discriminative distance, but record the raw
+                // union-containment distance so the reported value stays comparable to the boundary.
+                queue.push_back((child_path, recorded, next_level));
             }
         }
     }

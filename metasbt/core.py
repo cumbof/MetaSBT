@@ -1924,7 +1924,7 @@ class Database(object):
         self,
         genome_filepath: str,
         sketch_filepath: str,
-        uncertainty: float=50.0,
+        uncertainty: float=5.0,
         pruning_threshold: float=0.0,
         mode: str = "split",
     ) -> Dict[str, Dict[str, float]]:
@@ -1938,19 +1938,27 @@ class Database(object):
             Path to the input genome file in fasta format.
         sketch_filepath : str
             Path to the sketch representation of the input genome.
-        uncertainty : float, default 50.0
-            Percentage of uncertainty used to expand the selection of best matches.
+        uncertainty : float, default 5.0
+            Additive beam margin, in ANI/AAI distance points (uncertainty / 100 of the [0, 1]
+            distance range).  A sibling clade is kept if its ranking distance is within
+            best_distance + uncertainty/100 of the closest sibling.  The margin is absolute rather
+            than a fraction of the best distance so it does not collapse when the closest match is
+            exact (distance 0): a query can be distance 0 to a clade it does not belong to (horizontal
+            gene transfer, a shared mobile element, contamination), and an absolute margin still keeps
+            the true clade — which sits a little further out — in play.
         pruning_threshold : float, default 0.0
             Minimum containment score below which a branch is pruned during the accumulator search.
             Must be between 0.0 and 1.0.
         mode : str, default "split"
-            Search mode.  "split" (default) searches the kingdom/phylum/class/order levels in the
-            conserved AA payload, ranking sibling clades by the query's IDF-weighted (discriminative)
-            union containment and using raw union containment only as a reachability bound — this
-            avoids funnelling the query into the largest clade.  It then seeds a DNA descent from
-            the AA-selected order node(s) and continues down the family/genus/species/genome levels
-            within those subtrees only (finer resolution, coherent lineage, no cross-tree size
-            bias).  Pass "dna" or "aa" for a single-payload search across all levels from the root.
+            Search mode.  "split" (default) searches the kingdom/phylum/class/order levels reporting
+            the conserved AA (AAI) distance and the family/genus/species/genome levels reporting the
+            DNA (ANI) distance, but at every level it *ranks* sibling clades by the mean of their
+            IDF-weighted (discriminative) ANI and AAI distances — a clade must look right in both
+            nucleotide and protein space to be pursued, which keeps the descent on the correct lineage
+            where either measure alone would drift.  Raw union containment is only a reachability
+            bound.  The DNA descent is seeded from the AA-selected order node(s) and confined to those
+            subtrees (finer resolution, coherent lineage, no cross-tree size bias).  Pass "dna" or "aa"
+            for a single-measure search across all levels from the root.
 
         Raises
         ------
@@ -2008,18 +2016,19 @@ class Database(object):
         tree_topology = self._build_tree_topology()
 
         if mode == "split":
-            # Phase 1 — AA accumulator search (kingdom / phylum / class / order), ranking sibling
-            # clades by the query's IDF-weighted (discriminative) union containment rather than raw
-            # union containment. AA k-mers are conserved, so at this evolutionary scale every large
-            # clade's union saturates the universal k-mer space; raw union containment is then
-            # monotone in clade size and would pick the biggest clade regardless of true membership.
-            # Down-weighting the universal k-mers (idf) restores discrimination, while raw union
-            # containment is kept as the reachability bound that prunes subtrees that cannot contain
-            # the query.
+            # Phase 1 — AA accumulator search (kingdom / phylum / class / order). Sibling clades are
+            # ranked by the mean of their IDF-weighted (discriminative) ANI and AAI distances (fuse=
+            # True): AA k-mers are conserved, so at this evolutionary scale every large clade's union
+            # saturates the universal k-mer space and raw union containment would just pick the biggest
+            # clade — down-weighting the universal k-mers (idf) restores discrimination, and fusing the
+            # DNA axis adds a second, independent vote so a clade that is only *coincidentally* close in
+            # protein space (e.g. a wrong kingdom reached through conserved genes or an HGT block) is not
+            # pursued unless it is close on both axes. The reported distance is the AA (AAI) containment;
+            # raw union containment is the reachability bound.
             try:
                 raw_aa = deltatree.accumulator_search(
                     sketch_filepath, tree_root_filepath, tree_topology,
-                    self.metadata["kmer_size"], pruning_threshold, uncertainty, "aa"
+                    self.metadata["kmer_size"], pruning_threshold, uncertainty, "aa", True
                 )
             except Exception as e:
                 raise Exception(f"AA accumulator search failed: {e}")
@@ -2037,7 +2046,10 @@ class Database(object):
             # Seeding the DNA descent from every order node retained by the AA phase and
             # confining it to those subtrees fixes both: the lineage stays continuous, and
             # each family comparison is restricted to size-comparable siblings within the
-            # same order, which removes the cross-tree union-size bias.
+            # same order, which removes the cross-tree union-size bias. This phase also fuses
+            # both measures (fuse=True): ranking is the mean of the IDF-weighted ANI and AAI
+            # distances, so the still-informative AA axis breaks ties the DNA axis cannot, while
+            # the reported distance is the DNA (ANI) containment.
             seed_nodes = list(raw_aa.get("order", {}).keys())
             if not seed_nodes:
                 # Fall back to the deepest AA level that produced hits, else the root.
@@ -2055,7 +2067,7 @@ class Database(object):
                 try:
                     partial = deltatree.accumulator_search(
                         sketch_filepath, seed_node, tree_topology,
-                        self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna"
+                        self.metadata["kmer_size"], pruning_threshold, uncertainty, "dna", True
                     )
                 except Exception as e:
                     raise Exception(f"DNA accumulator search failed: {e}")
@@ -2075,7 +2087,7 @@ class Database(object):
             try:
                 raw_profiles = deltatree.accumulator_search(
                     sketch_filepath, tree_root_filepath, tree_topology,
-                    self.metadata["kmer_size"], pruning_threshold, uncertainty, mode
+                    self.metadata["kmer_size"], pruning_threshold, uncertainty, mode, False
                 )
             except Exception as e:
                 raise Exception(f"Accumulator search failed: {e}")
@@ -2515,7 +2527,7 @@ class Database(object):
         self,
         genomes: List[str],
         sketches: List[str],
-        uncertainty: float=50.0,
+        uncertainty: float=5.0,
         pruning_threshold: float=0.0,
         mode: str="split",
     ) -> Dict[str, Dict]:
@@ -2527,8 +2539,9 @@ class Database(object):
             List of paths to uncompressed genome files.
         sketches : list
             List of paths to corresponding genome sketches (same order as genomes).
-        uncertainty : float, default 50.0
-            Percentage of uncertainty used to expand the selection of best matches.
+        uncertainty : float, default 5.0
+            Additive beam margin in ANI/AAI distance points (uncertainty / 100 of the [0, 1]
+            distance range); see MetaSBT.profile for the full semantics.
         pruning_threshold : float, default 0.0
             Minimum containment ANI threshold for pruning the tree during search.
         mode : str, default "dna"
