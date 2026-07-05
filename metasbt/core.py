@@ -48,6 +48,16 @@ class Database(object):
     # Define the list of taxonomic levels
     LEVELS = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
 
+    # When several clusters pass the two-boundary gate for the same genome, distance is the primary
+    # selector; among candidates whose distance is within NEAR_TIE_BAND of the closest one (a near
+    # tie), the highest box margin (confidence) wins instead. Keeps distance in charge for clearly
+    # separated candidates while letting the margin decide genuinely close calls.
+    NEAR_TIE_BAND = 0.10
+
+    # Cap on the number of near-distance candidates evaluated per level (the beam already returns
+    # few; this only guards against a pathologically wide level).
+    MAX_CANDIDATES = 5
+
     def __init__(
         self,
         name: str,
@@ -823,26 +833,36 @@ class Database(object):
             if not matches:
                 continue
 
-            # Closest clusters and genomes come with their ANI distances
-            # The smaller the better
+            # Closest clusters and genomes come with their ANI distances (the smaller the better).
+            # Consider several near-distance candidates, not only the single closest, so that the box
+            # margin (confidence) can complement distance when clusters are near-equidistant.
             taxonomies = sorted(matches.keys(), key=lambda match: matches[match])
 
-            # Get the best match only
-            # We could comment this line to test it against all the other closest cluster under this level
-            taxonomies = [taxonomies[0]]
-
-            # Sort matches based on the best score
             if level == "genome":
                 # Trim the last level t out of the taxonomic label
                 taxonomies = ["|".join(match.split("|")[:-1]) for match in taxonomies]
+
+            # Keep the closest-first order, drop duplicate species labels, and cap the candidate set
+            seen: Set[str] = set()
+            deduped = list()
+            for match in taxonomies:
+                if match not in seen:
+                    seen.add(match)
+                    deduped.append(match)
+            taxonomies = deduped[:self.__class__.MAX_CANDIDATES]
 
             species_ids = list()
 
             centroid_sketches = list()
 
-            # Check whether the current genome is close enough to its closest cluster
+            # Check whether the current genome is close enough to its closest clusters
             for closest_species_taxonomy in taxonomies:
                 closest_species_name = closest_species_taxonomy.split("|")[-1]
+
+                if closest_species_name not in self.clusters["species"]:
+                    species_ids.append(None)
+                    centroid_sketches.append(None)
+                    continue
 
                 # Retrieve the closest species identifier
                 closest_species_id = self.clusters["species"][closest_species_name].identifier
@@ -857,28 +877,38 @@ class Database(object):
 
                 centroid_sketches.append(closest_species_centroid_sketch)
 
+            valid_sketches = [sketch for sketch in centroid_sketches if sketch]
+
             # Compute the ANI (DNA) and AAI (AA) distances between the input genome and the closest
             # cluster centroids independently, so the assignment can be gated on both axes.
-            _, dists_ani = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
-            _, dists_aai = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+            _, dists_ani = self.__class__.dist(genome_sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+            _, dists_aai = self.__class__.dist(genome_sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+
+            # Collect the candidates that fall within BOTH the ANI and the AAI boundary (the box)
+            candidates = list()
 
             for pos, closest_species_taxonomy in enumerate(taxonomies):
-                closest_species_id = species_ids[pos]
+                if centroid_sketches[pos] is None:
+                    continue
 
                 d_ani = dists_ani[centroid_sketches[pos]]
                 d_aai = dists_aai[centroid_sketches[pos]]
 
                 # Retrieve the two per-axis boundaries of the closest species cluster
-                _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_species_id]["taxonomy"])
+                _, max_ani, _, max_aai = self._estimate_boundaries(self.report[species_ids[pos]]["taxonomy"])
 
-                # Assign only if the genome falls within BOTH the ANI and the AAI boundary
                 if d_ani <= max_ani and d_aai <= max_aai:
-                    taxonomy = closest_species_taxonomy
+                    confidence = self.__class__._box_confidence(d_ani, max_ani, d_aai, max_aai)
+                    candidates.append((closest_species_taxonomy, 0.5 * (d_ani + d_aai), confidence))
 
-                    # Enable `characterized` to assign the current genome to the fully defined taxonomic label
-                    characterized = True
+            # Distance is primary; the box margin decides among near-ties (see `_select_candidate`)
+            chosen = self.__class__._select_candidate(candidates)
 
-                    break
+            if chosen is not None:
+                taxonomy = chosen[0]
+
+                # Enable `characterized` to assign the current genome to the fully defined taxonomic label
+                characterized = True
 
             if characterized:
                 # We have found an assignment
@@ -1186,84 +1216,98 @@ class Database(object):
                     if not matches:
                         continue
 
-                    # Closest clusters come with their ANI distances
-                    # The smaller the better
-                    taxonomies = sorted(matches.keys(), key=lambda match: matches[match])
+                    # Closest clusters come with their ANI distances (the smaller the better).
+                    # Consider several near-distance candidates so the box margin can complement
+                    # distance when clusters are near-equidistant.
+                    taxonomies = sorted(matches.keys(), key=lambda match: matches[match])[:self.__class__.MAX_CANDIDATES]
 
-                    # Get the best match only
-                    # We could comment this line to test it against all the other closest cluster under this level
-                    taxonomies = [taxonomies[0]]
+                    cluster_ids = list()
 
                     centroid_sketches = list()
 
-                    # Check whether the current genome is close enough to its closest cluster
                     for closest_cluster_taxonomy in taxonomies:
-                        current_level = level
-
                         closest_cluster_name = closest_cluster_taxonomy.split("|")[-1]
 
-                        # Retrieve the closest cluster identifier
-                        closest_cluster_id = self.clusters[current_level][closest_cluster_name].identifier
+                        if closest_cluster_name not in self.clusters[level]:
+                            cluster_ids.append(None)
+                            centroid_sketches.append(None)
+                            continue
+
+                        # Retrieve the closest cluster identifier and its centroid genome sketch
+                        closest_cluster_id = self.clusters[level][closest_cluster_name].identifier
 
                         closest_cluster_centroid = self.report[closest_cluster_id]["centroid"]
 
                         # Centroids are always genomes
-                        closest_cluster_centroid_sketch = self.genomes[closest_cluster_centroid].sketch_filepath
+                        cluster_ids.append(closest_cluster_id)
 
-                        centroid_sketches.append(closest_cluster_centroid_sketch)
+                        centroid_sketches.append(self.genomes[closest_cluster_centroid].sketch_filepath)
+
+                    valid_sketches = [sketch for sketch in centroid_sketches if sketch]
 
                     # Compute the ANI (DNA) and AAI (AA) distances between the unknown genome and the
                     # closest cluster centroids independently, to gate on both per-axis boundaries.
-                    _, dists_ani = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
-                    _, dists_aai = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+                    _, dists_ani = self.__class__.dist(genome_obj.sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+                    _, dists_aai = self.__class__.dist(genome_obj.sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+
+                    # Collect the candidates that fall within BOTH boundaries (the box); carry each
+                    # one's boundaries so the chosen candidate drives the dendrogram cut.
+                    candidates = list()
 
                     for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
+                        if centroid_sketches[inner_pos] is None:
+                            continue
+
                         d_ani = dists_ani[centroid_sketches[inner_pos]]
                         d_aai = dists_aai[centroid_sketches[inner_pos]]
 
                         try:
                             # Retrieve the two per-axis closest cluster boundaries
-                            _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_cluster_id]["taxonomy"])
+                            _, max_ani, _, max_aai = self._estimate_boundaries(self.report[cluster_ids[inner_pos]]["taxonomy"])
 
                         except Exception:
                             # This happens in case the distance is outside the kingdom boundaries
-                            # The input genome will be marked as unassigned
                             continue
 
-                        # Assign only if the genome falls within BOTH the ANI and the AAI boundary
                         if d_ani <= max_ani and d_aai <= max_aai:
-                            if len(sketches) > 1:
-                                # The dendrograms exist in case of >1 sketches. Genomes co-cluster only
-                                # if grouped together in BOTH the ANI and AAI dendrograms cut at their
-                                # respective boundaries (composite label = intersection of the two cuts).
-                                clusters = list(zip(
-                                    hier.fcluster(dendrogram_ani, max_ani, criterion="distance"),
-                                    hier.fcluster(dendrogram_aai, max_aai, criterion="distance"),
-                                ))
+                            confidence = self.__class__._box_confidence(d_ani, max_ani, d_aai, max_aai)
+                            candidates.append(((closest_cluster_taxonomy, max_ani, max_aai), 0.5 * (d_ani + d_aai), confidence))
 
-                            else:
-                                # There is only one sketch here
-                                clusters = [1]
+                    # Distance is primary; the box margin decides among near-ties (see `_select_candidate`)
+                    chosen = self.__class__._select_candidate(candidates)
 
-                            # Search for the cluster id assigned to the current genome
-                            cluster_id = clusters[outer_pos]
+                    if chosen is not None:
+                        closest_cluster_taxonomy, max_ani, max_aai = chosen[0]
 
-                            # Collect all the genomes that have been assigned to the same cluster id
-                            for sketch_filepath, assigned_cluster in zip(sketches, clusters):
-                                if assigned_cluster == cluster_id and sketch_filepath not in processed:
-                                    # Get the genome name from the sketch filepath
-                                    sketch_name = os.path.splitext(os.path.basename(sketch_filepath))[0]
+                        if len(sketches) > 1:
+                            # The dendrograms exist in case of >1 sketches. Genomes co-cluster only if
+                            # grouped together in BOTH the ANI and AAI dendrograms cut at the chosen
+                            # cluster's boundaries (composite label = intersection of the two cuts).
+                            clusters = list(zip(
+                                hier.fcluster(dendrogram_ani, max_ani, criterion="distance"),
+                                hier.fcluster(dendrogram_aai, max_aai, criterion="distance"),
+                            ))
 
-                                    # All genomes that fall under this cluster are assigned to an already defined cluster in the database
-                                    assignments[sketch_name] = closest_cluster_taxonomy
+                        else:
+                            # There is only one sketch here
+                            clusters = [1]
 
-                                    # Mark the assigned genomes as processed
-                                    processed.add(sketch_filepath)
+                        # Search for the cluster id assigned to the current genome
+                        cluster_id = clusters[outer_pos]
 
-                                    print(f"\t[{len(processed)}/{len(self.__unknowns)}] {level}={closest_cluster_taxonomy}\t{sketch_name}")
+                        # Collect all the genomes that have been assigned to the same cluster id
+                        for sketch_filepath, assigned_cluster in zip(sketches, clusters):
+                            if assigned_cluster == cluster_id and sketch_filepath not in processed:
+                                # Get the genome name from the sketch filepath
+                                sketch_name = os.path.splitext(os.path.basename(sketch_filepath))[0]
 
-                            # We have found a match under the current level
-                            break
+                                # All genomes that fall under this cluster are assigned to an already defined cluster in the database
+                                assignments[sketch_name] = closest_cluster_taxonomy
+
+                                # Mark the assigned genomes as processed
+                                processed.add(sketch_filepath)
+
+                                print(f"\t[{len(processed)}/{len(self.__unknowns)}] {level}={closest_cluster_taxonomy}\t{sketch_name}")
 
                 if level == "kingdom" and genome_obj.sketch_filepath not in processed:
                     # This genome has not been characterized, not even at the kingdom level
@@ -1411,6 +1455,72 @@ class Database(object):
         # Update metadata.json with the new clusters counter
         with open(metadata_json_filepath, "w+") as metadata_json_file:
             json.dump(self.metadata, metadata_json_file)
+
+    @staticmethod
+    def _box_confidence(d_ani: float, max_ani: float, d_aai: float, max_aai: float) -> float:
+        """Per-hit box margin: how deeply the genome sits inside a cluster's two-boundary box.
+
+        For each axis the margin is `1 - distance / boundary` (1.0 at the centroid, 0.0 at the
+        boundary); the confidence is the minimum of the two (the binding axis), clamped to [0, 1].
+        It is non-negative iff the genome is within BOTH boundaries, so this is the continuous form
+        of the assignment gate. Because it normalises by each cluster's own radius, it distinguishes
+        a genome that sits squarely inside a loose cluster from one perched at the edge of a tight
+        one — information the raw ANI/AAI distances do not carry.
+
+        Parameters
+        ----------
+        d_ani, d_aai : float
+            The genome-to-centroid ANI and AAI distances.
+        max_ani, max_aai : float
+            The cluster's ANI and AAI upper boundaries.
+
+        Returns
+        -------
+        float
+            The box margin in [0, 1].
+        """
+
+        def axis(distance: float, bound: float) -> float:
+            if bound and bound > 0:
+                return 1.0 - distance / bound
+            return 1.0 if distance == 0.0 else 0.0
+
+        return max(0.0, min(1.0, min(axis(d_ani, max_ani), axis(d_aai, max_aai))))
+
+    @classmethod
+    def _select_candidate(cls, candidates: List[Tuple[Any, float, float]]) -> Optional[Tuple[Any, float, float]]:
+        """Choose one cluster among those that already passed the two-boundary gate.
+
+        Distance is the primary selector; confidence (box margin) only complements it. Among the
+        candidates whose distance is within `NEAR_TIE_BAND` of the closest one — a near tie the raw
+        distance cannot confidently rank — the highest box margin wins, so a genome is attached to
+        the cluster it sits most squarely inside rather than the one it is merely nearest to the edge
+        of. Clearly separated candidates are still decided by distance alone.
+
+        Parameters
+        ----------
+        candidates : list
+            A list of (payload, distance, confidence) tuples, all already inside their box.
+
+        Returns
+        -------
+        tuple or None
+            The chosen (payload, distance, confidence) tuple, or None if `candidates` is empty.
+        """
+
+        if not candidates:
+            return None
+
+        best_distance = min(distance for _, distance, _ in candidates)
+
+        # Near-tie band relative to the closest candidate (an exact-0 best keeps only the other
+        # exact-0 candidates as ties, then the margin decides among them).
+        band = best_distance * (1.0 + cls.NEAR_TIE_BAND)
+
+        near_ties = [candidate for candidate in candidates if candidate[1] <= band]
+
+        # Highest box margin among the near ties; distance breaks a margin tie for determinism.
+        return max(near_ties, key=lambda candidate: (candidate[2], -candidate[1]))
 
     def _estimate_boundaries(self, taxonomy: str, species_threshold: float=0.05) -> Tuple[float, float, float, float]:
         """Estimate the boundaries of a given taxonomic entry.
@@ -1998,8 +2108,11 @@ class Database(object):
             where either measure alone would drift — and records the fused distance (the mean of the
             raw ANI and AAI union containments) at every level as the reported value.  Assignment,
             however, is gated on the two per-axis cluster boundaries independently (the genome must be
-            within both the ANI and the AAI interval), and the reported confidence is measured against
-            the tighter (binding) of the two.  Raw union containment is only a reachability bound.  The
+            within both the ANI and the AAI interval).  Confidence is a PER-HIT box margin: the
+            genome's distance to each candidate cluster's centroid, on each axis, normalised by that
+            cluster's own per-axis boundary and taking the tighter (binding) axis — so it varies per
+            hit and measures how deeply the genome sits inside each cluster's box, information the raw
+            distances lack.  Raw union containment is only a reachability bound.  The
             kingdom..order levels are searched in the AA subtree, then the DNA descent is
             seeded from the AA-selected order node(s) and confined to those subtrees (finer resolution,
             coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-measure search
@@ -2014,7 +2127,7 @@ class Database(object):
         -------
         dict
             A dictionary with the closest cluster and its ANI distance, indexed by the taxonomic
-            level name.  In "split" mode a "confidence" key is also present for the DNA levels.
+            level name, plus a "confidence" key mapping each level to the closest hit's box margin.
         """
 
         levels = ["db"] + self.__class__.LEVELS + ["genome"]
@@ -2036,6 +2149,7 @@ class Database(object):
 
         if os.path.isfile(query_result_filepath):
             try:
+                conf_by_hit: Dict[str, Dict[str, float]] = {}
                 with open(query_result_filepath) as profile_file:
                     for line in profile_file:
                         line = line.strip()
@@ -2046,12 +2160,18 @@ class Database(object):
                             ani   = float(line_split[2])
                             profiles[level][label] = ani
                             if len(line_split) > 3 and line_split[3].strip():
-                                if "confidence" not in profiles:
-                                    profiles["confidence"] = {}
                                 try:
-                                    profiles["confidence"][level] = float(line_split[3])
+                                    conf_by_hit.setdefault(level, {})[label] = float(line_split[3])
                                 except ValueError:
                                     pass
+                # Confidence is stored per hit; expose one value per level (the closest hit's) to
+                # match the fresh-compute contract the CLI consumes.
+                confidences: Dict[str, float] = {}
+                for level, hits in conf_by_hit.items():
+                    if profiles.get(level):
+                        best_label = min(profiles[level].items(), key=lambda item: item[1])[0]
+                        confidences[level] = hits.get(best_label, max(hits.values()))
+                profiles["confidence"] = confidences
                 return profiles
             except Exception:
                 os.unlink(query_result_filepath)
@@ -2159,24 +2279,56 @@ class Database(object):
             for match_path, ani in raw_profiles[lvl].items():
                 profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
 
-        # Confidence: clamp(1 - distance / boundary, 0.0, 1.0). The cluster now has two independent
-        # boundaries (ANI and AAI) and the assignment gate requires the genome to be within BOTH, so
-        # the binding constraint is the tighter (smaller) of the two. Confidence is reported against
-        # that binding boundary at every level.
+        # Confidence is the PER-HIT box margin (see `_box_confidence`): for each candidate cluster,
+        # the genome's distance to that cluster's centroid on each axis, normalised by the cluster's
+        # own per-axis boundary, taking the tighter (binding) axis. Unlike the recorded union distance
+        # it varies per hit and measures how deeply the genome sits inside each cluster's box
+        # (>= 0 iff within both boundaries) — the same quantity the assignment gate uses. Distances to
+        # all candidate centroids are computed in two batched calls.
+        centroid_sketch_of: Dict[Tuple[str, str], str] = {}
+        for level in self.__class__.LEVELS:
+            for label in profiles.get(level, dict()):
+                cluster = self.clusters.get(level, dict()).get(label.split("|")[-1])
+                if cluster is None:
+                    continue
+                info = self.report.get(cluster.identifier)
+                if not info:
+                    continue
+                centroid_obj = self.genomes.get(info.get("centroid"))
+                if centroid_obj is None or not centroid_obj.sketch_filepath:
+                    continue
+                centroid_sketch_of[(level, label)] = centroid_obj.sketch_filepath
+
+        unique_centroids = list({sketch for sketch in centroid_sketch_of.values()})
+        centroid_dist_ani: Dict[str, float] = {}
+        centroid_dist_aai: Dict[str, float] = {}
+        if unique_centroids:
+            _, centroid_dist_ani = self.__class__.dist(sketch_filepath, unique_centroids, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+            _, centroid_dist_aai = self.__class__.dist(sketch_filepath, unique_centroids, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+
+        confidence_by_hit: Dict[str, Dict[str, float]] = {}
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
             if level not in profiles or not profiles[level]:
                 continue
-            label, ani = min(profiles[level].items(), key=lambda x: x[1])
-            try:
-                _, max_ani, _, max_aai = self._estimate_boundaries(label)
-                bound = min(max_ani, max_aai)
-                if bound and bound > 0:
-                    confidences[level] = max(0.0, min(1.0, 1.0 - ani / bound))
-                else:
-                    confidences[level] = 1.0 if ani == 0.0 else 0.0
-            except Exception:
-                pass
+            level_confidences: Dict[str, float] = {}
+            for label in profiles[level]:
+                sketch = centroid_sketch_of.get((level, label))
+                if sketch is None:
+                    continue
+                try:
+                    _, max_ani, _, max_aai = self._estimate_boundaries(label)
+                except Exception:
+                    continue
+                level_confidences[label] = self.__class__._box_confidence(
+                    centroid_dist_ani.get(sketch, 1.0), max_ani,
+                    centroid_dist_aai.get(sketch, 1.0), max_aai,
+                )
+            if level_confidences:
+                confidence_by_hit[level] = level_confidences
+                # Expose one value per level (the closest hit's) for the CLI/return contract
+                best_label = min(profiles[level].items(), key=lambda item: item[1])[0]
+                confidences[level] = level_confidences.get(best_label, max(level_confidences.values()))
 
         profiles["confidence"] = confidences
 
@@ -2184,9 +2336,10 @@ class Database(object):
             profiles_table.write("# level\tclosest\tani\tconfidence\n")
             for level in self.__class__.LEVELS + ["genome"]:
                 if level in profiles:
-                    conf = confidences.get(level)
-                    conf_str = f"{conf:.6f}" if conf is not None else ""
+                    level_confidences = confidence_by_hit.get(level, dict())
                     for match, ani in profiles[level].items():
+                        conf = level_confidences.get(match)
+                        conf_str = f"{conf:.6f}" if conf is not None else ""
                         profiles_table.write(f"{level}\t{match}\t{ani}\t{conf_str}\n")
 
         return profiles
