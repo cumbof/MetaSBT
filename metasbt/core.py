@@ -508,13 +508,13 @@ class Database(object):
         """Learn the species-level distance boundary from the reference data instead of
         hard-coding it.
 
-        Distances are the FUSED metric (mean of ANI and AAI), the same one the profiler ranks and
-        records and the boundaries are stored in. Within each genus, the pairwise distances between
-        genomes that share the same input species label (within-species) and between genomes with
-        different input species labels (between-species) form two distributions. The boundary is the
-        distance that best separates them, i.e. the threshold maximising Youden's J (`TPR - FPR`).
-        This is the empirical species discontinuity of *this* reference set, so no fixed value is
-        assumed.
+        Distances are single-axis (this is called once for ANI and once for AAI, on the matching
+        per-genus condensed matrix), so it learns an independent species radius for each axis.
+        Within each genus, the pairwise distances between genomes that share the same input species
+        label (within-species) and between genomes with different input species labels
+        (between-species) form two distributions. The boundary is the distance that best separates
+        them, i.e. the threshold maximising Youden's J (`TPR - FPR`). This is the empirical species
+        discontinuity of *this* reference set on this axis, so no fixed value is assumed.
 
         Parameters
         ----------
@@ -670,43 +670,63 @@ class Database(object):
             genus_lineage = "|".join(taxonomy.split("|")[:genus_idx + 1])
             by_genus.setdefault(genus_lineage, dict())[genome_filepath] = taxonomy
 
-        # Build the sketches once (resume-friendly) and a per-genus condensed distance matrix
+        # Build the sketches once (resume-friendly) and a per-genus condensed distance matrix in
+        # each of the two spaces (ANI and AAI), so species are delineated on both axes.
         sketch_map = self.sketch_genomes(list(references.keys()))
 
         genus_paths: Dict[str, List[str]] = {}
-        genus_condensed: Dict[str, Optional[List[float]]] = {}
+        genus_condensed_ani: Dict[str, Optional[List[float]]] = {}
+        genus_condensed_aai: Dict[str, Optional[List[float]]] = {}
         for genus_lineage, members in by_genus.items():
             paths = sorted(members.keys())
             genus_paths[genus_lineage] = paths
-            genus_condensed[genus_lineage] = (
-                self._condensed_distances([sketch_map[p] for p in paths], mode="fused") if len(paths) > 1 else None
-            )
+            if len(paths) > 1:
+                genus_sketches = [sketch_map[p] for p in paths]
+                genus_condensed_ani[genus_lineage] = self._condensed_distances(genus_sketches, mode="dna")
+                genus_condensed_aai[genus_lineage] = self._condensed_distances(genus_sketches, mode="aa")
+            else:
+                genus_condensed_ani[genus_lineage] = None
+                genus_condensed_aai[genus_lineage] = None
 
-        # Reuse the species radius learned for the baseline; learn it only the first time so
-        # later reference updates remain consistent with the original index.
-        if "species_radius" in self.metadata:
-            radius = self.metadata["species_radius"]
-            within_hi = self.metadata.get("species_within_hi", radius)
+        # Reuse the per-axis species radii learned for the baseline; learn them only the first time
+        # so later reference updates remain consistent with the original index.
+        if "species_radius_ani" in self.metadata:
+            radius_ani = self.metadata["species_radius_ani"]
+            within_hi_ani = self.metadata.get("species_within_hi_ani", radius_ani)
+            radius_aai = self.metadata["species_radius_aai"]
+            within_hi_aai = self.metadata.get("species_within_hi_aai", radius_aai)
         else:
-            radius, within_hi = self._learn_species_radius(by_genus, genus_paths, genus_condensed)
-            self.metadata["species_radius"] = radius
-            self.metadata["species_within_hi"] = within_hi
+            radius_ani, within_hi_ani = self._learn_species_radius(by_genus, genus_paths, genus_condensed_ani)
+            radius_aai, within_hi_aai = self._learn_species_radius(by_genus, genus_paths, genus_condensed_aai)
+            self.metadata["species_radius_ani"] = radius_ani
+            self.metadata["species_within_hi_ani"] = within_hi_ani
+            self.metadata["species_radius_aai"] = radius_aai
+            self.metadata["species_within_hi_aai"] = within_hi_aai
             self._dump_metadata()
 
         refined: Dict[str, str] = {}
 
         for genus_lineage, members in by_genus.items():
             paths = genus_paths[genus_lineage]
-            condensed = genus_condensed[genus_lineage]
+            condensed_ani = genus_condensed_ani[genus_lineage]
+            condensed_aai = genus_condensed_aai[genus_lineage]
 
-            if condensed is None:
+            if condensed_ani is None:
                 # A single genome in this genus: one species cluster
                 labels = [0] * len(paths)
             else:
-                linkage = hier.linkage(condensed, method="average")
-                heights = sorted(float(height) for height in linkage[:, 2])
-                cut = self.__class__._gap_cut(heights, radius, within_hi)
-                labels = hier.fcluster(linkage, cut, criterion="distance")
+                # Cut the ANI and the AAI dendrogram each at its own learned species radius
+                # (tightened to a clearer natural valley where present) and intersect the two
+                # labelings: two genomes share a species only if grouped together on BOTH axes.
+                linkage_ani = hier.linkage(condensed_ani, method="average")
+                cut_ani = self.__class__._gap_cut(sorted(float(h) for h in linkage_ani[:, 2]), radius_ani, within_hi_ani)
+                labels_ani = hier.fcluster(linkage_ani, cut_ani, criterion="distance")
+
+                linkage_aai = hier.linkage(condensed_aai, method="average")
+                cut_aai = self.__class__._gap_cut(sorted(float(h) for h in linkage_aai[:, 2]), radius_aai, within_hi_aai)
+                labels_aai = hier.fcluster(linkage_aai, cut_aai, criterion="distance")
+
+                labels = list(zip(labels_ani, labels_aai))
 
             # Group genomes by their assigned cluster id (preserve a deterministic order)
             groups: "OrderedDict[Any, List[str]]" = OrderedDict()
@@ -837,21 +857,22 @@ class Database(object):
 
                 centroid_sketches.append(closest_species_centroid_sketch)
 
-            # Compute the distance between the input genome and the closest cluster centroids in the
-            # fused metric (mean of ANI and AAI), matching the split-mode profile ranking and the
-            # fused boundary the assignment is gated against.
-            _, dists = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="fused")
+            # Compute the ANI (DNA) and AAI (AA) distances between the input genome and the closest
+            # cluster centroids independently, so the assignment can be gated on both axes.
+            _, dists_ani = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+            _, dists_aai = self.__class__.dist(genome_sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
 
             for pos, closest_species_taxonomy in enumerate(taxonomies):
                 closest_species_id = species_ids[pos]
 
-                distance_from_centroid = dists[centroid_sketches[pos]]
+                d_ani = dists_ani[centroid_sketches[pos]]
+                d_aai = dists_aai[centroid_sketches[pos]]
 
-                # Retrieve the boundaries of the closest species cluster
-                _, max_boundary = self._estimate_boundaries(self.report[closest_species_id]["taxonomy"])
+                # Retrieve the two per-axis boundaries of the closest species cluster
+                _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_species_id]["taxonomy"])
 
-                # Compare the distance from the centroid with the closest cluster boundaries for assignment
-                if distance_from_centroid <= max_boundary:
+                # Assign only if the genome falls within BOTH the ANI and the AAI boundary
+                if d_ani <= max_ani and d_aai <= max_aai:
                     taxonomy = closest_species_taxonomy
 
                     # Enable `characterized` to assign the current genome to the fully defined taxonomic label
@@ -1125,18 +1146,19 @@ class Database(object):
         # Retrieve the paths to the genome sketches
         sketches = [genome.sketch_filepath for genome in self.__unknowns]
 
-        # A single average-linkage dendrogram in the FUSED metric (mean of ANI and AAI), the same
-        # distance the split-mode search ranks and records and the cluster boundaries are computed
-        # in. Cutting the fused dendrogram at a fused boundary keeps the membership gate consistent
-        # with how the closest cluster was selected at every level.
-        dendrogram: Any = None
+        # Two average-linkage dendrograms, one in ANI (DNA) space and one in AAI (AA) space. Genomes
+        # co-cluster at a level only when they are grouped together in BOTH trees cut at their
+        # respective boundaries (the intersection of the two cuts), so the clustering agrees with the
+        # two-boundary assignment gate — the same box (within both intervals) rather than an averaged
+        # diagonal.
+        dendrogram_ani: Any = None
+        dendrogram_aai: Any = None
 
         if len(sketches) > 1:
             print(f"Computing pair-wise distances between {len(sketches)} uncharacterized genomes")
 
-            condensed_distance_matrix = self._condensed_distances(sketches, mode="fused")
-
-            dendrogram = hier.linkage(condensed_distance_matrix, method="average")
+            dendrogram_ani = hier.linkage(self._condensed_distances(sketches, mode="dna"), method="average")
+            dendrogram_aai = hier.linkage(self._condensed_distances(sketches, mode="aa"), method="average")
 
         # Assignments map
         assignments = dict()
@@ -1190,30 +1212,34 @@ class Database(object):
 
                         centroid_sketches.append(closest_cluster_centroid_sketch)
 
-                    # Compute the distance between the unknown genome and the closest cluster centroids
-                    # in the fused metric (mean of ANI and AAI), matching the stored fused boundary
-                    _, dists = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="fused")
+                    # Compute the ANI (DNA) and AAI (AA) distances between the unknown genome and the
+                    # closest cluster centroids independently, to gate on both per-axis boundaries.
+                    _, dists_ani = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+                    _, dists_aai = self.__class__.dist(genome_obj.sketch_filepath, centroid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
 
                     for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
-                        distance_from_centroid = dists[centroid_sketches[inner_pos]]
+                        d_ani = dists_ani[centroid_sketches[inner_pos]]
+                        d_aai = dists_aai[centroid_sketches[inner_pos]]
 
                         try:
-                            # Retrieve the closest cluster boundaries
-                            _, max_boundary = self._estimate_boundaries(self.report[closest_cluster_id]["taxonomy"])
+                            # Retrieve the two per-axis closest cluster boundaries
+                            _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_cluster_id]["taxonomy"])
 
                         except Exception:
                             # This happens in case the distance is outside the kingdom boundaries
                             # The input genome will be marked as unassigned
                             continue
 
-                        # Compare the distance from the centroid with the closest cluster boundaries for assignment
-                        if distance_from_centroid <= max_boundary:
+                        # Assign only if the genome falls within BOTH the ANI and the AAI boundary
+                        if d_ani <= max_ani and d_aai <= max_aai:
                             if len(sketches) > 1:
-                                # The dendrogram exists in case of >1 sketches
-                                # The current genome must be assigned to the closest cluster
-                                # We should cut the dendrogram using the closest cluster boundaries to check for other assignments
-                                # Cut the fused-metric dendrogram at the fused boundary used at this level
-                                clusters = hier.fcluster(dendrogram, max_boundary, criterion="distance")
+                                # The dendrograms exist in case of >1 sketches. Genomes co-cluster only
+                                # if grouped together in BOTH the ANI and AAI dendrograms cut at their
+                                # respective boundaries (composite label = intersection of the two cuts).
+                                clusters = list(zip(
+                                    hier.fcluster(dendrogram_ani, max_ani, criterion="distance"),
+                                    hier.fcluster(dendrogram_aai, max_aai, criterion="distance"),
+                                ))
 
                             else:
                                 # There is only one sketch here
@@ -1297,14 +1323,16 @@ class Database(object):
 
                 # Estimate the boundaries for the temporary cluster
                 # This is a totally new cluster. There is no need to search for a centroid here
-                # The borrowed boundary is the fused (mean ANI/AAI) boundary of the new cluster's level
-                _, max_boundary = self._estimate_boundaries(tmp_taxonomy)
+                # The borrowed boundaries are the two per-axis boundaries of the new cluster's level
+                _, max_ani, _, max_aai = self._estimate_boundaries(tmp_taxonomy)
 
                 if len(sketches) > 1:
-                    # The dendrogram exists in case of >1 sketches
-                    # Cluster genomes according to the temporary cluster's boundaries,
-                    # cutting the single fused-metric dendrogram
-                    clusters = hier.fcluster(dendrogram, max_boundary, criterion="distance")
+                    # The dendrograms exist in case of >1 sketches. Cluster genomes according to the
+                    # temporary cluster's boundaries, intersecting the ANI and AAI cuts.
+                    clusters = list(zip(
+                        hier.fcluster(dendrogram_ani, max_ani, criterion="distance"),
+                        hier.fcluster(dendrogram_aai, max_aai, criterion="distance"),
+                    ))
 
                 else:
                     # There is only one sketch here
@@ -1384,8 +1412,11 @@ class Database(object):
         with open(metadata_json_filepath, "w+") as metadata_json_file:
             json.dump(self.metadata, metadata_json_file)
 
-    def _estimate_boundaries(self, taxonomy: str, species_threshold: float=0.05) -> Tuple[float, float]:
+    def _estimate_boundaries(self, taxonomy: str, species_threshold: float=0.05) -> Tuple[float, float, float, float]:
         """Estimate the boundaries of a given taxonomic entry.
+
+        ANI and AAI are estimated as two independent intervals, matching how `get_boundaries`
+        stores them and how the assignment gate consumes them (a genome must fall within both).
 
         Parameters
         ----------
@@ -1393,8 +1424,8 @@ class Database(object):
             A taxonomic label.
         species_threshold : float, default 0.05
             Fallback maximum genetic distance used as the radius for species-level clusters,
-            corresponding to 1 - ANI (e.g. 0.05 = 95% ANI). Used only when the database has no
-            `species_radius` learned from the reference data (see `cluster_references`).
+            corresponding to 1 - identity (e.g. 0.05 = 95% identity). Used only when the database
+            has no per-axis species radius learned from the reference data (see `cluster_references`).
 
         Raises
         ------
@@ -1406,7 +1437,7 @@ class Database(object):
         Returns
         -------
         tuple
-            A tuple with cluster boundaries.
+            A tuple (min_ani, max_ani, min_aai, max_aai) with the two per-axis cluster boundaries.
         """
 
         if not taxonomy:
@@ -1415,8 +1446,10 @@ class Database(object):
         cluster_level = self.__class__.LEVELS[taxonomy.count("|")]
 
         if cluster_level == "species":
-            # Prefer the species radius learned from the reference data over the fixed fallback
-            return (0.0, self.metadata.get("species_radius", species_threshold))
+            # Prefer the per-axis species radii learned from the reference data over the fixed fallback
+            radius_ani = self.metadata.get("species_radius_ani", species_threshold)
+            radius_aai = self.metadata.get("species_radius_aai", species_threshold)
+            return (0.0, radius_ani, 0.0, radius_aai)
 
         cluster_name = taxonomy.split("|")[-1]
 
@@ -1425,27 +1458,29 @@ class Database(object):
             # Retrieve the cluster identifier
             cluster_id = self.clusters[cluster_level][cluster_name].identifier
 
-            min_ani, max_ani = self.report[cluster_id]["boundaries"]
+            min_ani, max_ani, min_aai, max_aai = self.report[cluster_id]["boundaries"]
 
-            if min_ani is not None and max_ani is not None:
-                return (min_ani, max_ani)
+            if None not in (min_ani, max_ani, min_aai, max_aai):
+                return (min_ani, max_ani, min_aai, max_aai)
 
         if cluster_level == "kingdom":
             raise Exception(f"Unable to retrieve boundaries for {taxonomy}")
 
-        # Keep track of the minimum and maximum ANIs to define boundaries
-        min_bounds = list()
-        max_bounds = list()
+        # Keep track of the minimum and maximum ANIs/AAIs to define the two per-axis boundaries
+        min_bounds_ani = list()
+        max_bounds_ani = list()
+        min_bounds_aai = list()
+        max_bounds_aai = list()
 
         # Keep track of the input cluster level
         current_cluster_level = cluster_level
 
         # Retrieve the parent taxonomy and its cluster name
         current_cluster_parent_taxonomy = "|".join(taxonomy.split("|")[:-1])
-        
+
         current_cluster_parent = current_cluster_parent_taxonomy.split("|")[-1]
 
-        while not min_bounds and not max_bounds:
+        while not max_bounds_ani:
             parent_level = self.__class__.LEVELS[self.__class__.LEVELS.index(current_cluster_level)-1]
 
             if current_cluster_parent in self.clusters[parent_level]:
@@ -1459,11 +1494,13 @@ class Database(object):
                         parent_children_obj = self.clusters[cluster_level][child]
 
                         if parent_children_obj.identifier in self.report:
-                            min_ani, max_ani = self.report[parent_children_obj.identifier]["boundaries"]
+                            min_ani, max_ani, min_aai, max_aai = self.report[parent_children_obj.identifier]["boundaries"]
 
-                            if min_ani is not None and max_ani is not None:
-                                min_bounds.append(min_ani)
-                                max_bounds.append(max_ani)
+                            if None not in (min_ani, max_ani, min_aai, max_aai):
+                                min_bounds_ani.append(min_ani)
+                                max_bounds_ani.append(max_ani)
+                                min_bounds_aai.append(min_aai)
+                                max_bounds_aai.append(max_aai)
 
             if parent_level == "kingdom":
                 break
@@ -1475,11 +1512,15 @@ class Database(object):
 
             current_cluster_parent = current_cluster_parent_taxonomy.split("|")[-1]
 
-        if not min_bounds and not max_bounds:
-            #return 0.0, 1.0
+        if not max_bounds_ani:
             raise Exception(f"Unable to retrieve boundaries for {taxonomy}")
 
-        return (round(statistics.mean(min_bounds), 5), round(statistics.mean(max_bounds), 5))
+        return (
+            round(statistics.mean(min_bounds_ani), 5),
+            round(statistics.mean(max_bounds_ani), 5),
+            round(statistics.mean(min_bounds_aai), 5),
+            round(statistics.mean(max_bounds_aai), 5),
+        )
 
     def _build_tree_topology(self) -> Dict[str, List[Tuple[str, str]]]:
         """Build a mapping of parent node paths to their children paths and levels
@@ -1692,6 +1733,8 @@ class Database(object):
                 "internal",
                 "min_ani",
                 "max_ani",
+                "min_aai",
+                "max_aai",
             ]
 
             report_file.write("# {}\n".format("\t".join(header)))
@@ -1724,13 +1767,12 @@ class Database(object):
                         same_mags = len(self.report[cluster_obj.identifier]["mags"].difference(cluster_mags)) == 0
 
                         if same_references and same_mags:
-                            cluster_min_ani, cluster_max_ani = self.report[cluster_obj.identifier]["boundaries"]
+                            cluster_min_ani, cluster_max_ani, cluster_min_aai, cluster_max_aai = self.report[cluster_obj.identifier]["boundaries"]
 
-                            if cluster_min_ani is None:
-                                cluster_min_ani = ""
-
-                            if cluster_max_ani is None:
-                                cluster_max_ani = ""
+                            cluster_min_ani = "" if cluster_min_ani is None else cluster_min_ani
+                            cluster_max_ani = "" if cluster_max_ani is None else cluster_max_ani
+                            cluster_min_aai = "" if cluster_min_aai is None else cluster_min_aai
+                            cluster_max_aai = "" if cluster_max_aai is None else cluster_max_aai
 
                             # Retrieve information from the previous report if there are no changes
                             cluster_info = [
@@ -1747,6 +1789,8 @@ class Database(object):
                                 self.report[cluster_obj.identifier]["internal"],
                                 str(cluster_min_ani),
                                 str(cluster_max_ani),
+                                str(cluster_min_aai),
+                                str(cluster_max_aai),
                             ]
 
                             processed = True
@@ -1758,14 +1802,13 @@ class Database(object):
 
                         cluster_internal = cluster_obj.get_full_taxonomy(internal=True)
 
-                        # Retrieve the cluster boundaries
-                        cluster_min_ani, cluster_max_ani, cluster_centroid = cluster_obj.get_boundaries()
+                        # Retrieve the cluster boundaries (independent ANI and AAI intervals)
+                        cluster_min_ani, cluster_max_ani, cluster_min_aai, cluster_max_aai, cluster_centroid = cluster_obj.get_boundaries()
 
-                        if cluster_min_ani is None:
-                            cluster_min_ani = ""
-
-                        if cluster_max_ani is None:
-                            cluster_max_ani = ""
+                        cluster_min_ani = "" if cluster_min_ani is None else cluster_min_ani
+                        cluster_max_ani = "" if cluster_max_ani is None else cluster_max_ani
+                        cluster_min_aai = "" if cluster_min_aai is None else cluster_min_aai
+                        cluster_max_aai = "" if cluster_max_aai is None else cluster_max_aai
 
                         cluster_info = [
                             cluster_obj.identifier,
@@ -1781,6 +1824,8 @@ class Database(object):
                             cluster_internal,
                             str(cluster_min_ani),
                             str(cluster_max_ani),
+                            str(cluster_min_aai),
+                            str(cluster_max_aai),
                         ]
 
                         # Update the report immediately to avoid recomputing the species clusters boundaries at the higher levels
@@ -1808,12 +1853,13 @@ class Database(object):
 
                         self.report[cluster_obj.identifier]["internal"] = cluster_internal
 
-                        # Retrieve the cluster boundaries
+                        # Retrieve the cluster boundaries (independent ANI and AAI intervals)
                         cluster_min_ani = float(cluster_min_ani) if str(cluster_min_ani).strip() else None
-
                         cluster_max_ani = float(cluster_max_ani) if str(cluster_max_ani).strip() else None
+                        cluster_min_aai = float(cluster_min_aai) if str(cluster_min_aai).strip() else None
+                        cluster_max_aai = float(cluster_max_aai) if str(cluster_max_aai).strip() else None
 
-                        self.report[cluster_obj.identifier]["boundaries"] = (cluster_min_ani, cluster_max_ani)
+                        self.report[cluster_obj.identifier]["boundaries"] = (cluster_min_ani, cluster_max_ani, cluster_min_aai, cluster_max_aai)
 
                     report_file.write("{}\n".format("\t".join(cluster_info)))
 
@@ -1844,8 +1890,9 @@ class Database(object):
             Otherwise, overwrite the results.
         mode : str, default "dna"
             The bitmap mode: "dna" for ANI, "aa" for AAI, or "fused" for the mean of the two.
-            The fused distance is the metric the split-mode profiler ranks and records in, so
-            cluster boundaries and the membership gate use it to stay consistent with the profile.
+            Cluster boundaries and the membership gate use "dna" and "aa" independently (two
+            per-axis intervals); "fused" remains available as a convenience for a single averaged
+            distance and is the value the split-mode profiler records as the reported score.
 
         Raises
         ------
@@ -1948,10 +1995,12 @@ class Database(object):
             Search mode.  "split" (default) ranks sibling clades at every level by the mean of their
             IDF-weighted (discriminative) ANI and AAI distances — a clade must look right in both
             nucleotide and protein space to be pursued, which keeps the descent on the correct lineage
-            where either measure alone would drift — and records the same FUSED distance (the mean of
-            the raw ANI and AAI union containments) at every level, so the reported value is directly
-            comparable to the fused cluster boundaries.  Raw union containment is only a reachability
-            bound.  The kingdom..order levels are searched in the AA subtree, then the DNA descent is
+            where either measure alone would drift — and records the fused distance (the mean of the
+            raw ANI and AAI union containments) at every level as the reported value.  Assignment,
+            however, is gated on the two per-axis cluster boundaries independently (the genome must be
+            within both the ANI and the AAI interval), and the reported confidence is measured against
+            the tighter (binding) of the two.  Raw union containment is only a reachability bound.  The
+            kingdom..order levels are searched in the AA subtree, then the DNA descent is
             seeded from the AA-selected order node(s) and confined to those subtrees (finer resolution,
             coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-measure search
             (raw ANI or AAI recorded, no fusion) across all levels from the root.
@@ -2110,19 +2159,20 @@ class Database(object):
             for match_path, ani in raw_profiles[lvl].items():
                 profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
 
-        # Confidence: clamp(1 - distance / max_boundary, 0.0, 1.0).
-        # The recorded search distance and the stored boundary are both the FUSED metric (mean of
-        # ANI and AAI) at every level, so they are always comparable and confidence is reported at
-        # all levels.
+        # Confidence: clamp(1 - distance / boundary, 0.0, 1.0). The cluster now has two independent
+        # boundaries (ANI and AAI) and the assignment gate requires the genome to be within BOTH, so
+        # the binding constraint is the tighter (smaller) of the two. Confidence is reported against
+        # that binding boundary at every level.
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
             if level not in profiles or not profiles[level]:
                 continue
             label, ani = min(profiles[level].items(), key=lambda x: x[1])
             try:
-                _, max_boundary = self._estimate_boundaries(label)
-                if max_boundary and max_boundary > 0:
-                    confidences[level] = max(0.0, min(1.0, 1.0 - ani / max_boundary))
+                _, max_ani, _, max_aai = self._estimate_boundaries(label)
+                bound = min(max_ani, max_aai)
+                if bound and bound > 0:
+                    confidences[level] = max(0.0, min(1.0, 1.0 - ani / bound))
                 else:
                     confidences[level] = 1.0 if ani == 0.0 else 0.0
             except Exception:
@@ -3359,20 +3409,30 @@ class Database(object):
 
                         report_table[cluster_id]["internal"] = line_split[header.index("internal")]
 
-                        # Retrieve the cluster boundaries
+                        # Retrieve the cluster boundaries (independent ANI and AAI intervals)
                         min_ani = None
 
                         if line_split[header.index("min_ani")].strip():
-                            min_ani = float(line_split[header.index("min_ani")])
+                            min_ani = float(line_split[header.index("min_ani")].strip())
 
                         max_ani = None
 
                         if line_split[header.index("max_ani")].strip():
-                            # `max_ani` is the last field in the clusters table
-                            # strip it to get rid of the new line character
                             max_ani = float(line_split[header.index("max_ani")].strip())
 
-                        report_table[cluster_id]["boundaries"] = (min_ani, max_ani)
+                        min_aai = None
+
+                        if line_split[header.index("min_aai")].strip():
+                            min_aai = float(line_split[header.index("min_aai")].strip())
+
+                        max_aai = None
+
+                        if line_split[header.index("max_aai")].strip():
+                            # `max_aai` is the last field in the clusters table
+                            # strip it to get rid of the new line character
+                            max_aai = float(line_split[header.index("max_aai")].strip())
+
+                        report_table[cluster_id]["boundaries"] = (min_ani, max_ani, min_aai, max_aai)
 
         return report_table
 
@@ -4014,10 +4074,13 @@ class Entry(object):
         """Search for the cluster boundaries as the minimum and maximum distance from the
         centroid versus all the other genomes in the same cluster.
 
-        The distance is the FUSED metric — the mean of the ANI (DNA) and AAI (AA) containment
-        distances — at every level. This mirrors the split-mode search, which ranks and records
-        the same fused distance, so a cluster is bounded in the exact space it is searched and
-        gated in and the membership decision stays consistent with how the cluster was selected.
+        ANI (DNA) and AAI (AA) are kept as two SEPARATE boundaries: a cluster is bounded by both
+        an ANI interval and an AAI interval, computed independently from the same centroid. The
+        membership gate accepts a genome only when it falls within BOTH intervals (an axis-aligned
+        box, not the diagonal half-plane a single averaged boundary would define), so a genome that
+        is close on only one axis — near-identical DNA by horizontal transfer or a shared mobile
+        element while being distant in protein space, or vice versa — is rejected rather than let
+        through by one axis compensating for the other.
 
         WARNING: boundaries can be computed with a minimum of 3 entries.
 
@@ -4039,17 +4102,12 @@ class Entry(object):
         Returns
         -------
         tuple
-            A tuple with he minimum and maximum ANI distance, and the cluster centroid.
+            A tuple with the minimum and maximum ANI distance, the minimum and maximum AAI
+            distance, and the cluster centroid.
         """
 
         if self.level == "genome":
             raise Exception("Cannot compute boundaries over a genome entry!")
-
-        # Bound the cluster in the FUSED metric (mean of ANI and AAI) at every level. This keeps
-        # the stored boundary consistent with the split-mode search — which ranks and records the
-        # same fused distance — and with the fused centroid-distance gate applied during
-        # characterization and assignment.
-        mode = "fused"
 
         if self.level == "species":
             # Use `get_children()` if the current cluster is a species
@@ -4073,7 +4131,7 @@ class Entry(object):
                     # Compute the species cluster centroid
                     # This function is usually called in `_dump_report`, but the report is updated as soon as the boundaries of a species cluster are computed
                     # Thus, this should never happen
-                    _, _, species_cluster_centroid = self.database.clusters["species"][species_cluster].get_boundaries(limit_number=limit_number, limit_percentage=limit_percentage)
+                    _, _, _, _, species_cluster_centroid = self.database.clusters["species"][species_cluster].get_boundaries(limit_number=limit_number, limit_percentage=limit_percentage)
 
                     children.append(species_cluster_centroid)
 
@@ -4097,77 +4155,78 @@ class Entry(object):
             centroid = sorted(children)[0]
 
             # These boundaries must be estimated
-            return (None, None, centroid)
+            return (None, None, None, None, centroid)
 
         # Children are genomes
         search_in = self.database.genomes
 
-        # Keep track of the pair-wise distances between children
-        pairwise_dists = {child: list() for child in children}
+        # Keep the ANI (DNA) and AAI (AA) pair-wise distances as two independent matrices so the
+        # cluster can be bounded separately on each axis.
+        pairwise = {"dna": {child: list() for child in children}, "aa": {child: list() for child in children}}
 
         # Rescale nproc
         nproc = self.database.nproc if len(children) > self.database.nproc else len(children)
 
-        if nproc > 1:
-            with mp.Pool(processes=nproc) as pool:
-                args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp, mode) for pos, source in enumerate(children) if pos < len(children)-1]
+        for axis in ("dna", "aa"):
+            pairwise_dists = pairwise[axis]
 
-                for source_sketch, sketch_dists in pool.imap_unordered(self.database.__class__._dist, args_list, chunksize=1):
-                    source = os.path.splitext(os.path.basename(source_sketch))[0]
+            if nproc > 1:
+                with mp.Pool(processes=nproc) as pool:
+                    args_list = [(search_in[source].sketch_filepath, [search_in[target].sketch_filepath for target in children[pos+1:]], self.database.metadata["kmer_size"], self.database.tmp, axis) for pos, source in enumerate(children) if pos < len(children)-1]
 
-                    for target_sketch in sketch_dists:
-                        target = os.path.splitext(os.path.basename(target_sketch))[0]
+                    for source_sketch, sketch_dists in pool.imap_unordered(self.database.__class__._dist, args_list, chunksize=1):
+                        source = os.path.splitext(os.path.basename(source_sketch))[0]
 
-                        pairwise_dists[source].append(sketch_dists[target_sketch])
-                        pairwise_dists[target].append(sketch_dists[target_sketch])
+                        for target_sketch in sketch_dists:
+                            target = os.path.splitext(os.path.basename(target_sketch))[0]
 
-        else:
-            for pos, source in enumerate(children):
-                if pos < len(children)-1:
-                    # Retrieve the source sketch filepath
-                    source_sketch = search_in[source].sketch_filepath
+                            pairwise_dists[source].append(sketch_dists[target_sketch])
+                            pairwise_dists[target].append(sketch_dists[target_sketch])
 
-                    # Retrieve the target sketch filepaths
-                    target_sketches = [search_in[target].sketch_filepath for target in children[pos+1:]]
+            else:
+                for pos, source in enumerate(children):
+                    if pos < len(children)-1:
+                        # Retrieve the source sketch filepath
+                        source_sketch = search_in[source].sketch_filepath
 
-                    # Compute the ANI/AAI distance between source and targets
-                    _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.database.tmp, resume=False, mode=mode)
+                        # Retrieve the target sketch filepaths
+                        target_sketches = [search_in[target].sketch_filepath for target in children[pos+1:]]
 
-                    # Keep track of the ANI distances
-                    for target_sketch in dists:
-                        # Retrieve the target name
-                        target = os.path.splitext(os.path.basename(target_sketch))[0]
+                        # Compute the ANI (or AAI) distance between source and targets
+                        _, dists = self.database.__class__.dist(source_sketch, target_sketches, self.database.metadata["kmer_size"], tmp=self.database.tmp, resume=False, mode=axis)
 
-                        pairwise_dists[source].append(dists[target_sketch])
+                        for target_sketch in dists:
+                            # Retrieve the target name
+                            target = os.path.splitext(os.path.basename(target_sketch))[0]
 
-                        pairwise_dists[target].append(dists[target_sketch])
+                            pairwise_dists[source].append(dists[target_sketch])
+                            pairwise_dists[target].append(dists[target_sketch])
 
-        # Search for the centroid
-        avg_ani = sys.float_info.max
+        # Search for the centroid: the child that minimizes the combined (ANI + AAI) mean distance
+        # to all the other children, so a single centroid anchors both per-axis intervals.
+        best_combined = sys.float_info.max
 
         centroid = None
 
-        for child in pairwise_dists:
-            # Minimum average ANI
-            # Centroid: the child that minimizes the distances versus all the other children
-            child_avg_ani = statistics.mean(pairwise_dists[child])
+        for child in children:
+            combined = 0.5 * (statistics.mean(pairwise["dna"][child]) + statistics.mean(pairwise["aa"][child]))
 
-            if child_avg_ani < avg_ani:
-                avg_ani = child_avg_ani
+            if combined < best_combined:
+                best_combined = combined
 
                 centroid = child
 
-        # The centroid is always defined here
-        min_ani = round(min(pairwise_dists[centroid]), 5)
+        # The centroid is always defined here. Bound each axis independently around it.
+        min_ani = round(min(pairwise["dna"][centroid]), 5)
+        max_ani = round(max(pairwise["dna"][centroid]), 5)
+        min_aai = round(min(pairwise["aa"][centroid]), 5)
+        max_aai = round(max(pairwise["aa"][centroid]), 5)
 
-        max_ani = round(max(pairwise_dists[centroid]), 5)
-
-        if self.level != "kingdom" and max_ani == 1.0:
-            # In case of max ANI distance = 1.0
-            # This is too large and it is going to mess up with the assignment
-            # Every genome that matches with this node in terms of number of kmers, will eventually be assigned to this node
-            # Do not report the actual boudaries so that they can eventually be estimated differently
+        if self.level != "kingdom" and (max_ani == 1.0 or max_aai == 1.0):
+            # A max distance of 1.0 on either axis is uselessly loose — every genome that shares any
+            # k-mer with this node on that axis would clear it — so the box would swallow unrelated
+            # genomes. Drop the boundaries so they are estimated from the parent levels instead.
             # WARNING: We cannot estimate boundaries in case of a kingdom node
-            return (None, None, centroid)
+            return (None, None, None, None, centroid)
 
-        return (round(min_ani, 5), round(max_ani, 5), centroid)
+        return (min_ani, max_ani, min_aai, max_aai, centroid)
