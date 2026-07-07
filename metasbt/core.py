@@ -58,6 +58,17 @@ class Database(object):
     # few; this only guards against a pathologically wide level).
     MAX_CANDIDATES = 5
 
+    # A cluster's per-axis boundary is the high percentile of the pairwise distances among its own
+    # members (its intrinsic spread), not the max distance from a single centroid — so no one
+    # representative decides the radius. The percentile trims a lone outlier pair while still
+    # admitting peripheral members (the gate compares the query's MEDIAN distance to the members).
+    BOUNDARY_PERCENTILE = 90.0
+
+    # The membership gate compares a query to a cluster's members directly (representative-free). For
+    # a large cluster that is many distances per candidate, so sample at most this many members
+    # (deterministically) when computing both the boundary spread and the gate distance.
+    GATE_MEMBER_CAP = 64
+
     def __init__(
         self,
         name: str,
@@ -851,51 +862,27 @@ class Database(object):
                     deduped.append(match)
             taxonomies = deduped[:self.__class__.MAX_CANDIDATES]
 
-            species_ids = list()
+            # Collect the candidates that fall within BOTH the ANI and the AAI boundary (the box).
+            # The distance to each candidate is representative-free: the MEDIAN genome-to-genome ANI
+            # and AAI distance from the input genome to that species' members, not to a single centroid.
+            candidates = list()
 
-            centroid_sketches = list()
-
-            # Check whether the current genome is close enough to its closest clusters
             for closest_species_taxonomy in taxonomies:
                 closest_species_name = closest_species_taxonomy.split("|")[-1]
 
                 if closest_species_name not in self.clusters["species"]:
-                    species_ids.append(None)
-                    centroid_sketches.append(None)
                     continue
 
                 # Retrieve the closest species identifier
                 closest_species_id = self.clusters["species"][closest_species_name].identifier
 
-                # Get the name of the closest species centroid
-                closest_species_centroid = self.report[closest_species_id]["centroid"]
+                d_ani, d_aai = self._member_gate_distances(genome_sketch_filepath, "species", closest_species_name)
 
-                # Retrieve the centroid of the closest species from the report and locate its sketch
-                closest_species_centroid_sketch = os.path.join(self.root, "sketches", f"{closest_species_centroid}.bf")
-
-                species_ids.append(closest_species_id)
-
-                centroid_sketches.append(closest_species_centroid_sketch)
-
-            valid_sketches = [sketch for sketch in centroid_sketches if sketch]
-
-            # Compute the ANI (DNA) and AAI (AA) distances between the input genome and the closest
-            # cluster centroids independently, so the assignment can be gated on both axes.
-            _, dists_ani = self.__class__.dist(genome_sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
-            _, dists_aai = self.__class__.dist(genome_sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
-
-            # Collect the candidates that fall within BOTH the ANI and the AAI boundary (the box)
-            candidates = list()
-
-            for pos, closest_species_taxonomy in enumerate(taxonomies):
-                if centroid_sketches[pos] is None:
+                if d_ani is None:
                     continue
 
-                d_ani = dists_ani[centroid_sketches[pos]]
-                d_aai = dists_aai[centroid_sketches[pos]]
-
                 # Retrieve the two per-axis boundaries of the closest species cluster
-                _, max_ani, _, max_aai = self._estimate_boundaries(self.report[species_ids[pos]]["taxonomy"])
+                _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_species_id]["taxonomy"])
 
                 if d_ani <= max_ani and d_aai <= max_aai:
                     confidence = self.__class__._box_confidence(d_ani, max_ani, d_aai, max_aai)
@@ -1221,49 +1208,29 @@ class Database(object):
                     # distance when clusters are near-equidistant.
                     taxonomies = sorted(matches.keys(), key=lambda match: matches[match])[:self.__class__.MAX_CANDIDATES]
 
-                    cluster_ids = list()
-
-                    centroid_sketches = list()
+                    # Collect the candidates that fall within BOTH boundaries (the box); carry each
+                    # one's boundaries so the chosen candidate drives the dendrogram cut. The distance
+                    # to each candidate is representative-free: the MEDIAN genome-to-genome ANI and AAI
+                    # distance from the unknown genome to the cluster's members (the species centroids
+                    # beneath it), not to a single centroid.
+                    candidates = list()
 
                     for closest_cluster_taxonomy in taxonomies:
                         closest_cluster_name = closest_cluster_taxonomy.split("|")[-1]
 
                         if closest_cluster_name not in self.clusters[level]:
-                            cluster_ids.append(None)
-                            centroid_sketches.append(None)
                             continue
 
-                        # Retrieve the closest cluster identifier and its centroid genome sketch
                         closest_cluster_id = self.clusters[level][closest_cluster_name].identifier
 
-                        closest_cluster_centroid = self.report[closest_cluster_id]["centroid"]
+                        d_ani, d_aai = self._member_gate_distances(genome_obj.sketch_filepath, level, closest_cluster_name)
 
-                        # Centroids are always genomes
-                        cluster_ids.append(closest_cluster_id)
-
-                        centroid_sketches.append(self.genomes[closest_cluster_centroid].sketch_filepath)
-
-                    valid_sketches = [sketch for sketch in centroid_sketches if sketch]
-
-                    # Compute the ANI (DNA) and AAI (AA) distances between the unknown genome and the
-                    # closest cluster centroids independently, to gate on both per-axis boundaries.
-                    _, dists_ani = self.__class__.dist(genome_obj.sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
-                    _, dists_aai = self.__class__.dist(genome_obj.sketch_filepath, valid_sketches, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
-
-                    # Collect the candidates that fall within BOTH boundaries (the box); carry each
-                    # one's boundaries so the chosen candidate drives the dendrogram cut.
-                    candidates = list()
-
-                    for inner_pos, closest_cluster_taxonomy in enumerate(taxonomies):
-                        if centroid_sketches[inner_pos] is None:
+                        if d_ani is None:
                             continue
-
-                        d_ani = dists_ani[centroid_sketches[inner_pos]]
-                        d_aai = dists_aai[centroid_sketches[inner_pos]]
 
                         try:
                             # Retrieve the two per-axis closest cluster boundaries
-                            _, max_ani, _, max_aai = self._estimate_boundaries(self.report[cluster_ids[inner_pos]]["taxonomy"])
+                            _, max_ani, _, max_aai = self._estimate_boundaries(self.report[closest_cluster_id]["taxonomy"])
 
                         except Exception:
                             # This happens in case the distance is outside the kingdom boundaries
@@ -1522,6 +1489,94 @@ class Database(object):
         # Highest box margin among the near ties; distance breaks a margin tie for determinism.
         return max(near_ties, key=lambda candidate: (candidate[2], -candidate[1]))
 
+    def _cluster_member_sketches(self, level: str, cluster_name: str) -> List[str]:
+        """Return the sketches that stand for a cluster's members (representative-free gate/boundary).
+
+        Mirrors how `get_boundaries` populates a cluster: a species is represented by its own member
+        genomes, any higher cluster by the species centroids beneath it (one genome per species). A
+        large set is deterministically sub-sampled to `GATE_MEMBER_CAP` to bound the distance cost.
+
+        Parameters
+        ----------
+        level : str
+            The taxonomic level of the cluster.
+        cluster_name : str
+            The cluster (leaf-level) name.
+
+        Returns
+        -------
+        list
+            Paths to the member sketch files (possibly empty).
+        """
+
+        if cluster_name not in self.clusters.get(level, dict()):
+            return list()
+
+        cluster_obj = self.clusters[level][cluster_name]
+
+        names: List[str] = list()
+
+        if level == "species":
+            names = list(cluster_obj.get_children())
+
+        else:
+            for species_cluster in cluster_obj.get_children(up_to="species"):
+                if species_cluster in self.clusters["species"]:
+                    species_cluster_id = self.clusters["species"][species_cluster].identifier
+
+                    if species_cluster_id in self.report:
+                        names.append(self.report[species_cluster_id]["centroid"])
+
+        sketches = list()
+
+        for name in names:
+            sketch_filepath = os.path.join(self.root, "sketches", f"{name}.bf")
+
+            if os.path.isfile(sketch_filepath):
+                sketches.append(sketch_filepath)
+
+        if len(sketches) > self.__class__.GATE_MEMBER_CAP:
+            # Isolated RNG so this does not perturb the global random state
+            sketches = random.Random(0).sample(sketches, self.__class__.GATE_MEMBER_CAP)
+
+        return sketches
+
+    def _member_gate_distances(self, query_sketch_filepath: str, level: str, cluster_name: str) -> Tuple[Optional[float], Optional[float]]:
+        """Representative-free distance from a query to a cluster: the MEDIAN genome-to-genome ANI and
+        AAI distance from the query to the cluster's members.
+
+        Using the median over all members (rather than the distance to a single centroid) keeps the
+        gate from hinging on one arbitrary representative and is robust to an outlier member.
+
+        Parameters
+        ----------
+        query_sketch_filepath : str
+            Path to the query genome sketch.
+        level : str
+            The taxonomic level of the candidate cluster.
+        cluster_name : str
+            The candidate cluster name.
+
+        Returns
+        -------
+        tuple
+            (median ANI distance, median AAI distance), or (None, None) if the cluster has no usable
+            members.
+        """
+
+        members = self._cluster_member_sketches(level, cluster_name)
+
+        if not members:
+            return (None, None)
+
+        _, dists_ani = self.__class__.dist(query_sketch_filepath, members, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
+        _, dists_aai = self.__class__.dist(query_sketch_filepath, members, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
+
+        if not dists_ani or not dists_aai:
+            return (None, None)
+
+        return (statistics.median(dists_ani.values()), statistics.median(dists_aai.values()))
+
     def _estimate_boundaries(self, taxonomy: str, species_threshold: float=0.05) -> Tuple[float, float, float, float]:
         """Estimate the boundaries of a given taxonomic entry.
 
@@ -1555,15 +1610,11 @@ class Database(object):
 
         cluster_level = self.__class__.LEVELS[taxonomy.count("|")]
 
-        if cluster_level == "species":
-            # Prefer the per-axis species radii learned from the reference data over the fixed fallback
-            radius_ani = self.metadata.get("species_radius_ani", species_threshold)
-            radius_aai = self.metadata.get("species_radius_aai", species_threshold)
-            return (0.0, radius_ani, 0.0, radius_aai)
-
         cluster_name = taxonomy.split("|")[-1]
 
-        # Check whether the input taxonomy is already defined in the database
+        # A cluster's OWN per-cluster boundaries take precedence at every level, including species.
+        # `get_boundaries` computes them from the cluster's members (>= 3), so they capture how large
+        # or tight this specific cluster is — a global radius would flatten that. Only fall back below.
         if self.taxonomy_exists(taxonomy):
             # Retrieve the cluster identifier
             cluster_id = self.clusters[cluster_level][cluster_name].identifier
@@ -1572,6 +1623,13 @@ class Database(object):
 
             if None not in (min_ani, max_ani, min_aai, max_aai):
                 return (min_ani, max_ani, min_aai, max_aai)
+
+        if cluster_level == "species":
+            # Fallback ONLY when the species has too few genomes (< 3) to compute its own boundaries:
+            # the per-axis radii learned globally from the reference data, else the fixed threshold.
+            radius_ani = self.metadata.get("species_radius_ani", species_threshold)
+            radius_aai = self.metadata.get("species_radius_aai", species_threshold)
+            return (0.0, radius_ani, 0.0, radius_aai)
 
         if cluster_level == "kingdom":
             raise Exception(f"Unable to retrieve boundaries for {taxonomy}")
@@ -4204,16 +4262,19 @@ class Entry(object):
         return self.sketch_filepath
 
     def get_boundaries(self, limit_number: int=0, limit_percentage: float=100.0) -> str:
-        """Search for the cluster boundaries as the minimum and maximum distance from the
-        centroid versus all the other genomes in the same cluster.
+        """Search for the cluster boundaries as a high percentile (`BOUNDARY_PERCENTILE`) of the
+        cluster's own pair-wise distances — its intrinsic spread — on each axis. This is
+        representative-free: no single centroid decides how large the cluster is, and it lets clusters
+        at the same level be genuinely more or less tight.
 
-        ANI (DNA) and AAI (AA) are kept as two SEPARATE boundaries: a cluster is bounded by both
-        an ANI interval and an AAI interval, computed independently from the same centroid. The
-        membership gate accepts a genome only when it falls within BOTH intervals (an axis-aligned
-        box, not the diagonal half-plane a single averaged boundary would define), so a genome that
-        is close on only one axis — near-identical DNA by horizontal transfer or a shared mobile
-        element while being distant in protein space, or vice versa — is rejected rather than let
-        through by one axis compensating for the other.
+        ANI (DNA) and AAI (AA) are kept as two SEPARATE boundaries: a cluster is bounded by both an
+        ANI interval and an AAI interval, computed independently. The membership gate compares a
+        query's MEDIAN genome-to-genome distance to the cluster's members against these and accepts
+        only when it falls within BOTH intervals (an axis-aligned box, not the diagonal half-plane a
+        single averaged boundary would define), so a genome that is close on only one axis —
+        near-identical DNA by horizontal transfer or a shared mobile element while being distant in
+        protein space, or vice versa — is rejected rather than let through by one axis compensating
+        for the other.
 
         WARNING: boundaries can be computed with a minimum of 3 entries.
 
@@ -4294,8 +4355,11 @@ class Entry(object):
         search_in = self.database.genomes
 
         # Keep the ANI (DNA) and AAI (AA) pair-wise distances as two independent matrices so the
-        # cluster can be bounded separately on each axis.
+        # cluster can be bounded separately on each axis. `flat` collects every unordered pair once
+        # per axis: the boundary is a percentile of that spread (representative-free), while the
+        # per-child lists still serve to pick a centroid genome to stand for the cluster.
         pairwise = {"dna": {child: list() for child in children}, "aa": {child: list() for child in children}}
+        flat = {"dna": list(), "aa": list()}
 
         # Rescale nproc
         nproc = self.database.nproc if len(children) > self.database.nproc else len(children)
@@ -4316,6 +4380,10 @@ class Entry(object):
                             pairwise_dists[source].append(sketch_dists[target_sketch])
                             pairwise_dists[target].append(sketch_dists[target_sketch])
 
+                            # Each source is paired with children[pos+1:] only, so every unordered
+                            # pair reaches this point exactly once
+                            flat[axis].append(sketch_dists[target_sketch])
+
             else:
                 for pos, source in enumerate(children):
                     if pos < len(children)-1:
@@ -4335,8 +4403,12 @@ class Entry(object):
                             pairwise_dists[source].append(dists[target_sketch])
                             pairwise_dists[target].append(dists[target_sketch])
 
+                            flat[axis].append(dists[target_sketch])
+
         # Search for the centroid: the child that minimizes the combined (ANI + AAI) mean distance
-        # to all the other children, so a single centroid anchors both per-axis intervals.
+        # to all the other children. It no longer anchors the boundary (that is the pairwise spread
+        # below), but a higher-level cluster still needs one representative genome per species child,
+        # and the report stores it.
         best_combined = sys.float_info.max
 
         centroid = None
@@ -4349,11 +4421,14 @@ class Entry(object):
 
                 centroid = child
 
-        # The centroid is always defined here. Bound each axis independently around it.
-        min_ani = round(min(pairwise["dna"][centroid]), 5)
-        max_ani = round(max(pairwise["dna"][centroid]), 5)
-        min_aai = round(min(pairwise["aa"][centroid]), 5)
-        max_aai = round(max(pairwise["aa"][centroid]), 5)
+        # Bound each axis at a high percentile of the cluster's OWN pairwise spread — representative-
+        # free, so no single centroid decides how large the cluster is, and it captures that different
+        # clusters at the same level are genuinely more or less tight. The gate accepts a query whose
+        # MEDIAN distance to the members falls within this spread on both axes.
+        min_ani = round(min(flat["dna"]), 5)
+        max_ani = round(float(np.percentile(flat["dna"], self.database.BOUNDARY_PERCENTILE)), 5)
+        min_aai = round(min(flat["aa"]), 5)
+        max_aai = round(float(np.percentile(flat["aa"], self.database.BOUNDARY_PERCENTILE)), 5)
 
         if self.level != "kingdom" and (max_ani == 1.0 or max_aai == 1.0):
             # A max distance of 1.0 on either axis is uselessly loose — every genome that shares any
