@@ -1907,6 +1907,13 @@ class Database(object):
 
             report_file.write("# {}\n".format("\t".join(header)))
 
+            # Names of clusters whose boundaries were recomputed. Processing goes species -> ... ->
+            # kingdom, so when a species is recomputed its (possibly new) centroid is stored before
+            # its genus is reached; a higher cluster whose child was recomputed must recompute too,
+            # because its boundary is built from its children's centroids, which may have shifted even
+            # when the child cluster NAMES are unchanged.
+            recomputed_names: Set[str] = set()
+
             # Dump information about clusters at all the seven taxonomic levels
             # starting from the species all the way up to the kingdom
             for level in reversed(self.__class__.LEVELS):
@@ -1929,12 +1936,20 @@ class Database(object):
                     processed = False
 
                     if cluster_obj.identifier in self.report:
-                        # Check if there is any difference between the current and previous set of references and mags
-                        same_references = len(self.report[cluster_obj.identifier]["references"].difference(cluster_references)) == 0
+                        # Reuse the stored boundaries ONLY when the membership is IDENTICAL. Set
+                        # EQUALITY is required: a one-directional `old.difference(new)` would be empty
+                        # whenever genomes were merely ADDED (new ⊇ old), so a cluster that grew would
+                        # be treated as unchanged and keep stale boundaries. Boundaries are a function
+                        # of the members, so any addition or removal must force a recompute below.
+                        same_references = self.report[cluster_obj.identifier]["references"] == set(cluster_references)
 
-                        same_mags = len(self.report[cluster_obj.identifier]["mags"].difference(cluster_mags)) == 0
+                        same_mags = self.report[cluster_obj.identifier]["mags"] == set(cluster_mags)
 
-                        if same_references and same_mags:
+                        # A higher-level cluster must also recompute when any of its children were
+                        # recomputed (their centroid may have moved even if the child set is the same).
+                        child_recomputed = bool(cluster_obj.children & recomputed_names)
+
+                        if same_references and same_mags and not child_recomputed:
                             cluster_min_ani, cluster_max_ani, cluster_min_aai, cluster_max_aai = self.report[cluster_obj.identifier]["boundaries"]
 
                             cluster_min_ani = "" if cluster_min_ani is None else cluster_min_ani
@@ -1964,6 +1979,10 @@ class Database(object):
                             processed = True
 
                     if not processed:
+                        # This cluster's boundaries are (re)computed from scratch below; record it so
+                        # its parent recomputes too.
+                        recomputed_names.add(cluster_name)
+
                         cluster_is_known = cluster_obj.is_known()
 
                         cluster_taxonomy = cluster_obj.get_full_taxonomy()
