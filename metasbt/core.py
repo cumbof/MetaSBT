@@ -2105,14 +2105,16 @@ class Database(object):
             Search mode.  "split" (default) ranks sibling clades at every level by the mean of their
             IDF-weighted (discriminative) ANI and AAI distances — a clade must look right in both
             nucleotide and protein space to be pursued, which keeps the descent on the correct lineage
-            where either measure alone would drift — and records the fused distance (the mean of the
-            raw ANI and AAI union containments) at every level as the reported value.  Assignment,
-            however, is gated on the two per-axis cluster boundaries independently (the genome must be
-            within both the ANI and the AAI interval).  Confidence is a PER-HIT box margin: the
-            genome's distance to each candidate cluster's centroid, on each axis, normalised by that
-            cluster's own per-axis boundary and taking the tighter (binding) axis — so it varies per
-            hit and measures how deeply the genome sits inside each cluster's box, information the raw
-            distances lack.  Raw union containment is only a reachability bound.  The
+            where either measure alone would drift.  It records, per hit, the two IDF-weighted
+            *discriminative* distances (ANI from the DNA union, AAI from the AA union) — size-invariant
+            and representative-free, unlike raw union containment (which saturates on large clades) or a
+            distance to a single centroid (which misrepresents a diverse or lopsided clade).  Assignment
+            is gated on the two per-axis cluster boundaries independently (the genome must be within
+            both the ANI and the AAI interval).  Confidence is a PER-HIT branch-decisiveness score: how
+            much a hit's discriminative distance beat the best competing sibling at its branch (the
+            winner scored against the runner-up, a retained also-ran against the winner) — so it needs
+            no centroid or boundary and is meaningful at every level, and a low value flags a branch
+            where the descent nearly went to a sibling.  The
             kingdom..order levels are searched in the AA subtree, then the DNA descent is
             seeded from the AA-selected order node(s) and confined to those subtrees (finer resolution,
             coherent lineage, no cross-tree size bias).  Pass "dna" or "aa" for a single-measure search
@@ -2127,7 +2129,8 @@ class Database(object):
         -------
         dict
             A dictionary with the closest cluster and its ANI distance, indexed by the taxonomic
-            level name, plus a "confidence" key mapping each level to the closest hit's box margin.
+            level name, plus a "confidence" key mapping each level to the closest hit's
+            branch-decisiveness score.
         """
 
         levels = ["db"] + self.__class__.LEVELS + ["genome"]
@@ -2157,11 +2160,14 @@ class Database(object):
                             line_split = line.split("\t")
                             level = line_split[0]
                             label = line_split[1]
+                            # Columns: level, closest, ani, aai, confidence. The returned distance
+                            # contract is the ANI (nucleotide) distance; AAI is written to the file
+                            # for the user but not surfaced in the return value.
                             ani   = float(line_split[2])
                             profiles[level][label] = ani
-                            if len(line_split) > 3 and line_split[3].strip():
+                            if len(line_split) > 4 and line_split[4].strip():
                                 try:
-                                    conf_by_hit.setdefault(level, {})[label] = float(line_split[3])
+                                    conf_by_hit.setdefault(level, {})[label] = float(line_split[4])
                                 except ValueError:
                                     pass
                 # Confidence is stored per hit; expose one value per level (the closest hit's) to
@@ -2273,74 +2279,48 @@ class Database(object):
                 path_to_tax[genome_obj.sketch_filepath] = tax_label
                 path_to_tax[os.path.basename(genome_obj.sketch_filepath)] = tax_label
 
+        # Each raw hit now carries three numbers straight from the descent: the IDF-weighted
+        # discriminative ANI distance, the same for AAI, and a per-hit confidence. The returned
+        # distance contract stays the ANI distance; AAI and confidence are tracked alongside for the
+        # output file and (confidence) for the CLI.
+        aai_by_hit: Dict[str, Dict[str, float]] = {}
+        confidence_by_hit: Dict[str, Dict[str, float]] = {}
         for lvl in raw_profiles:
             if lvl not in profiles:
                 profiles[lvl] = dict()
-            for match_path, ani in raw_profiles[lvl].items():
-                profiles[lvl][path_to_tax.get(match_path, match_path)] = ani
+            for match_path, payload in raw_profiles[lvl].items():
+                label = path_to_tax.get(match_path, match_path)
+                ani_disc, aai_disc, confidence = payload
+                profiles[lvl][label] = ani_disc
+                aai_by_hit.setdefault(lvl, dict())[label] = aai_disc
+                confidence_by_hit.setdefault(lvl, dict())[label] = confidence
 
-        # Confidence is the PER-HIT box margin (see `_box_confidence`): for each candidate cluster,
-        # the genome's distance to that cluster's centroid on each axis, normalised by the cluster's
-        # own per-axis boundary, taking the tighter (binding) axis. Unlike the recorded union distance
-        # it varies per hit and measures how deeply the genome sits inside each cluster's box
-        # (>= 0 iff within both boundaries) — the same quantity the assignment gate uses. Distances to
-        # all candidate centroids are computed in two batched calls.
-        centroid_sketch_of: Dict[Tuple[str, str], str] = {}
-        for level in self.__class__.LEVELS:
-            for label in profiles.get(level, dict()):
-                cluster = self.clusters.get(level, dict()).get(label.split("|")[-1])
-                if cluster is None:
-                    continue
-                info = self.report.get(cluster.identifier)
-                if not info:
-                    continue
-                centroid_obj = self.genomes.get(info.get("centroid"))
-                if centroid_obj is None or not centroid_obj.sketch_filepath:
-                    continue
-                centroid_sketch_of[(level, label)] = centroid_obj.sketch_filepath
-
-        unique_centroids = list({sketch for sketch in centroid_sketch_of.values()})
-        centroid_dist_ani: Dict[str, float] = {}
-        centroid_dist_aai: Dict[str, float] = {}
-        if unique_centroids:
-            _, centroid_dist_ani = self.__class__.dist(sketch_filepath, unique_centroids, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="dna")
-            _, centroid_dist_aai = self.__class__.dist(sketch_filepath, unique_centroids, self.metadata["kmer_size"], tmp=self.tmp, resume=False, mode="aa")
-
-        confidence_by_hit: Dict[str, Dict[str, float]] = {}
+        # Confidence is a PER-HIT branch-decisiveness score (see `accumulator_search`): how much the
+        # hit's discriminative distance beat the best competing sibling at its branch. It needs no
+        # centroid and no boundary, so it is meaningful at every level. Expose one value per level
+        # (the closest hit's) for the CLI/return contract.
         confidences: Dict[str, float] = {}
         for level in self.__class__.LEVELS:
-            if level not in profiles or not profiles[level]:
+            if not profiles.get(level):
                 continue
-            level_confidences: Dict[str, float] = {}
-            for label in profiles[level]:
-                sketch = centroid_sketch_of.get((level, label))
-                if sketch is None:
-                    continue
-                try:
-                    _, max_ani, _, max_aai = self._estimate_boundaries(label)
-                except Exception:
-                    continue
-                level_confidences[label] = self.__class__._box_confidence(
-                    centroid_dist_ani.get(sketch, 1.0), max_ani,
-                    centroid_dist_aai.get(sketch, 1.0), max_aai,
-                )
+            level_confidences = confidence_by_hit.get(level, dict())
             if level_confidences:
-                confidence_by_hit[level] = level_confidences
-                # Expose one value per level (the closest hit's) for the CLI/return contract
                 best_label = min(profiles[level].items(), key=lambda item: item[1])[0]
                 confidences[level] = level_confidences.get(best_label, max(level_confidences.values()))
-
         profiles["confidence"] = confidences
 
         with open(query_result_filepath, "w+") as profiles_table:
-            profiles_table.write("# level\tclosest\tani\tconfidence\n")
+            profiles_table.write("# level\tclosest\tani\taai\tconfidence\n")
             for level in self.__class__.LEVELS + ["genome"]:
                 if level in profiles:
+                    level_aai = aai_by_hit.get(level, dict())
                     level_confidences = confidence_by_hit.get(level, dict())
                     for match, ani in profiles[level].items():
+                        aai = level_aai.get(match)
                         conf = level_confidences.get(match)
+                        aai_str = f"{aai}" if aai is not None else ""
                         conf_str = f"{conf:.6f}" if conf is not None else ""
-                        profiles_table.write(f"{level}\t{match}\t{ani}\t{conf_str}\n")
+                        profiles_table.write(f"{level}\t{match}\t{ani}\t{aai_str}\t{conf_str}\n")
 
         return profiles
 

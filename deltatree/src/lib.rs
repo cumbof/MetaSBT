@@ -650,7 +650,7 @@ fn accumulator_search(
     uncertainty: f64,
     mode: &str,
     fuse: bool,
-) -> PyResult<HashMap<String, HashMap<String, f64>>> {
+) -> PyResult<HashMap<String, HashMap<String, (f64, f64, f64)>>> {
 
     let report_aa = matches!(mode, "aa" | "AA");
     let aa_kmer = std::cmp::max(3, kmer_size / 3);
@@ -663,7 +663,9 @@ fn accumulator_search(
     // The reported payload must carry query k-mers for the recorded distance to be meaningful.
     let report_len = if report_aa { query_aa_len } else { query_dna_len };
 
-    let mut profiles: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    // Per hit we record three numbers: the IDF-weighted discriminative ANI distance, the same for
+    // AAI, and a confidence in [0, 1] that measures how decisively the hit won its branch.
+    let mut profiles: HashMap<String, HashMap<String, (f64, f64, f64)>> = HashMap::new();
 
     if report_len == 0.0 || !Path::new(tree_root).exists() {
         return Ok(profiles);
@@ -729,19 +731,19 @@ fn accumulator_search(
         plain_aa: f64,
     }
 
-    // Queue: (node_path, recorded_distance_for_this_node, level_name). The entry node (the
+    // Queue: (node_path, (ani_disc, aai_disc, confidence), level_name). The entry node (the
     // search root, or an anchored seed) carries the artificial level "db" and is never recorded;
-    // its distance is unused, so a placeholder is pushed for it.
-    let mut queue: VecDeque<(String, f64, String)> = VecDeque::new();
-    queue.push_back((tree_root.to_string(), 0.0, "db".to_string()));
+    // its payload is unused, so a placeholder is pushed for it.
+    let mut queue: VecDeque<(String, (f64, f64, f64), String)> = VecDeque::new();
+    queue.push_back((tree_root.to_string(), (0.0, 0.0, 0.0), "db".to_string()));
 
-    while let Some((node_path, node_distance, level_name)) = queue.pop_front() {
+    while let Some((node_path, node_payload, level_name)) = queue.pop_front() {
         // Record this node (skip the artificial entry root above the first scored level).
-        // The distance was already computed (and theta-checked) by the parent that enqueued it.
+        // The payload was already computed (and theta-checked) by the parent that enqueued it.
         if level_name != "db" {
             profiles.entry(level_name.clone())
                 .or_insert_with(HashMap::new)
-                .insert(node_path.clone(), node_distance);
+                .insert(node_path.clone(), node_payload);
         }
 
         let Some(children) = tree_topology.get(&node_path) else { continue; };
@@ -803,14 +805,15 @@ fn accumulator_search(
             cands.iter().map(|c| c.plain_aa).collect()
         };
 
-        // Fuse the two axes (mean) when requested, else rank by the single reported axis. The
-        // RECORDED distance mirrors the ranking metric: the mean of the raw ANI and AAI union
-        // containments when fusing, else the single reported payload's raw containment. Recording
-        // the same (fused) quantity the cluster boundaries are computed in keeps the reported value
-        // comparable to the boundary for confidence and for the membership gate.
-        // (path, level, rank_distance, recorded_distance)
-        let mut ranked: Vec<(String, String, f64, f64)> = Vec::with_capacity(cands.len());
-        for (i, c) in cands.iter().enumerate() {
+        // Fuse the two axes (mean) when requested, else rank by the single reported axis. Unlike
+        // before, the RECORDED per-hit distances are the IDF-weighted *discriminative* ANI and AAI
+        // distances (rank_dna / rank_aa) — the same size-invariant, representative-free quantity the
+        // beam ranks by — not the raw union containment (which saturates on large clades) nor a
+        // distance to a single centroid (which misrepresents a diverse or lopsided clade). Both axes
+        // are reported so a hit must look right in nucleotide *and* protein space at every level.
+        // (path, level, rank_distance, ani_disc, aai_disc)
+        let mut ranked: Vec<(String, String, f64, f64, f64)> = Vec::with_capacity(cands.len());
+        for (i, _c) in cands.iter().enumerate() {
             let rank_distance = if fuse {
                 0.5 * (rank_dna[i] + rank_aa[i])
             } else if report_aa {
@@ -818,14 +821,7 @@ fn accumulator_search(
             } else {
                 rank_dna[i]
             };
-            let recorded = if fuse {
-                0.5 * (c.plain_dna + c.plain_aa)
-            } else if report_aa {
-                c.plain_aa
-            } else {
-                c.plain_dna
-            };
-            ranked.push((c.path.clone(), c.level.clone(), rank_distance, recorded));
+            ranked.push((cands[i].path.clone(), cands[i].level.clone(), rank_distance, rank_dna[i], rank_aa[i]));
         }
 
         // Sort by ranking distance ascending so ranked[0] is the closest child.
@@ -847,11 +843,26 @@ fn accumulator_search(
             runner_up * (1.0 + uncertainty / 100.0)
         };
 
-        for (child_path, next_level, rank_distance, recorded) in ranked {
-            if rank_distance <= cutoff {
-                // Rank/beam by the (possibly fused) discriminative distance, but record the raw
-                // union-containment distance so the reported value stays comparable to the boundary.
-                queue.push_back((child_path, recorded, next_level));
+        for (i, (child_path, next_level, rank_distance, ani_disc, aai_disc)) in ranked.iter().enumerate() {
+            if *rank_distance <= cutoff {
+                // Confidence = how decisively this clade won its branch, in the discriminative
+                // (IDF-weighted) ranking distance. The branch winner is scored against the runner-up,
+                // a retained also-ran against the winner (so it lands near 0). An uncontested branch
+                // (a single surviving child) is fully confident. Low confidence therefore means the
+                // descent nearly went to a sibling here — the actionable ambiguity signal.
+                let best_other = if i == 0 {
+                    if ranked.len() > 1 { ranked[1].2 } else { f64::INFINITY }
+                } else {
+                    ranked[0].2
+                };
+                let confidence = if best_other.is_infinite() {
+                    1.0
+                } else if best_other > 0.0 {
+                    (1.0 - *rank_distance / best_other).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                queue.push_back((child_path.clone(), (*ani_disc, *aai_disc, confidence), next_level.clone()));
             }
         }
     }

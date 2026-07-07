@@ -6,5 +6,5 @@ modules and how to use the framework and its databases."""
 
 __author__ = ("Fabio Cumbo (fabio.cumbo@gmail.com)")
 
-__version__ = "2.45.0"
-__date__ = "July 5, 2026"
+__version__ = "2.46.0"
+__date__ = "July 6, 2026"
