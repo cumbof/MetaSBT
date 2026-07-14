@@ -583,8 +583,9 @@ class MetaSBT(object):
             genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
 
         if args.dereplicate > 0.0:
-            # Dereplicate genomes based on their ANI distance
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
+            # Dereplicate genomes based on their ANI distance. The references carry taxonomic labels,
+            # so the comparison is partitioned by genus when the threshold allows it (see dereplicate)
+            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, taxonomy=references)
 
         # Reshape the references dict
         # Consider genomes that passed the dereplication process only
@@ -1961,8 +1962,9 @@ class MetaSBT(object):
                 genomes = {genome for genome in genomes if quality[genome]["completeness"] >= args.completeness and quality[genome]["contamination"] <= args.contamination}
 
             if args.dereplicate > 0.0:
-                # Dereplicate references based on their ANI distance (input-vs-input)
-                genomes = self.database.dereplicate(genomes, threshold=args.dereplicate)
+                # Dereplicate references based on their ANI distance (input-vs-input), partitioned by
+                # genus when the threshold allows it since the references carry taxonomic labels
+                genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, taxonomy=references)
 
             # Cluster the surviving references into ANI-coherent species clusters (reusing the
             # species radius learned at index time) and relabel each cluster by majority vote;

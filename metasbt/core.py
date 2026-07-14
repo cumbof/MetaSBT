@@ -2830,14 +2830,80 @@ class Database(object):
 
         return results
 
+    def _genus_blocks(
+        self,
+        ordered_pairs: List[Tuple[str, str]],
+        taxonomy: Optional[Dict[str, str]],
+        threshold: float
+    ) -> Optional[List[List[str]]]:
+        """Partition sketches into per-genus blocks for a lossless, faster dereplication.
+
+        Blocking by genus is only lossless when no replica pair (distance <= `threshold`) can
+        straddle two genera, i.e. when the threshold is at or below the species radius: two genomes
+        that differ at the genus level are farther apart than the species radius, so a threshold
+        below it cannot pair them. When the threshold is coarser, or the input has no taxonomy, the
+        partition is unsafe and this returns None so the caller performs a flat all-vs-all instead.
+
+        Parameters
+        ----------
+        ordered_pairs : list
+            Ordered list of (genome filepath, sketch filepath) tuples.
+        taxonomy : dict, optional
+            Mapping of genome filepath to its taxonomic label.
+        threshold : float
+            The dereplication ANI distance threshold.
+
+        Returns
+        -------
+        list or None
+            A list of blocks, each a list of sketch filepaths sharing a genus, or None when the
+            input cannot be safely partitioned.
+        """
+
+        if taxonomy is None or any(genome_filepath not in taxonomy for genome_filepath, _ in ordered_pairs):
+            # Without a taxonomic label for every input genome (e.g. unassigned MAGs) there is no
+            # partition key: compare everything against everything
+            return None
+
+        # species_radius_ani is learned at index time (cluster_references); before it exists (the
+        # very first index build) fall back to the same default _learn_species_radius uses. It only
+        # gates the safety of the partition, never the dereplication result within a block
+        species_radius = self.metadata.get("species_radius_ani", 0.05)
+
+        if threshold > species_radius:
+            # The threshold is coarse enough for replicas to cross genus boundaries: do not partition
+            return None
+
+        genus_idx = self.__class__.LEVELS.index("genus")
+
+        blocks: "OrderedDict[str, List[str]]" = OrderedDict()
+
+        for genome_filepath, sketch_filepath in ordered_pairs:
+            label = self.__class__._format_taxonomy(taxonomy[genome_filepath])
+            genus_lineage = "|".join(label.split("|")[:genus_idx + 1])
+            blocks.setdefault(genus_lineage, list()).append(sketch_filepath)
+
+        return list(blocks.values())
+
     def dereplicate(
-        self, 
-        genomes: Set[str], 
-        threshold: float=0.01, 
-        compare_with: str="self"
+        self,
+        genomes: Set[str],
+        threshold: float=0.01,
+        compare_with: str="self",
+        taxonomy: Optional[Dict[str, str]]=None
     ) -> List[str]:
         """Dereplicate a set of genomes versus themselves or versus the genomes in the database.
         The dereplication process is based on their ANI distance according to a specific threshold.
+
+        When the input genomes carry a taxonomic label (e.g. reference genomes) and the threshold
+        is at or below the learned species radius, the input-vs-input comparison is partitioned by
+        genus: two genomes that differ at the genus level are always farther apart than the species
+        radius, so no replica pair can straddle two genera and comparing only within each genus loses
+        nothing while turning a single O(N^2) sweep into a sum of much smaller per-genus sweeps. Genus
+        is the finest rank `cluster_references` trusts (it re-clusters species within a genus), so
+        blocking there also collapses near-identical genomes that carry inconsistent input species
+        labels. When the threshold is coarser than the species radius (e.g. a cross-genus 50% ANI
+        dereplication) the partition is unsafe and the comparison falls back to a flat all-vs-all.
 
         Parameters
         ----------
@@ -2849,6 +2915,10 @@ class Database(object):
         compare_with : str, default "self"
             Dereplicate the input genomes versus themselves or versus the database, using "self" or "database" respectively.
             Possible values: "self", "database".
+        taxonomy : dict, optional
+            Mapping of genome filepath to its taxonomic label. When provided (and every input genome
+            is in it) it enables the genus-blocked comparison described above for `compare_with="self"`.
+            Ignored for `compare_with="database"`.
 
         Raises
         ------
@@ -2883,6 +2953,10 @@ class Database(object):
         # Map genome names to the input file paths
         names = dict()
 
+        # Keep the genome filepath alongside its sketch, in a stable order, so the input can be
+        # partitioned by the genome's taxonomic label further down
+        ordered_pairs: List[Tuple[str, str]] = list()
+
         for genome_filepath in genomes:
             # Define the input file name
             filename = self.__class__._basename(genome_filepath)
@@ -2896,6 +2970,7 @@ class Database(object):
             genome_sketch_filepath = genome_obj.sketch(genome_filepath)
 
             sketches.append(genome_sketch_filepath)
+            ordered_pairs.append((genome_filepath, genome_sketch_filepath))
         
         # Rescale nproc
         nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
@@ -2907,31 +2982,37 @@ class Database(object):
 
         # Dereplicate the input genomes versus themselves
         if compare_with == "self":
+            # Partition the input into per-genus blocks when it is safe to do so, otherwise fall back
+            # to a single block holding every sketch (the original flat all-vs-all). Replicas can only
+            # ever form within a block, so the two paths converge into the same upper-triangle sweep.
+            blocks = self._genus_blocks(ordered_pairs, taxonomy, threshold) or [sketches]
+
+            # Build the upper-triangle comparison tasks across all blocks: within each block every
+            # sketch is compared against the ones after it only, so each unordered pair is measured once
+            args_list = [
+                (sketch_filepath, block[pos + 1:], self.metadata["kmer_size"], self.tmp, "dna")
+                for block in blocks
+                for pos, sketch_filepath in enumerate(block)
+                if block[pos + 1:]
+            ]
+
+            def _record_clones(sketch_filepath: str, sketch_dists: Dict[str, float]) -> None:
+                sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
+
+                if sketch_clones:
+                    sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
+                    replicas[sketch_filename] = sketch_clones
+
             if nproc > 1:
                 with mp.Pool(processes=nproc) as pool:
-                    args_list = [(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], self.tmp, "dna") for pos, sketch_filepath in enumerate(sketches)]
-
                     for sketch_filepath, sketch_dists in tqdm.tqdm(pool.imap_unordered(self.__class__._dist, args_list, chunksize=1), total=len(args_list)):
-                        sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
-
-                        if sketch_clones:
-                            sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
-                            replicas[sketch_filename] = sketch_clones
+                        _record_clones(sketch_filepath, sketch_dists)
 
             else:
                 # Avoid using multiprocessing if `nproc` is 1
-                for pos, sketch_filepath in enumerate(sketches):
-                    _, sketch_dists = self.__class__.dist(sketch_filepath, sketches[pos+1:], self.metadata["kmer_size"], tmp=self.tmp, resume=False)
-
-                    # Select sketch replicas
-                    sketch_clones = {os.path.splitext(os.path.basename(sketch_target))[0]: sketch_dist for sketch_target, sketch_dist in sketch_dists.items() if sketch_dist <= threshold}
-
-                    if sketch_clones:
-                        # Define the input file name
-                        sketch_filename = os.path.splitext(os.path.basename(sketch_filepath))[0]
-
-                        # Keep track of replicas
-                        replicas[sketch_filename] = sketch_clones
+                for sketch_filepath, targets, kmer_size, tmp, mode in tqdm.tqdm(args_list):
+                    _, sketch_dists = self.__class__.dist(sketch_filepath, targets, kmer_size, tmp=tmp, resume=False, mode=mode)
+                    _record_clones(sketch_filepath, sketch_dists)
 
         elif compare_with == "database":
             if nproc > 1:
