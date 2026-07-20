@@ -154,21 +154,41 @@ class Database(object):
         # Cache for _build_tree_topology(); invalidated at the end of update()
         self._topology_cache: Optional[Dict[str, List[Tuple[str, str]]]] = None
 
-        if not os.path.isdir(self.root):
-            os.makedirs(self.root)
+        # `clusters.tsv` is only dumped at the very end of `update()`, so its absence means the
+        # database was never fully built: either it is brand new, or a previous `index` crashed
+        # part-way through. Both cases have no clusters to load, and in both the root is created
+        # (or kept) as is so that any sketches already under it can be reused.
+        report_filepath = os.path.join(self.root, "clusters.tsv")
+
+        if not os.path.isdir(self.root) or not os.path.isfile(report_filepath):
+            os.makedirs(self.root, exist_ok=True)
 
             # Create a folder for keeping track of clusters
-            os.makedirs(os.path.join(self.root, "clusters"))
+            os.makedirs(os.path.join(self.root, "clusters"), exist_ok=True)
 
             # Also create a folder for keeping track of genome sketches
-            os.makedirs(os.path.join(self.root, "sketches"))
+            os.makedirs(os.path.join(self.root, "sketches"), exist_ok=True)
 
-            # Init database metadata
-            # This is supposed to keep track of k-mer size, bloom filter size, minimum occurrence of k-mers, number of clusters
-            self.metadata: Dict[str, Any] = dict()
+            metadata_json_filepath = os.path.join(self.root, "metadata.json")
 
-            # There are no clusters yet
-            self.metadata["clusters_count"] = 0
+            if os.path.isfile(metadata_json_filepath):
+                # A partially built database: reuse the configuration its sketches were built with.
+                # Re-estimating it could settle on a different kmer size, which would silently
+                # invalidate every existing sketch (the .bf files stay structurally valid, only the
+                # distances computed from them become meaningless).
+                with open(metadata_json_filepath) as metadata_json_file:
+                    self.metadata = json.load(metadata_json_file)
+
+                if not self.__class__._validate_metadata(self.metadata):
+                    raise Exception("Database metadata did not pass the validation!")
+
+            else:
+                # Init database metadata
+                # This is supposed to keep track of k-mer size, bloom filter size, minimum occurrence of k-mers, number of clusters
+                self.metadata: Dict[str, Any] = dict()
+
+                # There are no clusters yet
+                self.metadata["clusters_count"] = 0
 
             # Init the database report with the list of clusters, theirs stats, and boundaries
             self.report: Dict[str, Any] = dict()
@@ -200,13 +220,8 @@ class Database(object):
             if not self.__class__._validate_metadata(self.metadata):
                 raise Exception("Database metadata did not pass the validation!")
 
-            # There should also be a report file under the database folder
-            report_filepath = os.path.join(self.root, "clusters.tsv")
-
-            if not os.path.isfile(report_filepath):
-                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), report_filepath)
-
             # Load the report table with the list of clusters in the database
+            # `report_filepath` is known to exist: it is what selected this branch
             self.report = self.__class__._load_report(report_filepath)
 
             if not self.report:

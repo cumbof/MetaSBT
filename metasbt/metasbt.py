@@ -397,6 +397,82 @@ class MetaSBT(object):
 
         print(f"Newick tree written to: {output_path}")
 
+    @staticmethod
+    def _reset_for_resume(db_dir: str) -> None:
+        """Strip a database folder down to its genome sketches, ready for a `--resume` rebuild.
+
+        Everything under `db_dir` is removed except the `sketches` folder, and the metadata is
+        rewritten keeping only the two entries the sketches depend on (the kmer size and the scaled
+        factor) plus a zeroed cluster counter. Anything else the interrupted run may have written
+        (cluster folders, the report, the learned species radii) is derived state that the rebuild
+        recomputes, and reusing a partially written copy of it would corrupt the new build.
+
+        Parameters
+        ----------
+        db_dir : str
+            Path to the database folder.
+
+        Raises
+        ------
+        Exception
+            If the folder has no sketches to resume from, or no metadata recording how they were
+            built (without the kmer size and scaled factor the sketches cannot be safely reused).
+        """
+
+        sketches_dir = os.path.join(db_dir, "sketches")
+
+        if not os.path.isdir(sketches_dir) or not os.listdir(sketches_dir):
+            raise Exception(
+                f"There are no genome sketches to resume from under {db_dir}. "
+                "Remove the folder and run `index` without --resume."
+            )
+
+        metadata_filepath = os.path.join(db_dir, "metadata.json")
+
+        if not os.path.isfile(metadata_filepath):
+            raise Exception(
+                f"No metadata.json under {db_dir}: there is no record of the kmer size and scaled "
+                "factor the existing sketches were built with, so they cannot be safely reused."
+            )
+
+        with open(metadata_filepath) as metadata_file:
+            metadata = json.load(metadata_file)
+
+        if "kmer_size" not in metadata or "scaled_factor" not in metadata:
+            raise Exception(
+                f"The metadata under {db_dir} does not record both the kmer size and the scaled "
+                "factor, so the existing sketches cannot be safely reused."
+            )
+
+        sketches_count = len(os.listdir(sketches_dir))
+
+        for entry in os.listdir(db_dir):
+            if entry in ("sketches", "metadata.json"):
+                continue
+
+            entry_path = os.path.join(db_dir, entry)
+
+            if os.path.isdir(entry_path) and not os.path.islink(entry_path):
+                shutil.rmtree(entry_path)
+
+            else:
+                os.unlink(entry_path)
+
+        with open(metadata_filepath, "w+") as metadata_file:
+            json.dump(
+                {
+                    "kmer_size": metadata["kmer_size"],
+                    "scaled_factor": metadata["scaled_factor"],
+                    "clusters_count": 0,
+                },
+                metadata_file,
+            )
+
+        print(
+            f"Resuming from {sketches_count} genome sketches under {db_dir} "
+            f"(kmer size {metadata['kmer_size']}, scaled factor {metadata['scaled_factor']})"
+        )
+
     def index(self, argv: List[Any]) -> None:
         """Build the first baseline of a MetaSBT database by indexing a set of reference genomes.
 
@@ -470,6 +546,16 @@ class MetaSBT(object):
             default=False,
             help="Pack the database into a compressed tarball.",
         )
+        general_group.add_argument(
+            "--resume",
+            action="store_true",
+            default=False,
+            help=(
+                "Rebuild an existing database, reusing the genome sketches already under it. "
+                "Everything else is rebuilt from scratch, and the kmer size and scaled factor are "
+                "taken from the existing metadata so that the sketches stay valid."
+            ),
+        )
 
         general_group.add_argument(
             "--scaled-factor",
@@ -527,10 +613,21 @@ class MetaSBT(object):
         # Define the path to the database folder
         db_dir = os.path.join(args.workdir, args.database)
 
-        if os.path.isdir(db_dir):
+        if os.path.isdir(db_dir) and not args.resume:
             # The `index` command must be used to initialize a database
             # If a database with the same name of the provided one already exists, consider running the `update` command
-            raise Exception(f"A database named '{args.database}' already exist under {args.workdir}")
+            raise Exception(
+                f"A database named '{args.database}' already exist under {args.workdir}. "
+                "Use --resume to rebuild it reusing the genome sketches already under it."
+            )
+
+        if args.resume and os.path.isdir(db_dir):
+            # Drop everything but the sketches so the rebuild starts from a clean slate. A crashed
+            # `index` can leave half-populated clusters and a metadata file carrying counters and
+            # learned radii from the interrupted run; keeping any of that would silently mix two
+            # builds. The sketches are the one artifact that is safe to carry over: they depend on
+            # nothing but the genome, the kmer size, and the scaled factor.
+            self.__class__._reset_for_resume(db_dir)
 
         # Define the path to the temporary folder
         tmp_dir = os.path.join(args.workdir, "tmp")
@@ -562,14 +659,38 @@ class MetaSBT(object):
         # Define the set of paths to the reference genomes
         genomes = set(references.keys())
 
-        # Define the database metadata
-        # Eventually, estimate the optimal kmer size
-        self.database.set_configs(
-            genomes,
-            kmer_size=args.kmer_size,
-            kmer_max=args.limit_kmer_size,
-            scaled_factor=args.scaled_factor
-        )
+        if args.resume and Database._validate_metadata(self.database.metadata):
+            # The existing sketches were built with the kmer size and scaled factor already recorded
+            # in the metadata: keep them. Re-running set_configs could estimate a different kmer
+            # size, and a sketch compared under the wrong kmer size yields a meaningless distance
+            # without raising anything (the .bf file stays a structurally valid pair of bitmaps).
+            if args.kmer_size and args.kmer_size != self.database.metadata["kmer_size"]:
+                raise Exception(
+                    f"--kmer-size {args.kmer_size} conflicts with the kmer size the existing sketches "
+                    f"were built with ({self.database.metadata['kmer_size']}). Drop --resume to rebuild "
+                    "the sketches from scratch."
+                )
+
+            # `--scaled-factor` always carries a value, so only an explicitly provided one (i.e. one
+            # differing from the parser default) can contradict the stored configuration
+            scaled_factor_given = args.scaled_factor != parser.get_default("scaled_factor")
+
+            if scaled_factor_given and args.scaled_factor != self.database.metadata["scaled_factor"]:
+                raise Exception(
+                    f"--scaled-factor {args.scaled_factor} conflicts with the scaled factor the existing "
+                    f"sketches were built with ({self.database.metadata['scaled_factor']}). Drop --resume "
+                    "to rebuild the sketches from scratch."
+                )
+
+        else:
+            # Define the database metadata
+            # Eventually, estimate the optimal kmer size
+            self.database.set_configs(
+                genomes,
+                kmer_size=args.kmer_size,
+                kmer_max=args.limit_kmer_size,
+                scaled_factor=args.scaled_factor
+            )
 
         if args.completeness > 0.0 or args.contamination < 100.0:
             # Retrieve the kingdom
