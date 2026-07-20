@@ -140,12 +140,6 @@ class Database(object):
         # Define a list to keep track of clusters that have been created or modified during `self.add()` and `self.characterize()`
         self.__clusters: List[str] = list()
 
-        # Per-genus condensed ANI (DNA) distance vectors produced by a genus-blocked dereplication,
-        # keyed by the ordered tuple of survivor sketch filepaths, so cluster_references can reuse
-        # them instead of recomputing the same matrix. Populated by dereplicate(), consumed and
-        # cleared by cluster_references().
-        self._ani_condensed_cache: Dict[Tuple[str, ...], List[float]] = dict()
-
         # Define a list to keep track of the genomes that do not match with any species clusters in the database
         self.__unknowns: List["Entry"] = list()
 
@@ -709,21 +703,11 @@ class Database(object):
             genus_paths[genus_lineage] = paths
             if len(paths) > 1:
                 genus_sketches = [sketch_map[p] for p in paths]
-                # A genus-blocked dereplication just computed this exact ANI matrix over the same
-                # (sorted) survivors: reuse it when present rather than recomputing it. The AAI matrix
-                # is never produced by dereplication (it is DNA-only), so it is always computed here.
-                genus_condensed_ani[genus_lineage] = self._ani_condensed_cache.get(
-                    tuple(genus_sketches)
-                )
-                if genus_condensed_ani[genus_lineage] is None:
-                    genus_condensed_ani[genus_lineage] = self._condensed_distances(genus_sketches, mode="dna")
+                genus_condensed_ani[genus_lineage] = self._condensed_distances(genus_sketches, mode="dna")
                 genus_condensed_aai[genus_lineage] = self._condensed_distances(genus_sketches, mode="aa")
             else:
                 genus_condensed_ani[genus_lineage] = None
                 genus_condensed_aai[genus_lineage] = None
-
-        # The cached matrices have been consumed; free the memory
-        self._ani_condensed_cache.clear()
 
         # Reuse the per-axis species radii learned for the baseline; learn them only the first time
         # so later reference updates remain consistent with the original index.
@@ -2165,29 +2149,6 @@ class Database(object):
         sketch_filepath, target_sketches, kmer_size, tmp, mode = args
         return Database.dist(sketch_filepath, target_sketches, kmer_size, tmp=tmp, resume=False, mode=mode)
 
-    @staticmethod
-    def _condensed_index(i: int, j: int, n: int) -> int:
-        """Map a pair (i, j) to its position in a condensed (upper-triangular, row-major) distance
-        vector of `n` elements, i.e. the layout produced by `_condensed_distances`.
-
-        Parameters
-        ----------
-        i, j : int
-            The two element indices (order-independent, i != j).
-        n : int
-            The number of elements.
-
-        Returns
-        -------
-        int
-            The index into the condensed vector for the (i, j) pair.
-        """
-
-        if i > j:
-            i, j = j, i
-
-        return i * (n - 1) - (i - 1) * i // 2 + (j - i - 1)
-
     def profile(
         self,
         genome_filepath: str,
@@ -2869,23 +2830,27 @@ class Database(object):
 
         return results
 
-    def _genus_blocks(
+    def _taxonomic_blocks(
         self,
         ordered_pairs: List[Tuple[str, str]],
         taxonomy: Optional[Dict[str, str]],
-        threshold: float
+        threshold: float,
+        level: str="species"
     ) -> Optional["OrderedDict[str, List[Tuple[str, str]]]"]:
-        """Partition (genome, sketch) pairs into per-genus blocks for a lossless, faster dereplication.
+        """Partition (genome, sketch) pairs into per-clade blocks for a faster dereplication.
 
-        Blocking by genus is only lossless when no replica pair (distance <= `threshold`) can
-        straddle two genera, i.e. when the threshold is at or below the species radius: two genomes
-        that differ at the genus level are farther apart than the species radius, so a threshold
-        below it cannot pair them. When the threshold is coarser, or the input has no taxonomy, the
+        Blocking is only safe when no replica pair (distance <= `threshold`) can straddle two
+        genera, i.e. when the threshold is at or below the species radius: two genomes that differ
+        at the genus level are farther apart than the species radius, so a threshold below it
+        cannot pair them. When the threshold is coarser, or the input has no taxonomy, the
         partition is unsafe and this returns None so the caller performs a flat all-vs-all instead.
 
-        Within each genus the pairs are sorted by genome filepath, the same ordering
-        `cluster_references` uses (`sorted(members.keys())`), so the per-genus condensed matrices the
-        two produce line up and can be shared.
+        The genus is therefore the coarsest block that ever needs comparing; `dereplicate` blocks at
+        the species first (much smaller blocks) and then re-runs over the per-genus survivors, so
+        replicas carrying inconsistent input species labels are still collapsed.
+
+        Within each block the pairs are sorted by genome filepath, so the representative kept for a
+        group of near-identical genomes is deterministic.
 
         Parameters
         ----------
@@ -2895,11 +2860,13 @@ class Database(object):
             Mapping of genome filepath to its taxonomic label.
         threshold : float
             The dereplication ANI distance threshold.
+        level : str, default "species"
+            The taxonomic level the lineage is truncated at to form the block key.
 
         Returns
         -------
         OrderedDict or None
-            Mapping of genus lineage to its list of (genome filepath, sketch filepath) pairs sorted
+            Mapping of clade lineage to its list of (genome filepath, sketch filepath) pairs sorted
             by genome filepath, or None when the input cannot be safely partitioned.
         """
 
@@ -2917,20 +2884,77 @@ class Database(object):
             # The threshold is coarse enough for replicas to cross genus boundaries: do not partition
             return None
 
-        genus_idx = self.__class__.LEVELS.index("genus")
+        level_idx = self.__class__.LEVELS.index(level)
 
         blocks: "OrderedDict[str, List[Tuple[str, str]]]" = OrderedDict()
 
         for genome_filepath, sketch_filepath in ordered_pairs:
             label = self.__class__._format_taxonomy(taxonomy[genome_filepath])
-            genus_lineage = "|".join(label.split("|")[:genus_idx + 1])
-            blocks.setdefault(genus_lineage, list()).append((genome_filepath, sketch_filepath))
+            lineage = "|".join(label.split("|")[:level_idx + 1])
+            blocks.setdefault(lineage, list()).append((genome_filepath, sketch_filepath))
 
-        # Sort each genus block by genome filepath to match cluster_references' per-genus ordering
-        for genus_lineage in blocks:
-            blocks[genus_lineage].sort(key=lambda pair: pair[0])
+        # Sort each block by genome filepath so the surviving representative is deterministic
+        for lineage in blocks:
+            blocks[lineage].sort(key=lambda pair: pair[0])
 
         return blocks
+
+    @staticmethod
+    def _greedy_block(args: Tuple[List[str], int, str, float]) -> Tuple[List[str], Dict[str, Dict[str, float]]]:
+        """Dereplicate one block of sketches with a greedy leader (centroid) sweep.
+
+        Genomes are visited in the given order against the representatives accepted so far only,
+        never against the whole block: a genome within `threshold` of any representative is a
+        replica of it and is dropped, otherwise it becomes a new representative. The scan over the
+        representatives stops at the first hit, so a block of `n` genomes collapsing to `r`
+        representatives costs O(n * r) comparisons instead of O(n^2), and holds O(r) distances in
+        memory instead of the full O(n^2) matrix. For a dereplication at (or below) the species
+        radius `r` is a small constant, which is what makes very large blocks tractable at all.
+
+        Parameters
+        ----------
+        args : tuple
+            A (ordered sketch filepaths, kmer size, temporary folder, threshold) tuple.
+
+        Returns
+        -------
+        tuple
+            The list of representative sketch filepaths and a mapping of representative name to its
+            {replica name: distance} dictionary.
+        """
+
+        sketches, kmer_size, tmp, threshold = args
+
+        # Compare a candidate against the representatives in chunks so a candidate that is a replica
+        # of an early representative does not pay for the whole (potentially long) list
+        chunk_size = 256
+
+        representatives: List[str] = list()
+        replicas: Dict[str, Dict[str, float]] = dict()
+
+        for sketch_filepath in sketches:
+            hit: Optional[Tuple[str, float]] = None
+
+            for offset in range(0, len(representatives), chunk_size):
+                chunk = representatives[offset:offset + chunk_size]
+
+                _, distances = Database.dist(sketch_filepath, chunk, kmer_size, tmp=tmp, resume=False, mode="dna")
+
+                closest = min(chunk, key=lambda target: distances[target])
+
+                if distances[closest] <= threshold:
+                    hit = (closest, distances[closest])
+                    break
+
+            if hit is None:
+                representatives.append(sketch_filepath)
+
+            else:
+                representative_name = os.path.splitext(os.path.basename(hit[0]))[0]
+                clone_name = os.path.splitext(os.path.basename(sketch_filepath))[0]
+                replicas.setdefault(representative_name, dict())[clone_name] = hit[1]
+
+        return representatives, replicas
 
     def dereplicate(
         self,
@@ -2942,15 +2966,23 @@ class Database(object):
         """Dereplicate a set of genomes versus themselves or versus the genomes in the database.
         The dereplication process is based on their ANI distance according to a specific threshold.
 
-        When the input genomes carry a taxonomic label (e.g. reference genomes) and the threshold
-        is at or below the learned species radius, the input-vs-input comparison is partitioned by
-        genus: two genomes that differ at the genus level are always farther apart than the species
-        radius, so no replica pair can straddle two genera and comparing only within each genus loses
-        nothing while turning a single O(N^2) sweep into a sum of much smaller per-genus sweeps. Genus
-        is the finest rank `cluster_references` trusts (it re-clusters species within a genus), so
-        blocking there also collapses near-identical genomes that carry inconsistent input species
-        labels. When the threshold is coarser than the species radius (e.g. a cross-genus 50% ANI
+        When the input genomes carry a taxonomic label (e.g. reference genomes) and the threshold is
+        at or below the learned species radius, the input-vs-input comparison runs as two greedy
+        leader sweeps instead of a flat all-vs-all: first within each input species, then over the
+        surviving representatives within each genus. Two genomes that differ at the genus level are
+        always farther apart than the species radius, so no replica pair can straddle two genera,
+        and the second sweep recovers every within-genus pair the first one could not see because
+        the two genomes carry inconsistent input species labels. Each sweep compares a genome only
+        against the representatives accepted so far and stops at the first hit, so a block of `n`
+        genomes collapsing to `r` representatives costs O(n * r) comparisons and O(r) memory rather
+        than the O(n^2) of a full pairwise matrix, which does not fit in RAM for the largest genera.
+        When the threshold is coarser than the species radius (e.g. a cross-genus 50% ANI
         dereplication) the partition is unsafe and the comparison falls back to a flat all-vs-all.
+
+        Note the blocked path is a greedy leader clustering: a genome is discarded only when it is
+        within `threshold` of a *kept* representative, never through a chain of discarded
+        intermediates as the flat pairwise sweep would allow. It is therefore slightly more
+        conservative, and the representative kept for each group is the first in sorted order.
 
         Parameters
         ----------
@@ -3029,9 +3061,9 @@ class Database(object):
 
         # Dereplicate the input genomes versus themselves
         if compare_with == "self":
-            genus_blocks = self._genus_blocks(ordered_pairs, taxonomy, threshold)
+            species_blocks = self._taxonomic_blocks(ordered_pairs, taxonomy, threshold, level="species")
 
-            if genus_blocks is None:
+            if species_blocks is None:
                 # Flat all-vs-all: every sketch is compared against the ones after it only, so each
                 # unordered pair is measured exactly once
                 args_list = [
@@ -3059,47 +3091,61 @@ class Database(object):
                         _record_clones(sketch_filepath, sketch_dists)
 
             else:
-                # Genus-blocked: for each genus compute the condensed (upper-triangular) DNA distance
-                # matrix once, derive replicas from it, and stash the survivor sub-matrix keyed by the
-                # survivor sketch tuple so cluster_references reuses it instead of recomputing. The
-                # per-genus ordering is sorted by genome filepath (see _genus_blocks), so within a
-                # genus the earliest genome of each near-identical group is the one that survives.
-                self._ani_condensed_cache.clear()
+                # Taxonomy-blocked, in two greedy passes. The first collapses replicas within each
+                # input species: the blocks are small, they are independent, and each one costs
+                # O(n * representatives) rather than O(n^2) (see _greedy_block), which is what keeps
+                # a genus of tens of thousands of genomes from materialising a matrix that no amount
+                # of RAM can hold. The second pass re-runs the same sweep over the per-genus
+                # survivors: it is what makes species blocking safe, since it still collapses
+                # near-identical genomes that carry inconsistent input species labels. Survivors of
+                # a species-level pass are few, so the genus pass is cheap.
+                #
+                # Note this is a greedy leader clustering, not the exhaustive pairwise sweep the
+                # flat path performs: a genome is dropped only when it is within `threshold` of a
+                # kept representative, never through a chain of dropped intermediates.
+                sketch_to_genome = {sketch_filepath: genome_filepath for genome_filepath, sketch_filepath in ordered_pairs}
 
-                for genus_pairs in tqdm.tqdm(list(genus_blocks.values())):
-                    genus_sketches = [sketch_filepath for _, sketch_filepath in genus_pairs]
-                    n = len(genus_sketches)
+                def _sweep(blocks: "OrderedDict[str, List[Tuple[str, str]]]") -> List[Tuple[str, str]]:
+                    """Greedily dereplicate every block, record the replicas, and return the
+                    surviving (genome, sketch) pairs sorted by genome filepath."""
 
-                    if n < 2:
-                        continue
+                    args_list = [
+                        ([sketch_filepath for _, sketch_filepath in block_pairs], self.metadata["kmer_size"], self.tmp, threshold)
+                        for block_pairs in blocks.values()
+                    ]
 
-                    condensed = self._condensed_distances(genus_sketches, mode="dna")
+                    block_nproc = min(self.nproc, len(args_list))
 
-                    excluded_idx: Set[int] = set()
+                    if block_nproc > 1:
+                        # Each block is dereplicated serially by one worker: parallelising across
+                        # blocks rather than within them keeps every worker's memory bounded by its
+                        # own block's representatives
+                        with mp.Pool(processes=block_nproc) as pool:
+                            results = list(
+                                tqdm.tqdm(pool.imap_unordered(self.__class__._greedy_block, args_list, chunksize=1), total=len(args_list))
+                            )
 
-                    k = 0
-                    for i in range(n):
-                        focus_name = os.path.splitext(os.path.basename(genus_sketches[i]))[0]
-                        for j in range(i + 1, n):
-                            if condensed[k] <= threshold:
-                                clone_name = os.path.splitext(os.path.basename(genus_sketches[j]))[0]
-                                replicas.setdefault(focus_name, dict())[clone_name] = condensed[k]
-                                # Keep the earlier genome, drop the later near-identical one
-                                excluded_idx.add(j)
-                            k += 1
+                    else:
+                        results = [self.__class__._greedy_block(args_tuple) for args_tuple in tqdm.tqdm(args_list)]
 
-                    # Cache the survivor-aligned condensed vector for cluster_references. Its own
-                    # per-genus ordering is sorted(survivor filepaths), which is exactly the surviving
-                    # subsequence of this already-sorted block, so the vectors line up.
-                    survivors = [i for i in range(n) if i not in excluded_idx]
+                    survivors: List[Tuple[str, str]] = list()
 
-                    if len(survivors) >= 2:
-                        survivor_condensed = [
-                            condensed[self.__class__._condensed_index(survivors[a], survivors[b], n)]
-                            for a in range(len(survivors))
-                            for b in range(a + 1, len(survivors))
-                        ]
-                        self._ani_condensed_cache[tuple(genus_sketches[i] for i in survivors)] = survivor_condensed
+                    for representatives, block_replicas in results:
+                        for representative_name, clones in block_replicas.items():
+                            replicas.setdefault(representative_name, dict()).update(clones)
+
+                        survivors.extend((sketch_to_genome[sketch_filepath], sketch_filepath) for sketch_filepath in representatives)
+
+                    survivors.sort(key=lambda pair: pair[0])
+
+                    return survivors
+
+                survivor_pairs = _sweep(species_blocks)
+
+                genus_blocks = self._taxonomic_blocks(survivor_pairs, taxonomy, threshold, level="genus")
+
+                if genus_blocks is not None:
+                    _sweep(genus_blocks)
 
         elif compare_with == "database":
             if nproc > 1:
