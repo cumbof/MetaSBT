@@ -22,7 +22,7 @@ use pyo3::prelude::*;
 use pyo3::exceptions::{PyIOError, PyValueError};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Cursor, Read, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -173,15 +173,90 @@ fn read_bitmap_pair(path: &str) -> PyResult<(RoaringBitmap, RoaringBitmap)> {
     Ok((dna, aa))
 }
 
-/// Select one bitmap from a dual-payload file based on mode.
+/// Read only the DNA bitmap from a dual-payload file.
+///
+/// The DNA payload is written first (see `write_bitmap_pair`), so it is reached without touching
+/// the AA payload at all: a distance computation that only needs one axis pays for one
+/// deserialization instead of two. This is the hot path for dereplication and single-measure
+/// profiling, where the AA bitmap would otherwise be decoded and immediately discarded.
+fn read_dna_bitmap(path: &str) -> PyResult<RoaringBitmap> {
+    let mut file = File::open(path)
+        .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", path, e)))?;
+
+    let mut dna_len_buf = [0u8; 8];
+    file.read_exact(&mut dna_len_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read DNA bitmap length: {}", e)))?;
+    let dna_len = u64::from_le_bytes(dna_len_buf) as usize;
+
+    let mut dna_buf = vec![0u8; dna_len];
+    file.read_exact(&mut dna_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read DNA bitmap: {}", e)))?;
+
+    RoaringBitmap::deserialize_from(&mut Cursor::new(dna_buf))
+        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize DNA bitmap: {}", e)))
+}
+
+/// Read only the AA bitmap from a dual-payload file, seeking past the DNA payload.
+fn read_aa_bitmap(path: &str) -> PyResult<RoaringBitmap> {
+    let mut file = File::open(path)
+        .map_err(|e| PyIOError::new_err(format!("Failed to open {}: {}", path, e)))?;
+
+    let mut dna_len_buf = [0u8; 8];
+    file.read_exact(&mut dna_len_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read DNA bitmap length: {}", e)))?;
+    let dna_len = u64::from_le_bytes(dna_len_buf);
+
+    // Skip the DNA payload without decoding it
+    file.seek(SeekFrom::Current(dna_len as i64))
+        .map_err(|e| PyIOError::new_err(format!("Failed to seek past DNA bitmap: {}", e)))?;
+
+    let mut aa_len_buf = [0u8; 8];
+    file.read_exact(&mut aa_len_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read AA bitmap length: {}", e)))?;
+    let aa_len = u64::from_le_bytes(aa_len_buf) as usize;
+
+    let mut aa_buf = vec![0u8; aa_len];
+    file.read_exact(&mut aa_buf)
+        .map_err(|e| PyIOError::new_err(format!("Failed to read AA bitmap: {}", e)))?;
+
+    RoaringBitmap::deserialize_from(&mut Cursor::new(aa_buf))
+        .map_err(|e| PyIOError::new_err(format!("Failed to deserialize AA bitmap: {}", e)))
+}
+
+/// Select one bitmap from a dual-payload file based on mode, decoding only the one requested.
 fn select_bitmap(path: &str, mode: &str) -> PyResult<RoaringBitmap> {
-    let (dna, aa) = read_bitmap_pair(path)?;
     match mode {
-        "dna" | "DNA" => Ok(dna),
-        "aa" | "AA" => Ok(aa),
+        "dna" | "DNA" => read_dna_bitmap(path),
+        "aa" | "AA" => read_aa_bitmap(path),
         _ => Err(PyValueError::new_err(format!(
             "Invalid mode '{}': expected 'dna' or 'aa'", mode
         ))),
+    }
+}
+
+/// Convert a FracMinHash containment (|focus ∩ target| / |focus|) into an ANI *distance* using
+/// the Mash/FracMinHash estimator, identical to the math in `containment_ani`. Factored out so the
+/// greedy leader sweep and the batch distance both compute exactly the same value.
+#[inline]
+fn containment_distance(intersection: u64, focus_len: f64, eff_kmer: f64) -> f64 {
+    if focus_len == 0.0 {
+        return 1.0;
+    }
+
+    let containment = intersection as f64 / focus_len;
+
+    let ani = if containment > 0.0 {
+        1.0 + (1.0 / eff_kmer) * containment.ln()
+    } else {
+        0.0
+    };
+
+    if ani <= 0.0 {
+        1.0
+    } else if ani >= 1.0 {
+        0.0
+    } else {
+        1.0 - ani
     }
 }
 
@@ -489,6 +564,107 @@ fn containment_ani(focus: &str, targets: Vec<String>, kmer_size: usize, mode: &s
     }
 
     Ok(results)
+}
+
+/// Dereplicate one block of genome sketches with a greedy leader (centroid) sweep, entirely in RAM.
+///
+/// Genomes are visited in the given order. Each candidate is compared only against the
+/// representatives accepted so far: if it is within `threshold` of its closest representative it is
+/// a replica of it and is dropped, otherwise it is promoted to a new representative. This is the
+/// CD-HIT/dRep leader-clustering semantic, and the survivors are exactly the representatives.
+///
+/// The point of doing it here rather than in Python is that every representative's bitmap stays
+/// **resident**: each sketch file is read and deserialized exactly once (when the candidate is
+/// first seen), instead of being re-read from disk on every comparison as a per-chunk
+/// `containment_ani` call would. A block of `n` genomes collapsing to `r` representatives therefore
+/// costs `n` sketch loads and O(n * r) in-memory Roaring intersections, rather than O(n * r) disk
+/// reads. Peak memory is the `r` resident representatives plus the single candidate in hand.
+///
+/// The scan of the representatives for a candidate is parallelised across `nproc` threads (Rayon):
+/// the sweep itself is inherently sequential (the representative set grows as it goes), but the
+/// per-candidate distance fan-out is embarrassingly parallel, which is what keeps a single dominant
+/// clade from running on one core. Pass `nproc <= 1` for a serial scan (used when the caller instead
+/// parallelises across many independent blocks, one per worker process).
+///
+/// Only the DNA bitmap is loaded (dereplication is an ANI comparison), so each candidate pays a
+/// single-bitmap deserialization. Returns the representative sketch paths (in acceptance order) and
+/// a `{representative name: {replica name: distance}}` map, the names being each path's file stem.
+#[pyfunction]
+fn greedy_dereplicate(
+    sketches: Vec<String>,
+    kmer_size: usize,
+    threshold: f64,
+    nproc: usize,
+) -> PyResult<(Vec<String>, HashMap<String, HashMap<String, f64>>)> {
+    let eff_kmer = kmer_size as f64;
+
+    let mut rep_paths: Vec<String> = Vec::new();
+    let mut rep_bitmaps: Vec<RoaringBitmap> = Vec::new();
+    let mut replicas: HashMap<String, HashMap<String, f64>> = HashMap::new();
+
+    for candidate_path in sketches.iter() {
+        let candidate_bm = read_dna_bitmap(candidate_path)?;
+        let candidate_len = candidate_bm.len() as f64;
+
+        // Closest representative (global minimum distance) accepted so far. An empty sketch or an
+        // empty representative set can never yield a hit, so the candidate is promoted.
+        let closest: Option<(usize, f64)> = if candidate_len == 0.0 || rep_bitmaps.is_empty() {
+            None
+        } else if nproc > 1 && rep_bitmaps.len() > 1 {
+            let (idx, dist) = get_pool(nproc).install(|| {
+                rep_bitmaps
+                    .par_iter()
+                    .enumerate()
+                    .map(|(i, rep)| {
+                        (i, containment_distance(candidate_bm.intersection_len(rep), candidate_len, eff_kmer))
+                    })
+                    .reduce(
+                        || (usize::MAX, f64::INFINITY),
+                        |a, b| if b.1 < a.1 { b } else { a },
+                    )
+            });
+            Some((idx, dist))
+        } else {
+            let mut best_idx = 0usize;
+            let mut best_dist = f64::INFINITY;
+            for (i, rep) in rep_bitmaps.iter().enumerate() {
+                let dist = containment_distance(candidate_bm.intersection_len(rep), candidate_len, eff_kmer);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i;
+                }
+            }
+            Some((best_idx, best_dist))
+        };
+
+        match closest {
+            Some((idx, dist)) if dist <= threshold => {
+                let representative_name = file_stem(&rep_paths[idx]);
+                let clone_name = file_stem(candidate_path);
+                replicas
+                    .entry(representative_name)
+                    .or_default()
+                    .insert(clone_name, dist);
+            }
+            _ => {
+                rep_paths.push(candidate_path.clone());
+                rep_bitmaps.push(candidate_bm);
+            }
+        }
+    }
+
+    Ok((rep_paths, replicas))
+}
+
+/// The file stem of a path (its basename without the final extension), mirroring Python's
+/// `os.path.splitext(os.path.basename(path))[0]` so representative/replica names match the keys the
+/// Python dereplication builds from the same sketch paths.
+fn file_stem(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.to_string())
+        .unwrap_or_else(|| path.to_string())
 }
 
 /// Build the Sequence Bloom Tree structure from a list of children sketches.
@@ -894,6 +1070,7 @@ fn deltatree(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sketch_many, m)?)?;
     m.add_function(wrap_pyfunction!(sketch_cardinality, m)?)?;
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;
+    m.add_function(wrap_pyfunction!(greedy_dereplicate, m)?)?;
     m.add_function(wrap_pyfunction!(accumulator_search, m)?)?;
     m.add_function(wrap_pyfunction!(build_delta_tree, m)?)?;
     Ok(())

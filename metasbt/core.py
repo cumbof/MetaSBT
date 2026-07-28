@@ -2915,21 +2915,24 @@ class Database(object):
         return blocks
 
     @staticmethod
-    def _greedy_block(args: Tuple[List[str], int, str, float]) -> Tuple[List[str], Dict[str, Dict[str, float]]]:
+    def _greedy_block(args: Tuple[List[str], int, float, int]) -> Tuple[List[str], Dict[str, Dict[str, float]]]:
         """Dereplicate one block of sketches with a greedy leader (centroid) sweep.
 
-        Genomes are visited in the given order against the representatives accepted so far only,
-        never against the whole block: a genome within `threshold` of any representative is a
-        replica of it and is dropped, otherwise it becomes a new representative. The scan over the
-        representatives stops at the first hit, so a block of `n` genomes collapsing to `r`
-        representatives costs O(n * r) comparisons instead of O(n^2), and holds O(r) distances in
-        memory instead of the full O(n^2) matrix. For a dereplication at (or below) the species
-        radius `r` is a small constant, which is what makes very large blocks tractable at all.
+        This is a thin wrapper over the Rust `greedy_dereplicate`: genomes are visited in the given
+        order against the representatives accepted so far only, a genome within `threshold` of its
+        closest representative is dropped as a replica of it, otherwise it becomes a new
+        representative. The whole sweep runs in the backend so every representative's bitmap stays
+        resident in memory and each sketch file is read and deserialized exactly once, instead of
+        being re-read from disk on every comparison. A block of `n` genomes collapsing to `r`
+        representatives therefore costs `n` sketch loads and O(n * r) in-memory intersections
+        (holding O(r) bitmaps), rather than the O(n * r) disk reads of a per-chunk `dist` loop.
 
         Parameters
         ----------
         args : tuple
-            A (ordered sketch filepaths, kmer size, temporary folder, threshold) tuple.
+            A (ordered sketch filepaths, kmer size, threshold, nproc) tuple. `nproc` is the thread
+            budget for the backend's per-candidate representative scan; pass 1 when the caller
+            already parallelises across independent blocks (one block per worker process).
 
         Returns
         -------
@@ -2938,38 +2941,9 @@ class Database(object):
             {replica name: distance} dictionary.
         """
 
-        sketches, kmer_size, tmp, threshold = args
+        sketches, kmer_size, threshold, nproc = args
 
-        # Compare a candidate against the representatives in chunks so a candidate that is a replica
-        # of an early representative does not pay for the whole (potentially long) list
-        chunk_size = 256
-
-        representatives: List[str] = list()
-        replicas: Dict[str, Dict[str, float]] = dict()
-
-        for sketch_filepath in sketches:
-            hit: Optional[Tuple[str, float]] = None
-
-            for offset in range(0, len(representatives), chunk_size):
-                chunk = representatives[offset:offset + chunk_size]
-
-                _, distances = Database.dist(sketch_filepath, chunk, kmer_size, tmp=tmp, resume=False, mode="dna")
-
-                closest = min(chunk, key=lambda target: distances[target])
-
-                if distances[closest] <= threshold:
-                    hit = (closest, distances[closest])
-                    break
-
-            if hit is None:
-                representatives.append(sketch_filepath)
-
-            else:
-                representative_name = os.path.splitext(os.path.basename(hit[0]))[0]
-                clone_name = os.path.splitext(os.path.basename(sketch_filepath))[0]
-                replicas.setdefault(representative_name, dict())[clone_name] = hit[1]
-
-        return representatives, replicas
+        return deltatree.greedy_dereplicate(sketches, kmer_size, threshold, nproc)
 
     def dereplicate(
         self,
@@ -2988,11 +2962,15 @@ class Database(object):
         always farther apart than the species radius, so no replica pair can straddle two genera,
         and the second sweep recovers every within-genus pair the first one could not see because
         the two genomes carry inconsistent input species labels. Each sweep compares a genome only
-        against the representatives accepted so far and stops at the first hit, so a block of `n`
-        genomes collapsing to `r` representatives costs O(n * r) comparisons and O(r) memory rather
-        than the O(n^2) of a full pairwise matrix, which does not fit in RAM for the largest genera.
-        When the threshold is coarser than the species radius (e.g. a cross-genus 50% ANI
-        dereplication) the partition is unsafe and the comparison falls back to a flat all-vs-all.
+        against the representatives accepted so far, so a block of `n` genomes collapsing to `r`
+        representatives costs O(n * r) comparisons and O(r) memory rather than the O(n^2) of a full
+        pairwise matrix, which does not fit in RAM for the largest genera. The sweep runs in the Rust
+        backend (`greedy_dereplicate`) so every representative's bitmap stays resident and each
+        sketch is read from disk exactly once instead of being re-read on every comparison; the
+        per-candidate scan of the representatives is itself parallelised, and blocks are scheduled
+        largest-first so a single dominant clade cannot pin the pass to one core. When the threshold
+        is coarser than the species radius (e.g. a cross-genus 50% ANI dereplication) the partition
+        is unsafe and the comparison falls back to a flat all-vs-all.
 
         Note the blocked path is a greedy leader clustering: a genome is discarded only when it is
         within `threshold` of a *kept* representative, never through a chain of discarded
@@ -3051,21 +3029,24 @@ class Database(object):
         # partitioned by the genome's taxonomic label further down
         ordered_pairs: List[Tuple[str, str]] = list()
 
-        for genome_filepath in genomes:
+        # Build every sketch up front in one parallel batch (the Rust backend fans out across genomes
+        # on its own thread pool and skips any sketch that already exists). Sketching serially, one
+        # `Entry.sketch` call per genome, was a single-threaded bottleneck in front of the whole
+        # dereplication for very large inputs.
+        genomes_list = list(genomes)
+        sketch_map = self.sketch_genomes(genomes_list)
+
+        for genome_filepath in genomes_list:
             # Define the input file name
             filename = self.__class__._basename(genome_filepath)
 
             names[filename] = genome_filepath
 
-            # Assume the input genomes are all in fasta format
-            genome_obj = Entry(self, filename, filename, "genome")
-
-            # Build their bloom filter sketch representation
-            genome_sketch_filepath = genome_obj.sketch(genome_filepath)
+            genome_sketch_filepath = sketch_map[genome_filepath]
 
             sketches.append(genome_sketch_filepath)
             ordered_pairs.append((genome_filepath, genome_sketch_filepath))
-        
+
         # Rescale nproc
         nproc = self.nproc if len(sketches) > self.nproc else len(sketches)
 
@@ -3120,28 +3101,53 @@ class Database(object):
                 # kept representative, never through a chain of dropped intermediates.
                 sketch_to_genome = {sketch_filepath: genome_filepath for genome_filepath, sketch_filepath in ordered_pairs}
 
+                kmer_size = self.metadata["kmer_size"]
+
+                # A block is "large" when the closest-representative scan inside it is worth
+                # parallelising on its own (the backend fans the scan out across all threads). There
+                # are only a handful of these — a dominant genus or species — and clade sizes are
+                # heavily skewed, so a single mega-block would otherwise pin the whole pass to one
+                # core. Everything below the cutoff is a "small" block, cheap enough that fanning out
+                # *across* blocks (one per worker process, each scan single-threaded) wins instead.
+                large_cutoff = max(1024, self.nproc * 8)
+
                 def _sweep(blocks: "OrderedDict[str, List[Tuple[str, str]]]") -> List[Tuple[str, str]]:
                     """Greedily dereplicate every block, record the replicas, and return the
                     surviving (genome, sketch) pairs sorted by genome filepath."""
 
-                    args_list = [
-                        ([sketch_filepath for _, sketch_filepath in block_pairs], self.metadata["kmer_size"], self.tmp, threshold)
-                        for block_pairs in blocks.values()
-                    ]
+                    # Largest blocks first (longest-processing-time scheduling): the dominant clade
+                    # starts immediately and the many small blocks backfill the remaining cores
+                    ordered_blocks = sorted(blocks.values(), key=len, reverse=True)
 
-                    block_nproc = min(self.nproc, len(args_list))
+                    large_blocks = [block_pairs for block_pairs in ordered_blocks if len(block_pairs) >= large_cutoff]
+                    small_blocks = [block_pairs for block_pairs in ordered_blocks if len(block_pairs) < large_cutoff]
 
-                    if block_nproc > 1:
-                        # Each block is dereplicated serially by one worker: parallelising across
-                        # blocks rather than within them keeps every worker's memory bounded by its
-                        # own block's representatives
-                        with mp.Pool(processes=block_nproc) as pool:
-                            results = list(
-                                tqdm.tqdm(pool.imap_unordered(self.__class__._greedy_block, args_list, chunksize=1), total=len(args_list))
-                            )
+                    results: List[Tuple[List[str], Dict[str, Dict[str, float]]]] = list()
 
-                    else:
-                        results = [self.__class__._greedy_block(args_tuple) for args_tuple in tqdm.tqdm(args_list)]
+                    # Large blocks: one at a time, each parallelising its own representative scan
+                    # across the full thread budget so a dominant clade is not stuck on one core
+                    for block_pairs in tqdm.tqdm(large_blocks):
+                        block_sketches = [sketch_filepath for _, sketch_filepath in block_pairs]
+                        results.append(self.__class__._greedy_block((block_sketches, kmer_size, threshold, self.nproc)))
+
+                    # Small blocks: fan out across blocks, each dereplicated serially by one worker so
+                    # every worker's memory stays bounded by its own block's representatives
+                    if small_blocks:
+                        args_list = [
+                            ([sketch_filepath for _, sketch_filepath in block_pairs], kmer_size, threshold, 1)
+                            for block_pairs in small_blocks
+                        ]
+
+                        block_nproc = min(self.nproc, len(args_list))
+
+                        if block_nproc > 1:
+                            with mp.Pool(processes=block_nproc) as pool:
+                                results.extend(
+                                    tqdm.tqdm(pool.imap_unordered(self.__class__._greedy_block, args_list, chunksize=1), total=len(args_list))
+                                )
+
+                        else:
+                            results.extend(self.__class__._greedy_block(args_tuple) for args_tuple in tqdm.tqdm(args_list))
 
                     survivors: List[Tuple[str, str]] = list()
 
@@ -3206,20 +3212,17 @@ class Database(object):
                         # Keep track of the replica in the database
                         replicas[closest_genome][genome_filename] = closest_genome_distance
 
-        # Define the set of excluded genomes based on their ANI distance
+        # Define the set of excluded genomes based on their ANI distance: every genome recorded as a
+        # replica of a kept representative is dropped, the representatives themselves survive. A
+        # representative is never itself a replica of another, so a single pass suffices. `names`
+        # only holds the input genomes, so a clone that lives in the database (input-vs-database) is
+        # skipped here.
         excluded = set()
 
-        for replica in replicas:
-            # Retrieve the input path to the fasta file or the bloom filter file
-            # In case of input versus database, `sketch_filename` does not exist in the input set of genomes
-            input_filepath = names.get(replica, None)
-
-            if input_filepath not in excluded:
-                # Exclude all the replicas to the current genome
-                for replica in replicas:
-                    for clone in replicas[replica]:
-                        if clone in names:
-                            excluded.add(names[clone])
+        for clones in replicas.values():
+            for clone in clones:
+                if clone in names:
+                    excluded.add(names[clone])
 
         # Compute the difference between the input set of genomes and the excluded ones
         return genomes.difference(excluded)
