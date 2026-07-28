@@ -20,6 +20,7 @@
 
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyIOError, PyValueError};
+use pyo3::types::PyBytes;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
@@ -667,6 +668,92 @@ fn file_stem(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Compute the condensed (upper-triangular, row-major) distance vector for an ordered list of
+/// sketches and return it as a raw little-endian `f64` byte buffer (wrap it on the Python side with
+/// `numpy.frombuffer(..., dtype="<f8")`).
+///
+/// This is the resident-memory counterpart of `greedy_dereplicate` for the reference clustering:
+/// every sketch's bitmap is loaded **once** into memory and every pair is an in-memory Roaring
+/// intersection, instead of the previous per-row `dist` calls that re-read every target sketch from
+/// disk (O(n^2) reads) and returned a Python dict-of-dicts that then had to be flattened into a
+/// Python list of floats. Returning packed bytes keeps the result at 8 bytes per pair — a NumPy
+/// array `scipy.cluster.hierarchy.linkage` can consume directly — rather than ~32 bytes per boxed
+/// Python float, which is what made a large genus' matrix blow up memory.
+///
+/// Entry `k` for pair `(i, j)` with `i < j` (row-major over the upper triangle) is the containment
+/// distance with the **lower-index genome as the focus**: `1 - ANI(|i ∩ j| / |i|)`, matching the
+/// order and orientation of the Python `_condensed_distances` it replaces. The per-row scan is
+/// parallelised across `nproc` threads; each row writes a disjoint slice of the output.
+#[pyfunction]
+fn condensed_distances<'py>(
+    py: Python<'py>,
+    sketches: Vec<String>,
+    kmer_size: usize,
+    mode: &str,
+    nproc: usize,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let n = sketches.len();
+
+    if n < 2 {
+        return Ok(PyBytes::new(py, &[]));
+    }
+
+    let eff_kmer = if matches!(mode, "aa" | "AA") {
+        std::cmp::max(3, kmer_size / 3) as f64
+    } else {
+        kmer_size as f64
+    };
+
+    // Load every bitmap once and keep it resident for the whole sweep.
+    let bitmaps: Vec<RoaringBitmap> = sketches
+        .iter()
+        .map(|path| select_bitmap(path, mode))
+        .collect::<PyResult<Vec<_>>>()?;
+    let lens: Vec<f64> = bitmaps.iter().map(|bitmap| bitmap.len() as f64).collect();
+
+    let total = n * (n - 1) / 2;
+    let mut out = vec![0.0f64; total];
+
+    if nproc > 1 && n > 2 {
+        // Carve `out` into one disjoint slice per row (row i holds n-1-i entries), then fill the
+        // rows in parallel. The slices are non-overlapping, so the parallel writes are safe.
+        let mut rest: &mut [f64] = out.as_mut_slice();
+        let mut row_slices: Vec<(usize, &mut [f64])> = Vec::with_capacity(n - 1);
+        for i in 0..n - 1 {
+            let (head, tail) = rest.split_at_mut(n - 1 - i);
+            row_slices.push((i, head));
+            rest = tail;
+        }
+
+        get_pool(nproc).install(|| {
+            row_slices.into_par_iter().for_each(|(i, slice)| {
+                let focus = &bitmaps[i];
+                let focus_len = lens[i];
+                for (offset, j) in (i + 1..n).enumerate() {
+                    slice[offset] = containment_distance(focus.intersection_len(&bitmaps[j]), focus_len, eff_kmer);
+                }
+            });
+        });
+    } else {
+        let mut offset = 0usize;
+        for i in 0..n - 1 {
+            let focus = &bitmaps[i];
+            let focus_len = lens[i];
+            for j in i + 1..n {
+                out[offset] = containment_distance(focus.intersection_len(&bitmaps[j]), focus_len, eff_kmer);
+                offset += 1;
+            }
+        }
+    }
+
+    // Reinterpret the f64 vector as little-endian bytes. f64 has no padding and both supported
+    // targets are little-endian, so this matches numpy's "<f8" layout.
+    let byte_len = out.len() * std::mem::size_of::<f64>();
+    let bytes = unsafe { std::slice::from_raw_parts(out.as_ptr() as *const u8, byte_len) };
+
+    Ok(PyBytes::new(py, bytes))
+}
+
 /// Build the Sequence Bloom Tree structure from a list of children sketches.
 ///
 /// Every internal node stores the **union** of its subtree — the set of all sub-sampled
@@ -1071,6 +1158,7 @@ fn deltatree(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sketch_cardinality, m)?)?;
     m.add_function(wrap_pyfunction!(containment_ani, m)?)?;
     m.add_function(wrap_pyfunction!(greedy_dereplicate, m)?)?;
+    m.add_function(wrap_pyfunction!(condensed_distances, m)?)?;
     m.add_function(wrap_pyfunction!(accumulator_search, m)?)?;
     m.add_function(wrap_pyfunction!(build_delta_tree, m)?)?;
     Ok(())

@@ -487,9 +487,16 @@ class Database(object):
         self.metadata["scaled_factor"] = scaled_factor
         self._dump_metadata()
 
-    def _condensed_distances(self, sketches: List[str], mode: str="dna") -> List[float]:
+    def _condensed_distances(self, sketches: List[str], mode: str="dna") -> "np.ndarray":
         """Return the condensed (upper-triangular, row-major) distance vector for an
         ordered list of sketch files, suitable for `scipy.cluster.hierarchy.linkage`.
+
+        The whole vector is computed by the Rust backend (`condensed_distances`), which loads every
+        sketch bitmap once and keeps it resident: each pair is an in-memory Roaring intersection
+        rather than a `dist` call that re-reads the target sketch from disk. The result comes back as
+        a packed little-endian f64 buffer and is wrapped as a NumPy array (8 bytes per pair), instead
+        of a Python dict-of-dicts flattened into a list of boxed floats — the representation that
+        made a large genus' matrix exhaust memory.
 
         Parameters
         ----------
@@ -500,66 +507,74 @@ class Database(object):
 
         Returns
         -------
-        list
-            The condensed distance vector: d(0,1), d(0,2), ..., d(0,n-1), d(1,2), ...
+        numpy.ndarray
+            The condensed distance vector: d(0,1), d(0,2), ..., d(0,n-1), d(1,2), ... Entry for pair
+            (i, j) with i < j is the containment distance with the lower-index genome as the focus.
         """
 
-        condensed: List[float] = []
-
         if len(sketches) < 2:
-            return condensed
+            return np.empty(0, dtype=np.float64)
 
         kmer_size = self.metadata["kmer_size"]
 
-        # Parallelise only for clades large enough to amortise the process-pool overhead;
-        # most genera are small and run faster serially (each `dist` call is a single Rust call).
-        if self.nproc > 1 and len(sketches) > 64:
-            args_list = [
-                (sketches[i], sketches[i + 1:], kmer_size, self.tmp, mode)
-                for i in range(len(sketches) - 1)
-            ]
+        # Parallelise the per-row scan only for clades large enough to amortise the thread fan-out;
+        # small genera run faster serially (the whole vector is a single backend call either way).
+        nproc = self.nproc if (self.nproc > 1 and len(sketches) > 64) else 1
 
-            with mp.Pool(processes=min(self.nproc, len(args_list))) as pool:
-                partial = dict(pool.imap_unordered(self.__class__._dist, args_list, chunksize=1))
+        raw = deltatree.condensed_distances(sketches, kmer_size, mode, nproc)
 
-            for i in range(len(sketches) - 1):
-                row = partial[sketches[i]]
-                condensed.extend(row[sketches[j]] for j in range(i + 1, len(sketches)))
+        return np.frombuffer(raw, dtype="<f8")
 
-        else:
-            for i in range(len(sketches) - 1):
-                _, row = self.__class__.dist(
-                    sketches[i], sketches[i + 1:], kmer_size, tmp=self.tmp, resume=False, mode=mode
-                )
-                condensed.extend(row[sketches[j]] for j in range(i + 1, len(sketches)))
+    @staticmethod
+    def _within_between(condensed: "np.ndarray", species_codes: "np.ndarray") -> Tuple["np.ndarray", "np.ndarray"]:
+        """Split a genus' condensed distance vector into its within-species and between-species
+        pairs, given each genome's integer species code in the same order as the condensed matrix.
 
-        return condensed
+        The split is vectorised per row (one NumPy comparison per genome, O(n) Python iterations
+        rather than O(n^2)), so a large genus is partitioned without materialising an n-by-n mask.
 
-    def _learn_species_radius(
-        self,
-        by_genus: Dict[str, Dict[str, str]],
-        genus_paths: Dict[str, List[str]],
-        genus_condensed: Dict[str, Optional[List[float]]],
-    ) -> Tuple[float, float]:
-        """Learn the species-level distance boundary from the reference data instead of
-        hard-coding it.
+        Parameters
+        ----------
+        condensed : numpy.ndarray
+            The condensed (upper-triangular, row-major) distance vector for the genus.
+        species_codes : numpy.ndarray
+            Integer species code per genome, ordered like the condensed matrix rows.
 
-        Distances are single-axis (this is called once for ANI and once for AAI, on the matching
-        per-genus condensed matrix), so it learns an independent species radius for each axis.
-        Within each genus, the pairwise distances between genomes that share the same input species
-        label (within-species) and between genomes with different input species labels
-        (between-species) form two distributions. The boundary is the distance that best separates
-        them, i.e. the threshold maximising Youden's J (`TPR - FPR`). This is the empirical species
+        Returns
+        -------
+        tuple
+            The within-species and between-species distance arrays.
+        """
+
+        n = species_codes.shape[0]
+
+        if n < 2 or condensed.size == 0:
+            empty = np.empty(0, dtype=condensed.dtype)
+            return empty, empty
+
+        # mask[k] is True when the two genomes of pair k share a species. Row i contributes the
+        # comparisons of genome i against every later genome, matching the condensed row-major order.
+        mask = np.concatenate([species_codes[i + 1:] == species_codes[i] for i in range(n - 1)])
+
+        return condensed[mask], condensed[~mask]
+
+    @staticmethod
+    def _radius_from_distributions(within_arr: "np.ndarray", between_arr: "np.ndarray") -> Tuple[float, float]:
+        """Learn the species-level distance boundary from the within/between-species distance
+        distributions instead of hard-coding it.
+
+        Distances are single-axis (this is computed once for ANI and once for AAI), so it learns an
+        independent species radius for each axis. The within-species and between-species pairwise
+        distances form two distributions; the boundary is the distance that best separates them,
+        i.e. the threshold maximising Youden's J (`TPR - FPR`). This is the empirical species
         discontinuity of *this* reference set on this axis, so no fixed value is assumed.
 
         Parameters
         ----------
-        by_genus : dict
-            Mapping of genus lineage to its {genome filepath: formatted taxonomy}.
-        genus_paths : dict
-            Mapping of genus lineage to its ordered list of genome filepaths.
-        genus_condensed : dict
-            Mapping of genus lineage to its condensed distance vector (or None for singletons).
+        within_arr : numpy.ndarray
+            All within-species pairwise distances pooled across genera.
+        between_arr : numpy.ndarray
+            All between-species pairwise distances pooled across genera.
 
         Returns
         -------
@@ -571,29 +586,11 @@ class Database(object):
 
         default = 0.05
 
-        within: List[float] = []
-        between: List[float] = []
-
-        for genus_lineage, condensed in genus_condensed.items():
-            if not condensed:
-                continue
-
-            paths = genus_paths[genus_lineage]
-            members = by_genus[genus_lineage]
-            species = [members[p].split("|")[-1] for p in paths]
-
-            k = 0
-            n = len(paths)
-            for i in range(n):
-                for j in range(i + 1, n):
-                    (within if species[i] == species[j] else between).append(condensed[k])
-                    k += 1
-
-        if not within or not between:
+        if within_arr.size == 0 or between_arr.size == 0:
             return default, default
 
-        within_arr = np.sort(np.array(within, dtype=float))
-        between_arr = np.sort(np.array(between, dtype=float))
+        within_arr = np.sort(within_arr)
+        between_arr = np.sort(between_arr)
 
         # Evaluate every observed distance as a candidate threshold and keep the one that
         # best tells the two distributions apart (maximum true-positive minus false-positive
@@ -673,15 +670,19 @@ class Database(object):
         genus level (ranks above the species are taken as given — the ANI discontinuity that
         delineates species is not informative at higher ranks) and, within each genus, clustered
         at the species level by cutting the average-linkage dendrogram. The cut height is the
-        species radius learned from the data (`_learn_species_radius`), optionally tightened to a
+        species radius learned from the data (`_radius_from_distributions`), optionally tightened to a
         clearer natural valley in the genus (`_gap_cut`), so no fixed threshold is hard-coded.
         Each resulting cluster is named by the majority input species label of its members (ties
         broken alphabetically); when the cut splits one input species into several clusters they
         are disambiguated with a `__clade_N` suffix. A cluster whose majority label matches an
         existing species in the database merges into it through `add()`.
 
-        Note: clustering happens within a genus, so a genus over-represented by thousands of
-        genomes pays an O(n^2) distance cost; this is acceptable for the one-off index build.
+        Genera are processed one at a time: each genus' two condensed distance matrices are computed
+        by the resident-memory backend and released before the next genus, so peak memory is a single
+        genus' matrix rather than every genus' matrices at once. The hierarchical clustering is still
+        inherently O(n^2) in a genus' size (the average-linkage dendrogram needs the full condensed
+        matrix), which is acceptable for the one-off index build; a genus far larger than that after
+        dereplication would need a different clustering primitive, not just a leaner matrix layout.
 
         Parameters
         ----------
@@ -706,23 +707,28 @@ class Database(object):
             genus_lineage = "|".join(taxonomy.split("|")[:genus_idx + 1])
             by_genus.setdefault(genus_lineage, dict())[genome_filepath] = taxonomy
 
-        # Build the sketches once (resume-friendly) and a per-genus condensed distance matrix in
-        # each of the two spaces (ANI and AAI), so species are delineated on both axes.
+        # Build the sketches once (resume-friendly). Condensed distance matrices are computed one
+        # genus at a time, below, and discarded before moving on, so peak memory is a single genus'
+        # matrix rather than every genus' two matrices held at once.
         sketch_map = self.sketch_genomes(list(references.keys()))
 
-        genus_paths: Dict[str, List[str]] = {}
-        genus_condensed_ani: Dict[str, Optional[List[float]]] = {}
-        genus_condensed_aai: Dict[str, Optional[List[float]]] = {}
-        for genus_lineage, members in by_genus.items():
-            paths = sorted(members.keys())
-            genus_paths[genus_lineage] = paths
-            if len(paths) > 1:
-                genus_sketches = [sketch_map[p] for p in paths]
-                genus_condensed_ani[genus_lineage] = self._condensed_distances(genus_sketches, mode="dna")
-                genus_condensed_aai[genus_lineage] = self._condensed_distances(genus_sketches, mode="aa")
-            else:
-                genus_condensed_ani[genus_lineage] = None
-                genus_condensed_aai[genus_lineage] = None
+        genus_paths: Dict[str, List[str]] = {
+            genus_lineage: sorted(members.keys()) for genus_lineage, members in by_genus.items()
+        }
+
+        def _genus_condensed(genus_lineage: str) -> Tuple["np.ndarray", "np.ndarray"]:
+            """The (ANI, AAI) condensed distance vectors for a genus with at least two genomes."""
+            genus_sketches = [sketch_map[p] for p in genus_paths[genus_lineage]]
+            return (
+                self._condensed_distances(genus_sketches, mode="dna"),
+                self._condensed_distances(genus_sketches, mode="aa"),
+            )
+
+        def _species_codes(genus_lineage: str) -> "np.ndarray":
+            """Integer species code per genome, ordered like the genus' condensed matrix rows."""
+            members = by_genus[genus_lineage]
+            names = np.array([members[p].split("|")[-1] for p in genus_paths[genus_lineage]])
+            return np.unique(names, return_inverse=True)[1]
 
         # Reuse the per-axis species radii learned for the baseline; learn them only the first time
         # so later reference updates remain consistent with the original index.
@@ -732,8 +738,38 @@ class Database(object):
             radius_aai = self.metadata["species_radius_aai"]
             within_hi_aai = self.metadata.get("species_within_hi_aai", radius_aai)
         else:
-            radius_ani, within_hi_ani = self._learn_species_radius(by_genus, genus_paths, genus_condensed_ani)
-            radius_aai, within_hi_aai = self._learn_species_radius(by_genus, genus_paths, genus_condensed_aai)
+            # First build: pool the within/between-species distances across genera to learn the two
+            # radii, streaming one genus at a time and discarding its matrices immediately. Only the
+            # pooled distributions (compact NumPy arrays) outlive a genus, not the matrices, so the
+            # radius is still learned globally without ever holding every genus' matrix at once. The
+            # clustering pass below recomputes each genus' matrices; with the resident-memory backend
+            # a second distance pass on a one-off build is cheaper than keeping them all in RAM.
+            within_ani_parts: List["np.ndarray"] = []
+            between_ani_parts: List["np.ndarray"] = []
+            within_aai_parts: List["np.ndarray"] = []
+            between_aai_parts: List["np.ndarray"] = []
+
+            for genus_lineage in by_genus:
+                if len(genus_paths[genus_lineage]) < 2:
+                    continue
+
+                codes = _species_codes(genus_lineage)
+                condensed_ani, condensed_aai = _genus_condensed(genus_lineage)
+
+                within, between = self.__class__._within_between(condensed_ani, codes)
+                within_ani_parts.append(within)
+                between_ani_parts.append(between)
+
+                within, between = self.__class__._within_between(condensed_aai, codes)
+                within_aai_parts.append(within)
+                between_aai_parts.append(between)
+
+            def _pool(parts: List["np.ndarray"]) -> "np.ndarray":
+                return np.concatenate(parts) if parts else np.empty(0, dtype=np.float64)
+
+            radius_ani, within_hi_ani = self.__class__._radius_from_distributions(_pool(within_ani_parts), _pool(between_ani_parts))
+            radius_aai, within_hi_aai = self.__class__._radius_from_distributions(_pool(within_aai_parts), _pool(between_aai_parts))
+
             self.metadata["species_radius_ani"] = radius_ani
             self.metadata["species_within_hi_ani"] = within_hi_ani
             self.metadata["species_radius_aai"] = radius_aai
@@ -744,16 +780,17 @@ class Database(object):
 
         for genus_lineage, members in by_genus.items():
             paths = genus_paths[genus_lineage]
-            condensed_ani = genus_condensed_ani[genus_lineage]
-            condensed_aai = genus_condensed_aai[genus_lineage]
 
-            if condensed_ani is None:
+            if len(paths) < 2:
                 # A single genome in this genus: one species cluster
                 labels = [0] * len(paths)
             else:
                 # Cut the ANI and the AAI dendrogram each at its own learned species radius
                 # (tightened to a clearer natural valley where present) and intersect the two
-                # labelings: two genomes share a species only if grouped together on BOTH axes.
+                # labelings: two genomes share a species only if grouped together on BOTH axes. Each
+                # genus' matrices are built here and released at the end of the iteration.
+                condensed_ani, condensed_aai = _genus_condensed(genus_lineage)
+
                 linkage_ani = hier.linkage(condensed_ani, method="average")
                 cut_ani = self.__class__._gap_cut(sorted(float(h) for h in linkage_ani[:, 2]), radius_ani, within_hi_ani)
                 labels_ani = hier.fcluster(linkage_ani, cut_ani, criterion="distance")
@@ -2891,7 +2928,7 @@ class Database(object):
             return None
 
         # species_radius_ani is learned at index time (cluster_references); before it exists (the
-        # very first index build) fall back to the same default _learn_species_radius uses. It only
+        # very first index build) fall back to the same default _radius_from_distributions uses. It only
         # gates the safety of the partition, never the dereplication result within a block
         species_radius = self.metadata.get("species_radius_ani", 0.05)
 
