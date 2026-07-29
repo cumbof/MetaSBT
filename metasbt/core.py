@@ -2985,12 +2985,141 @@ class Database(object):
 
         return deltatree.greedy_dereplicate(sketches, kmer_size, threshold, nproc)
 
+    @staticmethod
+    def _read_dereplication_cache(cache_filepath: Optional[str], genomes: Set[str], threshold: float) -> Optional[Set[str]]:
+        """Return the survivor set persisted by a previous `dereplicate`, but only when it is safe to
+        reuse: the cached run must have used this exact threshold and this exact input genome set.
+
+        Dereplication is a pure function of the input genomes, the threshold and the (resumed)
+        sketches, so a cache written for the same input and threshold yields the same survivors. If
+        the input set or the threshold differ, or the file is missing or malformed, this returns None
+        and the caller recomputes from scratch.
+
+        Parameters
+        ----------
+        cache_filepath : str, optional
+            Path to the dereplication cache written by `_write_dereplication_cache`, or None.
+        genomes : set
+            The input genome filepaths about to be dereplicated.
+        threshold : float
+            The dereplication threshold about to be used.
+
+        Returns
+        -------
+        set or None
+            The cached survivor filepaths when the cache matches, otherwise None.
+        """
+
+        if not cache_filepath or not os.path.isfile(cache_filepath):
+            return None
+
+        cached_threshold: Optional[float] = None
+        inputs: Set[str] = set()
+        survivors: Set[str] = set()
+
+        try:
+            with open(cache_filepath) as cache_file:
+                for line in cache_file:
+                    line = line.rstrip("\n")
+
+                    if not line:
+                        continue
+
+                    if line.startswith("#"):
+                        header = line.lstrip("#").strip().split("\t")
+
+                        if len(header) == 2 and header[0] == "threshold":
+                            cached_threshold = float(header[1])
+
+                        continue
+
+                    columns = line.split("\t")
+
+                    # Every row is <genome>\t<representative>\t<distance>; a survivor is its own
+                    # representative, a replica points at the survivor it collapsed into
+                    genome_filepath, representative_filepath = columns[0], columns[1]
+                    inputs.add(genome_filepath)
+
+                    if genome_filepath == representative_filepath:
+                        survivors.add(genome_filepath)
+
+        except (ValueError, IndexError, OSError):
+            # A truncated or malformed cache (e.g. a crash mid-write on an older layout) is simply
+            # ignored so the caller falls back to recomputing
+            return None
+
+        if cached_threshold is None or abs(cached_threshold - threshold) > 1e-12:
+            return None
+
+        if inputs != set(genomes):
+            # The input set changed (genomes added/removed since the cache was written): recompute
+            return None
+
+        return survivors
+
+    @staticmethod
+    def _write_dereplication_cache(
+        cache_filepath: str,
+        threshold: float,
+        survivors: Set[str],
+        replicas: Dict[str, Dict[str, float]],
+        names: Dict[str, str],
+    ) -> None:
+        """Persist a dereplication result so a later `--resume` never has to recompute it.
+
+        One row is written per input genome: a survivor maps to itself at distance 0.0, a discarded
+        replica maps to the representative it collapsed into at the ANI distance that dropped it. The
+        full input set is therefore recorded (every survivor plus every replica), which is what
+        `_read_dereplication_cache` matches against before reusing the survivors. The file is written
+        to a temporary sibling and atomically renamed, so an interrupted write never leaves a
+        half-written cache that a subsequent resume would trust.
+
+        Parameters
+        ----------
+        cache_filepath : str
+            Destination path for the cache.
+        threshold : float
+            The threshold the result was computed with (recorded in the header for reuse checks).
+        survivors : set
+            The surviving genome filepaths.
+        replicas : dict
+            Mapping of representative name to its {replica name: distance} dictionary (basenames).
+        names : dict
+            Mapping of genome basename to its input filepath.
+        """
+
+        tmp_cache_filepath = f"{cache_filepath}.tmp"
+
+        with open(tmp_cache_filepath, "w") as cache_file:
+            cache_file.write("# MetaSBT dereplication survivors\n")
+            cache_file.write(f"# threshold\t{threshold}\n")
+
+            for genome_filepath in sorted(survivors):
+                cache_file.write(f"{genome_filepath}\t{genome_filepath}\t0.0\n")
+
+            for representative_name, clones in replicas.items():
+                representative_filepath = names.get(representative_name)
+
+                if representative_filepath is None:
+                    continue
+
+                for clone_name, distance in clones.items():
+                    clone_filepath = names.get(clone_name)
+
+                    if clone_filepath is None:
+                        continue
+
+                    cache_file.write(f"{clone_filepath}\t{representative_filepath}\t{distance}\n")
+
+        os.replace(tmp_cache_filepath, cache_filepath)
+
     def dereplicate(
         self,
         genomes: Set[str],
         threshold: float=0.01,
         compare_with: str="self",
-        taxonomy: Optional[Dict[str, str]]=None
+        taxonomy: Optional[Dict[str, str]]=None,
+        cache_filepath: Optional[str]=None
     ) -> List[str]:
         """Dereplicate a set of genomes versus themselves or versus the genomes in the database.
         The dereplication process is based on their ANI distance according to a specific threshold.
@@ -3031,6 +3160,11 @@ class Database(object):
             Mapping of genome filepath to its taxonomic label. When provided (and every input genome
             is in it) it enables the genus-blocked comparison described above for `compare_with="self"`.
             Ignored for `compare_with="database"`.
+        cache_filepath : str, optional
+            Path to a persistent dereplication cache (`compare_with="self"` only). When set, the
+            result is written there after the sweep and, on a later call with the same input set and
+            threshold, reused instead of recomputed — so an interrupted index that already paid for
+            dereplication never has to repeat it on `--resume`.
 
         Raises
         ------
@@ -3059,6 +3193,17 @@ class Database(object):
             # This argument is used to select the genomes against with the dereplication process is performed
             # It can be run against the input genomes themselves using "self", or against the genomes in the database with "database"
             raise ValueError("The dereplication can be performed against the input itself or the genomes in the database!")
+
+        # Reuse a previously persisted result when the input set and threshold are unchanged, so a
+        # resumed build that already dereplicated does not pay for it again (self-comparison only:
+        # the cache records input genomes as their own representatives)
+        if compare_with == "self":
+            cached_survivors = self.__class__._read_dereplication_cache(cache_filepath, genomes, threshold)
+
+            if cached_survivors is not None:
+                print(f"Reusing {len(cached_survivors)} dereplicated genomes from {cache_filepath}")
+
+                return cached_survivors
 
         sketches = list()
 
@@ -3265,7 +3410,15 @@ class Database(object):
                     excluded.add(names[clone])
 
         # Compute the difference between the input set of genomes and the excluded ones
-        return genomes.difference(excluded)
+        survivors = genomes.difference(excluded)
+
+        # Persist the result so a later resume can reuse it instead of recomputing. Only the
+        # self-comparison result is cacheable: its representatives are input genomes, whereas the
+        # database comparison collapses inputs onto genomes that are not in `names`.
+        if compare_with == "self" and cache_filepath:
+            self.__class__._write_dereplication_cache(cache_filepath, threshold, survivors, replicas, names)
+
+        return survivors
 
     def merge(self, clusters: Set[str], into: str=None, update: bool=True) -> None:
         """Merge two or more species clusters.

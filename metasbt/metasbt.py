@@ -401,11 +401,14 @@ class MetaSBT(object):
     def _reset_for_resume(db_dir: str) -> None:
         """Strip a database folder down to its genome sketches, ready for a `--resume` rebuild.
 
-        Everything under `db_dir` is removed except the `sketches` folder, and the metadata is
-        rewritten keeping only the two entries the sketches depend on (the kmer size and the scaled
-        factor) plus a zeroed cluster counter. Anything else the interrupted run may have written
-        (cluster folders, the report, the learned species radii) is derived state that the rebuild
-        recomputes, and reusing a partially written copy of it would corrupt the new build.
+        Everything under `db_dir` is removed except the `sketches` folder and the `dereplicated.tsv`
+        cache, and the metadata is rewritten keeping only the two entries the sketches depend on (the
+        kmer size and the scaled factor) plus a zeroed cluster counter. Anything else the interrupted
+        run may have written (cluster folders, the report, the learned species radii) is derived
+        state that the rebuild recomputes, and reusing a partially written copy of it would corrupt
+        the new build. The dereplication cache is kept because it is an expensive, input-determined
+        result: `dereplicate` reuses it only when the input set and threshold still match, and
+        recomputes (overwriting it) otherwise, so keeping a stale copy is always safe.
 
         Parameters
         ----------
@@ -447,7 +450,7 @@ class MetaSBT(object):
         sketches_count = len(os.listdir(sketches_dir))
 
         for entry in os.listdir(db_dir):
-            if entry in ("sketches", "metadata.json"):
+            if entry in ("sketches", "metadata.json", "dereplicated.tsv"):
                 continue
 
             entry_path = os.path.join(db_dir, entry)
@@ -705,8 +708,15 @@ class MetaSBT(object):
 
         if args.dereplicate > 0.0:
             # Dereplicate genomes based on their ANI distance. The references carry taxonomic labels,
-            # so the comparison is partitioned by genus when the threshold allows it (see dereplicate)
-            genomes = self.database.dereplicate(genomes, threshold=args.dereplicate, taxonomy=references)
+            # so the comparison is partitioned by genus when the threshold allows it (see dereplicate).
+            # The result is cached under the database folder (and preserved across --resume) so an
+            # interrupted build that already dereplicated does not repeat it on the next run.
+            genomes = self.database.dereplicate(
+                genomes,
+                threshold=args.dereplicate,
+                taxonomy=references,
+                cache_filepath=os.path.join(db_dir, "dereplicated.tsv"),
+            )
 
         # Reshape the references dict
         # Consider genomes that passed the dereplication process only
