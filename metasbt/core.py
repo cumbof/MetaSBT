@@ -495,7 +495,10 @@ class Database(object):
         sketch bitmap once and keeps it resident: each pair is an in-memory Roaring intersection
         rather than a `dist` call that re-reads the target sketch from disk. The result comes back as
         a packed little-endian f64 buffer and is wrapped as a NumPy array (8 bytes per pair), instead
-        of a Python dict-of-dicts flattened into a list of boxed floats — the representation that
+        of a Python dict-of-dicts flattened into a list of boxed floats. The backend returns a
+        mutable bytearray so the wrapped array is writable: scipy's average-linkage (nn_chain)
+        mutates the condensed vector in place and raises on a read-only buffer. This is the
+        representation that
         made a large genus' matrix exhaust memory.
 
         Parameters

@@ -20,7 +20,7 @@
 
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyIOError, PyValueError};
-use pyo3::types::PyBytes;
+use pyo3::types::PyByteArray;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
@@ -691,11 +691,11 @@ fn condensed_distances<'py>(
     kmer_size: usize,
     mode: &str,
     nproc: usize,
-) -> PyResult<Bound<'py, PyBytes>> {
+) -> PyResult<Bound<'py, PyByteArray>> {
     let n = sketches.len();
 
     if n < 2 {
-        return Ok(PyBytes::new(py, &[]));
+        return Ok(PyByteArray::new(py, &[]));
     }
 
     let eff_kmer = if matches!(mode, "aa" | "AA") {
@@ -747,11 +747,13 @@ fn condensed_distances<'py>(
     }
 
     // Reinterpret the f64 vector as little-endian bytes. f64 has no padding and both supported
-    // targets are little-endian, so this matches numpy's "<f8" layout.
+    // targets are little-endian, so this matches numpy's "<f8" layout. A mutable bytearray (not an
+    // immutable bytes) is returned so the NumPy view Python wraps around it is writable: scipy's
+    // average-linkage (nn_chain) mutates the condensed vector in place and rejects a read-only one.
     let byte_len = out.len() * std::mem::size_of::<f64>();
     let bytes = unsafe { std::slice::from_raw_parts(out.as_ptr() as *const u8, byte_len) };
 
-    Ok(PyBytes::new(py, bytes))
+    Ok(PyByteArray::new(py, bytes))
 }
 
 /// Build the Sequence Bloom Tree structure from a list of children sketches.
