@@ -479,6 +479,12 @@ class MetaSBT(object):
     def index(self, argv: List[Any]) -> None:
         """Build the first baseline of a MetaSBT database by indexing a set of reference genomes.
 
+        Run against an already complete database (without --resume), `index` instead adds the input
+        genomes as a brand-new kingdom, keeping the existing clusters and genomes untouched: the input
+        is sketched, dereplicated and clustered on its own (kingdoms never cross-compare) and spliced
+        in beside the existing kingdoms. It refuses input whose kingdom is already in the database
+        (that is `update`'s job) and refuses a half-built database (which must be resumed).
+
         Parameters
         ----------
         argv : list
@@ -487,7 +493,8 @@ class MetaSBT(object):
         Raises
         ------
         Exception
-            If a MetaSBT database with the same name of the provided one already exists.
+            - If the database exists but is incomplete and --resume was not given;
+            - If the input genomes belong to a kingdom already present in the database.
         """
 
         parser = argparse.ArgumentParser(
@@ -616,21 +623,36 @@ class MetaSBT(object):
         # Define the path to the database folder
         db_dir = os.path.join(args.workdir, args.database)
 
-        if os.path.isdir(db_dir) and not args.resume:
-            # The `index` command must be used to initialize a database
-            # If a database with the same name of the provided one already exists, consider running the `update` command
+        db_exists = os.path.isdir(db_dir)
+
+        # A database is "complete" only once `update()` has dumped clusters.tsv (see Database.__init__).
+        # A complete database can take a brand-new kingdom incrementally (new-kingdom mode, below); an
+        # incomplete one (a crashed `index`) can only be resumed.
+        db_complete = db_exists and os.path.isfile(os.path.join(db_dir, "clusters.tsv"))
+
+        if db_exists and not args.resume and not db_complete:
+            # A half-built database: the only safe move is to resume it. Running afresh would either
+            # collide with the partial state or, with new-kingdom mode, splice onto clusters that were
+            # never finished.
             raise Exception(
-                f"A database named '{args.database}' already exist under {args.workdir}. "
-                "Use --resume to rebuild it reusing the genome sketches already under it."
+                f"A database named '{args.database}' already exist under {args.workdir} but it is not "
+                "complete. Use --resume to rebuild it reusing the genome sketches already under it."
             )
 
-        if args.resume and os.path.isdir(db_dir):
+        if args.resume and db_exists:
             # Drop everything but the sketches so the rebuild starts from a clean slate. A crashed
             # `index` can leave half-populated clusters and a metadata file carrying counters and
             # learned radii from the interrupted run; keeping any of that would silently mix two
             # builds. The sketches are the one artifact that is safe to carry over: they depend on
             # nothing but the genome, the kmer size, and the scaled factor.
             self.__class__._reset_for_resume(db_dir)
+
+        # New-kingdom mode: add genomes from a kingdom NOT yet in a complete database, keeping its
+        # existing clusters and genomes untouched. The input genomes are sketched, dereplicated and
+        # clustered on their own (kingdoms never cross-compare), then `add()`/`update()` splice the new
+        # kingdom subtree in beside the existing ones. `--resume` (a full rebuild) takes precedence.
+        # The kingdom-overlap guard is enforced below, once the input taxonomy has been read.
+        incremental = db_complete and not args.resume
 
         # Define the path to the temporary folder
         tmp_dir = os.path.join(args.workdir, "tmp")
@@ -662,7 +684,25 @@ class MetaSBT(object):
         # Define the set of paths to the reference genomes
         genomes = set(references.keys())
 
-        if args.resume and Database._validate_metadata(self.database.metadata):
+        # The kingdoms the input genomes belong to (the first taxonomic level of every label)
+        input_kingdoms = {Database._format_taxonomy(taxonomy).split("|")[0] for taxonomy in references.values()}
+
+        if incremental:
+            # `index` only ever adds a kingdom that is not yet in the database. Adding genomes to a
+            # kingdom already present is `update`'s job (it would profile them against the existing
+            # tree); a full rebuild is `--resume`. Refuse anything that overlaps an existing kingdom.
+            existing_kingdoms = set(self.database.clusters["kingdom"].keys())
+            overlap = existing_kingdoms.intersection(input_kingdoms)
+
+            if overlap:
+                raise Exception(
+                    f"The database '{args.database}' already contains genomes from "
+                    f"{', '.join(sorted(overlap))}. The `index` command only adds genomes from a "
+                    "kingdom not yet in the database; use `update` to add genomes to an existing "
+                    "kingdom, or --resume to rebuild the whole database from scratch."
+                )
+
+        if (args.resume or incremental) and Database._validate_metadata(self.database.metadata):
             # The existing sketches were built with the kmer size and scaled factor already recorded
             # in the metadata: keep them. Re-running set_configs could estimate a different kmer
             # size, and a sketch compared under the wrong kmer size yields a meaningless distance
@@ -710,12 +750,20 @@ class MetaSBT(object):
             # Dereplicate genomes based on their ANI distance. The references carry taxonomic labels,
             # so the comparison is partitioned by genus when the threshold allows it (see dereplicate).
             # The result is cached under the database folder (and preserved across --resume) so an
-            # interrupted build that already dereplicated does not repeat it on the next run.
+            # interrupted build that already dereplicated does not repeat it on the next run. A
+            # new-kingdom run caches under a per-kingdom name so it never clobbers the baseline
+            # kingdom's dereplication record.
+            cache_name = "dereplicated.tsv"
+
+            if incremental:
+                kingdom_tag = "_".join(sorted(kingdom[3:] for kingdom in input_kingdoms))
+                cache_name = f"dereplicated_{kingdom_tag}.tsv"
+
             genomes = self.database.dereplicate(
                 genomes,
                 threshold=args.dereplicate,
                 taxonomy=references,
-                cache_filepath=os.path.join(db_dir, "dereplicated.tsv"),
+                cache_filepath=os.path.join(db_dir, cache_name),
             )
 
         # Reshape the references dict
