@@ -1946,7 +1946,10 @@ class MetaSBT(object):
         # Fix absolute paths to sketches
         # Search for all the txt files under the clusters folder
         # txt files contain the list of paths to the genome sketches that are used to build the SBTs
-        sketch_lists = Path(os.path.join(db_dir, "clusters")).glob("**/*.txt")
+        # Use `tarball_db_dir`: it is the final location of the extracted database in BOTH cases
+        # (it is set to `db_dir` above when --database renames the folder, and left as the tarball's
+        # own name when --database is empty), whereas `db_dir` is only defined when --database is set.
+        sketch_lists = Path(os.path.join(tarball_db_dir, "clusters")).glob("**/*.txt")
 
         for sketch_list_filepath in sketch_lists:
             with open(sketch_list_filepath) as fh:
@@ -1957,7 +1960,7 @@ class MetaSBT(object):
             sketches_or_clusters_dir_index = max([pos for pos, v in enumerate(sketch_filepaths[0].split(os.sep)) if v == "clusters" or v == "sketches"])
 
             # Rebase the sketch filepaths to the new path on the local filesystem
-            rebased_sketch_filepaths = [os.path.join(db_dir, os.sep.join(line.strip().split(os.sep)[sketches_or_clusters_dir_index:])) for line in sketch_filepaths]
+            rebased_sketch_filepaths = [os.path.join(tarball_db_dir, os.sep.join(line.strip().split(os.sep)[sketches_or_clusters_dir_index:])) for line in sketch_filepaths]
 
             with open(sketch_list_filepath, "w+") as sketch_list_file:
                 for sketch_filepath in rebased_sketch_filepaths:
