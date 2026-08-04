@@ -1239,13 +1239,25 @@ class MetaSBT(object):
             args.database
         ]
 
-        try:
-            subprocess.check_call(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # `-v` filenames go to stdout (discarded); capture stderr so warnings are reportable.
+        result = subprocess.run(command_line, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
 
-        except subprocess.CalledProcessError as e:
-            error_message = f"An error has occurred while running\n{' '.join(command_line)}\n\n"
+        # tar exit codes: 0 = success, 1 = warning (a file changed or vanished while being read,
+        # e.g. an NFS .nfsXXXX silly-rename or an mtime tick during a long archive), 2+ = fatal.
+        # A code-1 archive is complete and usable, so only >= 2 is treated as an error.
+        if result.returncode >= 2:
+            error_message = (
+                f"An error has occurred while running\n{' '.join(command_line)}\n\n{result.stderr}"
+            )
 
-            raise Exception(error_message) from e
+            raise Exception(error_message)
+
+        if result.returncode == 1:
+            print(
+                f"Warning: tar reported that some files changed or were removed while '{args.database}' "
+                "was being archived. The tarball is complete, but double-check its contents:\n"
+                f"{result.stderr}"
+            )
 
         # Compute the sha256 hash
         sha256 = subprocess.run(["sha256sum", output_filepath], capture_output=True, text=True)
