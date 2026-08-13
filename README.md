@@ -23,13 +23,16 @@ We also maintain a collection of public databases built with MetaSBT from curate
 If you use MetaSBT in your work, please cite:
 
 ```bibtex
-@article{Cumbo2025.08.25.672238,
+@article{Cumbo2026.natbiotech,
 	author    = {Cumbo, Fabio and Blankenberg, Daniel},
 	title     = {Characterization of microbial dark matter at scale with MetaSBT and taxonomy-aware Sequence Bloom Trees},
-    journal   = {bioRxiv},
-    year      = {2025},
-    publisher = {Cold Spring Harbor Laboratory},
-	doi       = {10.1101/2025.08.25.672238}
+    journal   = {Nature Biotechnology},
+    year      = {2026},
+    month     = {Aug},
+    day       = {13},
+    publisher = {Nature Publishing Group US},
+	issn      = {1546-1696},
+    doi       = {10.1038/s41587-026-03245-7},
 }
 ```
 
